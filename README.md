@@ -8,11 +8,13 @@
 
 ## 🌟 จุดเด่น (Key Features)
 
--   🗣️ **Thai Language Centric:** ออกแบบมาเพื่อเข้าใจบริบทภาษาไทยโดยเฉพาะ (เช่น "ยอดขาย", "ลูกค้า", "ไตรมาส") ผ่าน Prompt Engineering
+-   🗣️ **Thai Language Centric:** ออกแบบมาเพื่อเข้าใจบริบทภาษาไทยโดยเฉพาะ ผ่าน Advanced Prompt Engineering + RAG-based Few-shot Learning
 -   🏠 **100% Local Execution:** ใช้โมเดล **Qwen2.5-Coder:7b** ผ่าน Ollama ข้อมูลของคุณจะไม่ออกจากเครื่อง (Privacy & Security)
--   🧠 **Smart Schema Mapping:** ระบบสามารถแมพคำภาษาไทยเข้ากับ Column Name ภาษาอังกฤษใน Database ได้อย่างแม่นยำ
--   📊 **Persistent Visualization:** ระบบจดจำผลลัพธ์การค้นหาล่าสุด (Session State) ทำให้คุณสามารถเปลี่ยนรูปแบบกราฟ (Bar/Line/Area) ไปมาได้โดยไม่ต้อง Query ใหม่
--   🛡️ **Self-Correction SQL:** มี Logic ในการ Clean SQL (ตัด Markdown/Code Fences ออก) เพื่อลด Error เวลา Execute
+-   🔌 **Multi-Database Support:** รองรับ SQLite, MySQL, PostgreSQL พร้อม UI สำหรับเปลี่ยน Database โดยไม่ต้องแก้โค้ด
+-   🧠 **Smart Schema Mapping:** ระบบแมพคำภาษาไทยเข้ากับ Column Name อัตโนมัติ + Dynamic Schema Detection
+-   🔄 **Self-Correction Loop:** AI แก้ไข SQL อัตโนมัติเมื่อเจอ Error (ลด Error Rate 20-30%)
+-   📊 **Persistent Visualization:** ระบบจดจำผลลัพธ์ (Session State) ทำให้เปลี่ยนรูปแบบกราฟได้โดยไม่ต้อง Query ใหม่
+-   🎯 **RAG-powered Examples:** ดึงตัวอย่าง Thai→SQL ที่เกี่ยวข้องจาก Vector Store (ChromaDB) แบบ Dynamic
 
 ---
 
@@ -20,8 +22,10 @@
 
 -   **Frontend:** [Streamlit](https://streamlit.io/) (Interactive Web UI)
 -   **LLM Orchestration:** [LangChain](https://www.langchain.com/) (LCEL Architecture)
--   **Model:** Qwen2.5-Coder:7b (Running on Ollama)
--   **Database:** SQLite (SQLAlchemy Connectable)
+-   **Model:** Qwen2.5-Coder:7b/14b (Running on Ollama)
+-   **Database:** SQLite, MySQL, PostgreSQL (via SQLAlchemy)
+-   **Vector Store:** ChromaDB (for RAG-based few-shot)
+-   **Embeddings:** Sentence-Transformers (Multilingual support)
 -   **Data Processing:** Pandas
 
 ---
@@ -55,55 +59,143 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 4. สร้าง Mock Database
+### 4. สร้าง Mock Database (Optional)
 เรามีสคริปต์สำหรับสร้างข้อมูลจำลอง (Sales Transaction) ให้ทดสอบทันที:
 ```bash
 python setup_db.py
 ```
 *(เมื่อรันเสร็จ คุณจะได้ไฟล์ `local_database.db` ในโฟลเดอร์)*
 
+หรือจะข้ามขั้นตอนนี้และเชื่อมต่อกับ **Database จริงของคุณ** (MySQL, PostgreSQL) ได้เลย
+
 ---
 
 ## ▶️ วิธีใช้งาน (Usage)
 
-1.  **Start App:**
+### Quick Start (SQLite - ไม่ต้อง Setup Database)
+
+1.  **Start Ollama:**
+    ```bash
+    ollama serve
+    ```
+
+2.  **Start App:**
     ```bash
     streamlit run app.py
     ```
 
-2.  **Access:**
-    Browser จะเปิดขึ้นที่ `http://localhost:8501`
+3.  **เชื่อมต่อ Database:**
+    - ที่ Sidebar เลือก **SQLite**
+    - Database File: `local_database.db` (ใช้ mock data ที่สร้างไว้)
+    - กดปุ่ม **🔗 Connect to Database**
 
-3.  **Example Questions (ลองถามดู):**
+4.  **ลองถามคำถาม:**
     -   *"ยอดขายรวมทั้งหมดของปีนี้แบ่งตามเดือน"*
     -   *"ลูกค้าคนไหนมียอดซื้อเยอะที่สุด 5 อันดับแรก"*
-    -   *"แสดงสัดส่วนยอดขายแยกตามหมวดหมู่สินค้า"*
-    -   *"ในเดือนธันวาคม มีลูกค้ามาช้อปปิ้งกี่คน"*
+
+---
+
+### เชื่อมต่อ MySQL (XAMPP / Standalone)
+
+#### สำหรับ XAMPP:
+1.  **Start XAMPP:**
+    - เปิด XAMPP Control Panel
+    - กด **Start** ที่ MySQL (รอจนสถานะเป็นสีเขียว)
+
+2.  **เชื่อมต่อใน App:**
+    ```
+    Database Type: MySQL
+    Host: localhost
+    Port: 3306
+    Username: root
+    Password: (ปล่อยว่างถ้าไม่ได้ตั้ง)
+    Database Name: ชื่อ database ของคุณ (เช่น classicmodels)
+    ```
+
+3.  กดปุ่ม **🔗 Connect to Database**
+
+#### สำหรับ MySQL Standalone:
+```bash
+# Mac
+brew services start mysql
+
+# Linux
+sudo service mysql start
+
+# Windows
+เปิด MySQL Service จาก Services.msc
+```
+
+---
+
+### เชื่อมต่อ PostgreSQL
+
+1.  **Start PostgreSQL:**
+    ```bash
+    # Mac
+    brew services start postgresql
+    
+    # Linux
+    sudo service postgresql start
+    ```
+
+2.  **เชื่อมต่อใน App:**
+    ```
+    Database Type: PostgreSQL
+    Host: localhost
+    Port: 5432
+    Username: postgres
+    Password: your_password
+    Database Name: your_database
+    ```
+
+---
+
+### Driver Requirements
+
+| Database | Driver | คำสั่งติดตั้ง |
+|----------|--------|---------------|
+| SQLite | (Built-in) | - |
+| MySQL | pymysql | `pip install pymysql` |
+| PostgreSQL | psycopg2 | `pip install psycopg2-binary` |
 
 ---
 
 ## 🔧 การปรับแต่ง (Configuration)
 
-### ปรับแต่งความเข้าใจภาษาไทย (Prompt Tuning)
-หากต้องการให้ AI เข้าใจคำศัพท์เฉพาะทางในองค์กรคุณมากขึ้น ให้แก้ไขตัวแปร `template` ในไฟล์ `app.py`:
+### เปลี่ยน Database
+ใช้ **UI ใน Sidebar** สำหรับเปลี่ยน Database โดยไม่ต้องแก้โค้ด:
 
-```python
-template = """
-...
-Schema Mapping Examples:
-  - "กำไรสุทธิ" -> (revenue - cost)
-  - "ภาคอีสาน" -> region = 'Northeast'
-  - "สินค้าขายดี" -> ORDER BY total_sales DESC LIMIT 10
-...
-"""
+1. เลือก Database Type (SQLite / MySQL / PostgreSQL)
+2. กรอกข้อมูลการเชื่อมต่อ
+3. กดปุ่ม **🔗 Connect to Database**
+
+ระบบจะ:
+- ตรวจสอบ Schema อัตโนมัติ
+- แสดง Tables และ Columns ที่มีจริง
+- ปรับ AI Prompt ให้เหมาะกับ Database นั้นๆ
+
+### เพิ่มตัวอย่าง Thai→SQL
+เพิ่มตัวอย่างใหม่ใน `thai_sql_examples.json`:
+
+```json
+{
+  "question": "คำถามภาษาไทยใหม่",
+  "sql": "SELECT ... FROM ...",
+  "category": "aggregation"
+}
 ```
 
-### เปลี่ยน Database
-แก้ `db_path` ใน `app.py` เพื่อต่อกับ Database จริงของคุณ (PostgreSQL, MySQL, etc.):
+ระบบจะดึงตัวอย่างที่เกี่ยวข้องมาใช้อัตโนมัติ (RAG-based)
+
+### ปรับแต่งความเข้าใจภาษาไทย
+แก้ไขตัวแปร `template` ใน `app.py` (ฟังก์ชัน `get_llm_chain()`):
 
 ```python
-# ตัวอย่าง PostgreSQL
-db_path = "postgresql+psycopg2://user:pass@localhost:5432/mydatabase"
+### Thai-to-English Schema Mapping:
+- "กำไรสุทธิ" -> (revenue - cost)
+- "ภาคอีสาน" -> region = 'Northeast'
+...
 ```
 
 ---
@@ -112,21 +204,50 @@ db_path = "postgresql+psycopg2://user:pass@localhost:5432/mydatabase"
 
 ```text
 nlp_sql_project/
-├── app.py               # 🧠 หัวใจหลัก: Streamlit UI + LangChain Logic
-├── local_database.db    # 💽 ฐานข้อมูล SQLite (สร้างจาก setup_db.py)
-├── setup_db.py          # ⚙️ สคริปต์สร้าง Mock Data
-├── requirements.txt     # 📦 รายชื่อ Library
-└── README.md            # 📖 คู่มือเล่มนี้
+├── app.py                    # 🧠 หัวใจหลัก: Streamlit UI + LangChain Logic
+├── rag_store.py              # 🔍 RAG System: ChromaDB + Vector Search
+├── thai_sql_examples.json    # 📚 Dataset: 25 Thai→SQL examples
+├── local_database.db         # 💽 Mock Database (SQLite)
+├── setup_db.py               # ⚙️ สคริปต์สร้าง Mock Data
+├── requirements.txt          # 📦 Dependencies
+├── TUNING_GUIDE.md           # 📖 LLM Tuning Guide (Advanced)
+└── README.md                 # 📖 คู่มือเล่มนี้
 ```
 
 ---
 
 ## 🤝 Troubleshooting
 
--   **Error `ModuleNotFoundError: No module named 'langchain.chains'`**:
-    -   โปรเจกต์นี้ใช้ LangChain แบบ Modern (LCEL) แล้ว ไม่ควรเจอ Error นี้ หากเจอให้ลอง `pip install -r requirements.txt` ใหม่
--   **กราฟไม่ขึ้น**:
-    -   ลองถามคำถามที่ผลลัพธ์เป็นกลุ่มข้อมูล (Aggregate) เช่น "ยอดขายรวม...", "จำนวน..." หาก Query ออกมาแค่ 1 แถว กราฟอาจจะไม่แสดงผล
+### ❌ Connection Errors
+
+**`ConnectError: [Errno 61] Connection refused`**
+- **สาเหตุ:** Ollama server ไม่ได้ทำงาน
+- **แก้ไข:** เปิด Terminal รัน `ollama serve` หรือเปิด Ollama Desktop App
+
+**`Connection refused` (Database)**
+- **สาเหตุ:** Database Service ไม่ได้ Start
+- **แก้ไข:**
+  - **XAMPP:** เปิด XAMPP Control Panel → Start MySQL
+  - **MySQL:** `brew services start mysql` (Mac) หรือ `sudo service mysql start` (Linux)
+  - **PostgreSQL:** `brew services start postgresql` (Mac)
+
+### 🔧 Other Issues
+
+**`ModuleNotFoundError`**
+- รัน `pip install -r requirements.txt` ใหม่
+
+**กราฟไม่ขึ้น**
+- ลองถามคำถามที่ผลลัพธ์เป็นหลายแถว (เช่น "ยอดขายแต่ละเดือน")
+
+**AI เขียน SQL ผิด**
+- ลองเพิ่มตัวอย่างใน `thai_sql_examples.json`
+- อ่าน `TUNING_GUIDE.md` สำหรับวิธีปรับปรุง
+
+---
+
+## 📚 เอกสารเพิ่มเติม
+
+- **[TUNING_GUIDE.md](TUNING_GUIDE.md)** - คู่มือการ Tune LLM แบบละเอียด (Prompt Engineering, RAG, Fine-tuning)
 
 ---
 
