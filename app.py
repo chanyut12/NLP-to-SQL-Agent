@@ -10,6 +10,9 @@ import os
 import csv
 import uuid
 
+# RAG Store for dynamic few-shot examples
+from rag_store import create_example_store
+
 # --- 1. ตั้งค่า Page ---
 st.set_page_config(page_title="Thai NLP to SQL Agent", layout="wide")
 st.title("🤖 AI Data Analyst (Thai Supported)")
@@ -27,6 +30,11 @@ def get_db_engine():
     return engine
 
 @st.cache_resource
+def get_example_store():
+    """Initialize and cache the RAG example store."""
+    return create_example_store(examples_path="thai_sql_examples.json")
+
+@st.cache_resource
 def get_llm_chain():
     """โหลด Model และสร้าง Prompt Chain เก็บไว้"""
     
@@ -38,7 +46,8 @@ def get_llm_chain():
     # 2. Setup LLM
     llm = ChatOllama(model="qwen2.5-coder:7b", temperature=0)
     
-    # 3. Setup Prompt with Few-shot Examples & Chain-of-Thought
+    # 3. Setup Prompt with Dynamic Few-shot Examples (RAG-based)
+    # Note: {dynamic_examples} will be filled at runtime with semantically similar examples
     template = """You are a SQLite expert specialized in Thai language understanding.
 Given an input question (possibly in Thai), create a syntactically correct SQLite query.
 
@@ -60,28 +69,8 @@ Given an input question (possibly in Thai), create a syntactically correct SQLit
 - "มากที่สุด" / "สูงสุด" -> ORDER BY ... DESC LIMIT
 - "น้อยที่สุด" / "ต่ำสุด" -> ORDER BY ... ASC LIMIT
 
-### Few-shot Examples (Thai -> SQL):
-
-Question: ยอดขายรวมของเดือนธันวาคม
-SQL: SELECT SUM(total_price) AS total_sales FROM receipt WHERE month = 'December';
-
-Question: ลูกค้าคนไหนซื้อเยอะที่สุด 5 อันดับแรก
-SQL: SELECT customer_name, SUM(total_price) AS total_spent FROM receipt GROUP BY customer_name ORDER BY total_spent DESC LIMIT 5;
-
-Question: จำนวนใบเสร็จแยกตามวิธีชำระเงิน
-SQL: SELECT payment_method, COUNT(receipt_id) AS receipt_count FROM receipt GROUP BY payment_method ORDER BY receipt_count DESC;
-
-Question: ยอดขายเฉลี่ยต่อใบเสร็จของแต่ละหมวดสินค้า
-SQL: SELECT product_category, AVG(total_price) AS avg_sale FROM receipt GROUP BY product_category ORDER BY avg_sale DESC;
-
-Question: แสดงยอดขายรวมแยกตามเดือน
-SQL: SELECT month, SUM(total_price) AS monthly_sales FROM receipt GROUP BY month ORDER BY monthly_sales DESC;
-
-Question: หมวดสินค้าไหนขายดีที่สุด
-SQL: SELECT product_category, SUM(total_price) AS total_sales FROM receipt GROUP BY product_category ORDER BY total_sales DESC LIMIT 1;
-
-Question: มีลูกค้ากี่คนที่จ่ายด้วยบัตรเครดิต
-SQL: SELECT COUNT(DISTINCT customer_name) AS customer_count FROM receipt WHERE payment_method = 'Credit Card';
+### Similar Examples (Retrieved dynamically):
+{dynamic_examples}
 
 ### Current Database Schema:
 {schema}
@@ -93,9 +82,9 @@ SQL:"""
     prompt = PromptTemplate.from_template(template)
     prompt = prompt.partial(schema=schema)
     
-    # 4. Create Chain
+    # 4. Create Chain (dynamic_examples will be filled at runtime)
     chain = prompt | llm | StrOutputParser()
-    return chain, llm
+    return chain, llm, prompt
 
 def clean_sql(response: str) -> str:
     """Clean SQL response by removing markdown code fences and extra whitespace"""
@@ -106,14 +95,34 @@ def clean_sql(response: str) -> str:
         .strip()
     )
 
-def generate_sql_with_retry(question: str, chain, llm, engine, max_retries: int = 2):
+def generate_sql_with_retry(
+    question: str,
+    prompt,
+    llm,
+    engine,
+    example_store,
+    max_retries: int = 2
+):
     """
-    Generate SQL with self-correction loop.
-    If SQL execution fails, send error back to LLM for correction.
+    Generate SQL with RAG-based few-shot and self-correction loop.
+    
+    Args:
+        question: User's question (Thai or English)
+        prompt: PromptTemplate with {dynamic_examples}, {question} placeholders
+        llm: Language model instance
+        engine: SQLAlchemy engine
+        example_store: RAG example store for dynamic few-shot
+        max_retries: Maximum retry attempts for self-correction
     
     Returns:
         tuple: (final_sql, dataframe, error_message, retry_count)
     """
+    # Get dynamic examples from RAG store
+    dynamic_examples = example_store.format_examples_for_prompt(question, top_k=3)
+    
+    # Create chain with dynamic examples
+    chain = prompt.partial(dynamic_examples=dynamic_examples) | llm | StrOutputParser()
+    
     # First attempt
     response = chain.invoke({"question": question})
     sql = clean_sql(response)
@@ -204,7 +213,8 @@ def update_feedback(log_id, feedback_value):
 # Initialize Resources
 try:
     engine = get_db_engine()
-    generate_query, llm = get_llm_chain()
+    generate_query, llm, prompt_template = get_llm_chain()
+    example_store = get_example_store()
 except Exception as e:
     st.error(f"❌ Connection Error: {e}")
     st.stop()
@@ -261,12 +271,13 @@ if run_clicked:
         with st.spinner("🤖 AI กำลังเขียน SQL และดึงข้อมูล..."):
             start_time = time.time()
             
-            # Use self-correction loop (max 2 retries)
+            # Use RAG-based few-shot with self-correction loop (max 2 retries)
             final_sql, df_result, error_msg, retry_count = generate_sql_with_retry(
                 question=user_question,
-                chain=generate_query,
+                prompt=prompt_template,
                 llm=llm,
                 engine=engine,
+                example_store=example_store,
                 max_retries=2
             )
             
