@@ -6,3 +6,7 @@ langchain-community
 langchain-ollama
 matplotlib
 plotly
+
+# RAG Dependencies (for dynamic few-shot retrieval)
+chromadb>=0.4.0
+sentence-transformers>=2.2.0
