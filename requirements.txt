@@ -1,0 +1,8 @@
+streamlit
+pandas
+sqlalchemy
+langchain
+langchain-community
+langchain-ollama
+matplotlib
+plotly

@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual Environment
+venv/
+env/
+.env
+
+# Database (Mock DB อาจจะเอาขึ้นได้ถ้าไฟล์เล็ก แต่ปกติไม่นิยม)
+# local_database.db  <-- ผม comment ไว้ก่อน เผื่อคุณอยากเอา mock data ขึ้นโชว์
+*.sqlite3
+
+# IDE
+.vscode/
+.idea/
+.cursor/
+
+# OS
+.DS_Store
+
+# Logs
+logs.csv
+
