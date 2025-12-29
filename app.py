@@ -19,15 +19,25 @@ st.title("🤖 AI Data Analyst (Thai Supported)")
 st.caption("Powered by Qwen2.5-Coder & Streamlit")
 
 # --- 2. Caching Resources (Performance Optimization) ---
-@st.cache_resource
-def get_db_engine():
+def get_db_engine(db_type, db_config):
     """สร้าง Connection ไปยัง Database และ cache ไว้"""
-    db_path = "sqlite:///local_database.db"
-    engine = create_engine(db_path)
-    # ทดสอบการเชื่อมต่อ
-    with engine.connect() as conn:
-        pass
-    return engine
+    try:
+        if db_type == "SQLite":
+            db_path = f"sqlite:///{db_config['database']}"
+        elif db_type == "MySQL":
+            db_path = f"mysql+pymysql://{db_config['user']}:{db_config['password']}@{db_config['host']}:{db_config['port']}/{db_config['database']}?charset=utf8mb4"
+        elif db_type == "PostgreSQL":
+            db_path = f"postgresql+psycopg2://{db_config['user']}:{db_config['password']}@{db_config['host']}:{db_config['port']}/{db_config['database']}"
+        else:
+            raise ValueError(f"Unsupported database type: {db_type}")
+        
+        engine = create_engine(db_path)
+        # ทดสอบการเชื่อมต่อ
+        with engine.connect() as conn:
+            pass
+        return engine, None  # Return engine and no error
+    except Exception as e:
+        return None, str(e)  # Return None and error message
 
 @st.cache_resource
 def get_example_store():
@@ -38,10 +48,7 @@ def get_example_store():
 def get_llm_chain():
     """โหลด Model และสร้าง Prompt Chain เก็บไว้"""
     
-    # 1. Setup DB Schema info
-    engine = get_db_engine()
-    db = SQLDatabase(engine)
-    schema = db.get_table_info()
+    # Note: Schema will be injected dynamically at runtime based on connected database
     
     # 2. Setup LLM
     llm = ChatOllama(model="qwen2.5-coder:7b", temperature=0)
@@ -75,16 +82,14 @@ Given an input question (possibly in Thai), create a syntactically correct SQLit
 ### Current Database Schema:
 {schema}
 
-### Your Task:
+### Your Task (IMPORTANT: Use ONLY the tables and columns from the schema above):
 Question: {question}
 SQL:"""
     
     prompt = PromptTemplate.from_template(template)
-    prompt = prompt.partial(schema=schema)
     
-    # 4. Create Chain (dynamic_examples will be filled at runtime)
-    chain = prompt | llm | StrOutputParser()
-    return chain, llm, prompt
+    # Note: schema and dynamic_examples will be filled at runtime
+    return None, llm, prompt
 
 def clean_sql(response: str) -> str:
     """Clean SQL response by removing markdown code fences and extra whitespace"""
@@ -108,7 +113,7 @@ def generate_sql_with_retry(
     
     Args:
         question: User's question (Thai or English)
-        prompt: PromptTemplate with {dynamic_examples}, {question} placeholders
+        prompt: PromptTemplate with {dynamic_examples}, {schema}, {question} placeholders
         llm: Language model instance
         engine: SQLAlchemy engine
         example_store: RAG example store for dynamic few-shot
@@ -120,8 +125,12 @@ def generate_sql_with_retry(
     # Get dynamic examples from RAG store
     dynamic_examples = example_store.format_examples_for_prompt(question, top_k=3)
     
-    # Create chain with dynamic examples
-    chain = prompt.partial(dynamic_examples=dynamic_examples) | llm | StrOutputParser()
+    # Get schema from current database
+    db = SQLDatabase(engine)
+    schema = db.get_table_info()
+    
+    # Create chain with dynamic examples and schema
+    chain = prompt.partial(dynamic_examples=dynamic_examples, schema=schema) | llm | StrOutputParser()
     
     # First attempt
     response = chain.invoke({"question": question})
@@ -210,22 +219,82 @@ def update_feedback(log_id, feedback_value):
             writer = csv.writer(f)
             writer.writerows(rows)
 
-# Initialize Resources
-try:
-    engine = get_db_engine()
-    generate_query, llm, prompt_template = get_llm_chain()
-    example_store = get_example_store()
-except Exception as e:
-    st.error(f"❌ Connection Error: {e}")
-    st.stop()
-
 # --- 4. User Interface (UI) ---
 
-# Sidebar: Dynamic Schema Display
+# Sidebar: Database Connection Settings
 with st.sidebar:
+    st.header("🔌 Database Connection")
+    
+    # Database Type Selector
+    db_type = st.selectbox(
+        "Database Type",
+        ["SQLite", "MySQL", "PostgreSQL"],
+        index=0,
+        help="เลือกประเภท Database ที่ต้องการเชื่อมต่อ"
+    )
+    
+    # Configuration based on database type
+    if db_type == "SQLite":
+        db_config = {
+            "database": st.text_input("Database File", value="local_database.db", help="ชื่อไฟล์ SQLite (เช่น data.db)")
+        }
+    else:  # MySQL or PostgreSQL
+        with st.expander("⚙️ Connection Settings", expanded=True):
+            col1, col2 = st.columns(2)
+            with col1:
+                db_config = {
+                    "host": st.text_input("Host", value="localhost"),
+                    "port": st.text_input("Port", value="3306" if db_type == "MySQL" else "5432")
+                }
+            with col2:
+                db_config.update({
+                    "user": st.text_input("Username", value="root" if db_type == "MySQL" else "postgres"),
+                    "password": st.text_input("Password", type="password", value="")
+                })
+            
+            db_config["database"] = st.text_input(
+                "Database Name",
+                value="classicmodels" if db_type == "MySQL" else "mydb",
+                help="ชื่อ Database ที่ต้องการเชื่อมต่อ"
+            )
+    
+    # Connect Button
+    connect_clicked = st.button("🔗 Connect to Database", use_container_width=True)
+    
+    # Initialize session state for connection
+    if "db_connected" not in st.session_state:
+        st.session_state.db_connected = False
+        st.session_state.engine = None
+        st.session_state.connection_error = None
+    
+    # Handle connection
+    if connect_clicked or st.session_state.db_connected:
+        if connect_clicked:
+            with st.spinner("กำลังเชื่อมต่อ Database..."):
+                engine, error = get_db_engine(db_type, db_config)
+                
+                if engine:
+                    st.session_state.engine = engine
+                    st.session_state.db_connected = True
+                    st.session_state.connection_error = None
+                    st.success("✅ เชื่อมต่อสำเร็จ!")
+                else:
+                    st.session_state.db_connected = False
+                    st.session_state.connection_error = error
+                    st.error(f"❌ เชื่อมต่อไม่สำเร็จ: {error}")
+        
+        # Show connection status
+        if st.session_state.db_connected:
+            st.info(f"📊 Connected to: **{db_type}** - `{db_config.get('database', 'N/A')}`")
+    else:
+        st.warning("⚠️ กรุณาเชื่อมต่อ Database ก่อนใช้งาน")
+        st.stop()
+    
+    st.markdown("---")
     st.header("📂 Database Schema")
     
     # Use Inspector to get dynamic schema
+    engine = st.session_state.engine
     inspector = inspect(engine)
     table_names = inspector.get_table_names()
     
@@ -268,6 +337,25 @@ if run_clicked:
     if not user_question:
         st.warning("กรุณาป้อนคำถามก่อนกดค้นหา")
     else:
+        # Initialize LLM resources on first query
+        if "llm_initialized" not in st.session_state:
+            with st.spinner("กำลังโหลด AI Model..."):
+                try:
+                    generate_query, llm, prompt_template = get_llm_chain()
+                    example_store = get_example_store()
+                    st.session_state.llm = llm
+                    st.session_state.prompt_template = prompt_template
+                    st.session_state.example_store = example_store
+                    st.session_state.llm_initialized = True
+                except Exception as e:
+                    st.error(f"❌ Error loading AI Model: {e}")
+                    st.stop()
+        
+        llm = st.session_state.llm
+        prompt_template = st.session_state.prompt_template
+        example_store = st.session_state.example_store
+        engine = st.session_state.engine
+        
         with st.spinner("🤖 AI กำลังเขียน SQL และดึงข้อมูล..."):
             start_time = time.time()
             
