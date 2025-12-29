@@ -38,29 +38,57 @@ def get_llm_chain():
     # 2. Setup LLM
     llm = ChatOllama(model="qwen2.5-coder:7b", temperature=0)
     
-    # 3. Setup Prompt
-    template = """
-    You are a SQLite expert. Given an input question, create a syntactically correct SQLite query to run.
-    Unless the user specifies a specific number of examples, always limit your query to at most 100 results using LIMIT.
-    Order the results by a relevant column to return the most interesting examples in the database.
-    
-    Important:
-    - The input question might be in **Thai language**. You must interpret the intent and map it to the English schema.
-    - Schema Mapping Examples:
-      - "ยอดขาย" -> SUM(total_price)
-      - "จำนวนใบเสร็จ" -> COUNT(receipt_id)
-      - "ลูกค้า" -> customer_name
-      - "หมวดหมู่" -> product_category
-      - "เดือน" -> month (values are in English: 'January', 'February', etc.)
-      - "การชำระเงิน" -> payment_method
-      - "ค่าเฉลี่ย" -> AVG(...)
-    
-    Only return the SQL query. Do not return any markdown, explanations, or code blocks.
-    
-    Schema: {schema}
-    Question: {question}
-    SQL Query:
-    """
+    # 3. Setup Prompt with Few-shot Examples & Chain-of-Thought
+    template = """You are a SQLite expert specialized in Thai language understanding.
+Given an input question (possibly in Thai), create a syntactically correct SQLite query.
+
+### Instructions:
+1. Interpret Thai keywords and map them to English column names
+2. Determine the appropriate SQL operation (SELECT, COUNT, SUM, AVG, etc.)
+3. Apply filters (WHERE) and groupings (GROUP BY) as needed
+4. Limit results to 100 unless specified otherwise
+5. Return ONLY the SQL query without markdown or explanations
+
+### Thai-to-English Schema Mapping:
+- "ยอดขาย" / "ยอดรวม" -> total_price (use SUM for aggregation)
+- "จำนวนใบเสร็จ" / "กี่ใบ" -> COUNT(receipt_id)
+- "ลูกค้า" / "คนซื้อ" -> customer_name
+- "หมวดหมู่" / "ประเภทสินค้า" -> product_category
+- "เดือน" -> month (values: 'January', 'February', ..., 'December')
+- "การชำระเงิน" / "จ่ายเงิน" -> payment_method
+- "ค่าเฉลี่ย" / "เฉลี่ย" -> AVG(...)
+- "มากที่สุด" / "สูงสุด" -> ORDER BY ... DESC LIMIT
+- "น้อยที่สุด" / "ต่ำสุด" -> ORDER BY ... ASC LIMIT
+
+### Few-shot Examples (Thai -> SQL):
+
+Question: ยอดขายรวมของเดือนธันวาคม
+SQL: SELECT SUM(total_price) AS total_sales FROM receipt WHERE month = 'December';
+
+Question: ลูกค้าคนไหนซื้อเยอะที่สุด 5 อันดับแรก
+SQL: SELECT customer_name, SUM(total_price) AS total_spent FROM receipt GROUP BY customer_name ORDER BY total_spent DESC LIMIT 5;
+
+Question: จำนวนใบเสร็จแยกตามวิธีชำระเงิน
+SQL: SELECT payment_method, COUNT(receipt_id) AS receipt_count FROM receipt GROUP BY payment_method ORDER BY receipt_count DESC;
+
+Question: ยอดขายเฉลี่ยต่อใบเสร็จของแต่ละหมวดสินค้า
+SQL: SELECT product_category, AVG(total_price) AS avg_sale FROM receipt GROUP BY product_category ORDER BY avg_sale DESC;
+
+Question: แสดงยอดขายรวมแยกตามเดือน
+SQL: SELECT month, SUM(total_price) AS monthly_sales FROM receipt GROUP BY month ORDER BY monthly_sales DESC;
+
+Question: หมวดสินค้าไหนขายดีที่สุด
+SQL: SELECT product_category, SUM(total_price) AS total_sales FROM receipt GROUP BY product_category ORDER BY total_sales DESC LIMIT 1;
+
+Question: มีลูกค้ากี่คนที่จ่ายด้วยบัตรเครดิต
+SQL: SELECT COUNT(DISTINCT customer_name) AS customer_count FROM receipt WHERE payment_method = 'Credit Card';
+
+### Current Database Schema:
+{schema}
+
+### Your Task:
+Question: {question}
+SQL:"""
     
     prompt = PromptTemplate.from_template(template)
     prompt = prompt.partial(schema=schema)
