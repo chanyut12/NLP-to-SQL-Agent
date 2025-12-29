@@ -95,7 +95,64 @@ SQL:"""
     
     # 4. Create Chain
     chain = prompt | llm | StrOutputParser()
-    return chain
+    return chain, llm
+
+def clean_sql(response: str) -> str:
+    """Clean SQL response by removing markdown code fences and extra whitespace"""
+    return (
+        response.strip()
+        .replace("```sql", "")
+        .replace("```", "")
+        .strip()
+    )
+
+def generate_sql_with_retry(question: str, chain, llm, engine, max_retries: int = 2):
+    """
+    Generate SQL with self-correction loop.
+    If SQL execution fails, send error back to LLM for correction.
+    
+    Returns:
+        tuple: (final_sql, dataframe, error_message, retry_count)
+    """
+    # First attempt
+    response = chain.invoke({"question": question})
+    sql = clean_sql(response)
+    
+    for attempt in range(max_retries + 1):
+        try:
+            # Try to execute SQL
+            df = pd.read_sql(sql, engine)
+            return sql, df, None, attempt  # Success
+            
+        except Exception as e:
+            error_msg = str(e)
+            
+            if attempt < max_retries:
+                # Create correction prompt
+                correction_prompt = f"""The following SQL query failed with an error.
+
+Error: {error_msg}
+
+Failed SQL: {sql}
+
+Please analyze the error and provide a corrected SQL query.
+Return ONLY the corrected SQL query without any explanation or markdown.
+
+Corrected SQL:"""
+                
+                # Ask LLM to fix the SQL
+                corrected_response = llm.invoke(correction_prompt)
+                
+                # Handle AIMessage object
+                if hasattr(corrected_response, 'content'):
+                    sql = clean_sql(corrected_response.content)
+                else:
+                    sql = clean_sql(str(corrected_response))
+            else:
+                # Max retries exceeded
+                return sql, None, error_msg, attempt
+    
+    return sql, None, "Max retries exceeded", max_retries
 
 # --- 3. Logging & Feedback Functions (Metrics) ---
 LOG_FILE = 'query_logs.csv'
@@ -147,7 +204,7 @@ def update_feedback(log_id, feedback_value):
 # Initialize Resources
 try:
     engine = get_db_engine()
-    generate_query = get_llm_chain()
+    generate_query, llm = get_llm_chain()
 except Exception as e:
     st.error(f"❌ Connection Error: {e}")
     st.stop()
@@ -195,47 +252,45 @@ run_clicked = st.button("🚀 ค้นหาข้อมูล")
 
 if run_clicked:
     st.session_state.last_error = None
-    st.session_state.last_log_id = None # Reset Log ID
+    st.session_state.last_log_id = None  # Reset Log ID
+    st.session_state.last_retry_count = 0  # Track retry attempts
     
     if not user_question:
         st.warning("กรุณาป้อนคำถามก่อนกดค้นหา")
     else:
         with st.spinner("🤖 AI กำลังเขียน SQL และดึงข้อมูล..."):
             start_time = time.time()
-            try:
-                # 1. Generate SQL
-                response = generate_query.invoke({"question": user_question})
-                
-                # Clean SQL
-                cleaned_sql = (
-                    response.strip()
-                    .replace("```sql", "")
-                    .replace("```", "")
-                    .strip()
-                )
-                
-                # 2. Execute SQL
-                df_result = pd.read_sql(cleaned_sql, engine)
-                
-                duration = time.time() - start_time
-                
-                # Success Logic
-                st.session_state.last_sql = cleaned_sql
+            
+            # Use self-correction loop (max 2 retries)
+            final_sql, df_result, error_msg, retry_count = generate_sql_with_retry(
+                question=user_question,
+                chain=generate_query,
+                llm=llm,
+                engine=engine,
+                max_retries=2
+            )
+            
+            duration = time.time() - start_time
+            st.session_state.last_retry_count = retry_count
+            
+            if df_result is not None:
+                # Success
+                st.session_state.last_sql = final_sql
                 st.session_state.last_df = df_result
+                st.session_state.last_error = None
                 
-                # Log Success (Metric: 1)
-                log_id = log_query(user_question, cleaned_sql, "Success", duration=duration)
+                # Log with retry info
+                status = "Success" if retry_count == 0 else f"Success (Retry {retry_count})"
+                log_id = log_query(user_question, final_sql, status, duration=duration)
                 st.session_state.last_log_id = log_id
-
-            except Exception as e:
-                duration = time.time() - start_time
-                # Error Logic
-                st.session_state.last_error = str(e)
-                st.session_state.last_sql = None
+            else:
+                # Error after all retries
+                st.session_state.last_error = error_msg
+                st.session_state.last_sql = final_sql  # Keep last attempted SQL for debugging
                 st.session_state.last_df = None
                 
-                # Log Error (Metric: 0)
-                log_id = log_query(user_question, response if 'response' in locals() else "", "Error", str(e), duration)
+                # Log Error
+                log_id = log_query(user_question, final_sql, "Error", error_msg, duration)
                 st.session_state.last_log_id = log_id
 
 # Display Logic
@@ -246,7 +301,12 @@ if st.session_state.last_error:
 df_result = st.session_state.last_df
 
 if df_result is not None:
-    st.success("✅ สร้าง SQL Query สำเร็จ!")
+    # Show success message with retry info if applicable
+    retry_count = st.session_state.get("last_retry_count", 0)
+    if retry_count > 0:
+        st.success(f"✅ สร้าง SQL Query สำเร็จ! (Self-corrected after {retry_count} retry)")
+    else:
+        st.success("✅ สร้าง SQL Query สำเร็จ!")
     
     col1, col2 = st.columns([3, 1])
     with col1:
