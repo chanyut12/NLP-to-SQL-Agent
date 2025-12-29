@@ -1,0 +1,10 @@
+LogID,Timestamp,Question,SQL,Status,Error,Duration_Sec,Feedback
+3fb00cf5-3b6f-47b3-8077-8b5d1a0700f0,2025-12-29 16:16:47.487243,ยอดขายรวมของเดือน December,"SELECT SUM(total_price) AS total_sales 
+FROM receipt 
+WHERE month = 'December' 
+LIMIT 100;",Success,,13.12,
+07b622b4-99eb-4f30-8817-ee709a96d8ea,2025-12-29 16:17:01.524818,ยอดขายรวมของเดือนมกรา,"SELECT SUM(total_price) AS total_sales 
+FROM receipt 
+WHERE month = 'May' 
+LIMIT 100;",Success,,4.10,Negative
+36c6d19e-9eea-470f-8f13-aa2c88eeb69a,2025-12-29 16:17:42.657402,ลูกค้าคนไหนมียอดซื้อเยอะที่สุด 5 อันดับแรก,"SELECT customer_name, SUM(total_price) AS total_spent FROM receipt GROUP BY customer_name ORDER BY total_spent DESC LIMIT 5",Success,,4.42,
