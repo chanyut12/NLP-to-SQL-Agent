@@ -10,7 +10,7 @@ env/
 .env
 
 # Database (Mock DB อาจจะเอาขึ้นได้ถ้าไฟล์เล็ก แต่ปกติไม่นิยม)
-# local_database.db  <-- ผม comment ไว้ก่อน เผื่อคุณอยากเอา mock data ขึ้นโชว์
+local_database.db  <-- ผม comment ไว้ก่อน เผื่อคุณอยากเอา mock data ขึ้นโชว์
 *.sqlite3
 
 # IDE
