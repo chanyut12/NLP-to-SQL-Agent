@@ -116,6 +116,18 @@ def clean_sql(response: str) -> str:
         .strip()
     )
 
+def format_sql_for_display(sql: str, dialect: str = "sqlite") -> str:
+    """Format SQL query for better readability with proper indentation and line breaks"""
+    try:
+        # Parse and format SQL using sqlglot with pretty printing
+        import sqlglot
+        parsed = sqlglot.parse_one(sql, read=dialect)
+        formatted = parsed.sql(dialect=dialect, pretty=True)
+        return formatted
+    except Exception:
+        # Fallback to original SQL if formatting fails
+        return sql
+
 def generate_sql_with_retry(
     question: str,
     prompt,
@@ -479,6 +491,7 @@ if run_clicked:
                 st.session_state.last_sql = final_sql
                 st.session_state.last_df = df_result
                 st.session_state.last_error = None
+                st.session_state.last_dialect = dialect  # Store dialect for formatting
                 
                 # Log with retry info
                 status = "Success" if retry_count == 0 else f"Success (Retry {retry_count})"
@@ -496,6 +509,7 @@ if run_clicked:
                 st.session_state.last_error = error_msg
                 st.session_state.last_sql = final_sql  # Keep last attempted SQL for debugging
                 st.session_state.last_df = None
+                st.session_state.last_dialect = dialect  # Store dialect for formatting
                 
                 # Log Error
                 log_id = log_query(
@@ -526,7 +540,11 @@ if df_result is not None:
     
     col1, col2 = st.columns([3, 1])
     with col1:
-        st.code(st.session_state.last_sql or "", language="sql")
+        # Format SQL for better readability
+        raw_sql = st.session_state.last_sql or ""
+        dialect = st.session_state.get("last_dialect", "sqlite")
+        formatted_sql = format_sql_for_display(raw_sql, dialect=dialect)
+        st.code(formatted_sql, language="sql")
     with col2:
         # Feedback Loop (Real Metrics)
         st.caption("ผลลัพธ์ถูกต้องไหม?")
