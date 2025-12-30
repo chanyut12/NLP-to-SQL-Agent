@@ -6,7 +6,10 @@ langchain-community
 langchain-ollama
 matplotlib
 plotly
-pymysql
+
+# Database Drivers (for multi-database support)
+pymysql              # MySQL
+psycopg2-binary      # PostgreSQL
 
 # RAG Dependencies (for dynamic few-shot retrieval)
 chromadb>=0.4.0

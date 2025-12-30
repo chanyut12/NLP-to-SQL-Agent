@@ -33,35 +33,92 @@
 ## ⚙️ การติดตั้ง (Installation)
 
 ### 1. Prerequisites
--   Python 3.10+
--   [Ollama](https://ollama.com/) (รัน `ollama serve`)
+-   **Python 3.10+**
+-   **[Ollama](https://ollama.com/)** - สำหรับรัน LLM ในเครื่อง
+    ```bash
+    # Download จาก https://ollama.com/download
+    # แล้วรัน Ollama server
+    ollama serve
+    ```
 
-### 2. Setup
+### 2. Clone Repository
 ```bash
-# Clone
 git clone <your-repo-url>
 cd nlp_sql_project
-
-# Venv
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-
-# Install
-pip install -r requirements.txt
-
-# Pull Model
-ollama pull qwen2.5-coder:7b
 ```
 
-### 3. Create Mock DB (Optional)
+### 3. สร้าง Virtual Environment
+```bash
+python -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
+```
+
+### 4. ติดตั้ง Dependencies
+```bash
+pip install -r requirements.txt
+```
+
+**📦 Database Drivers (รวมอยู่ใน requirements.txt แล้ว):**
+-   **SQLite**: มาพร้อม Python (ไม่ต้องติดตั้งเพิ่ม)
+-   **MySQL**: `pymysql`
+-   **PostgreSQL**: `psycopg2-binary`
+
+หากต้องการติดตั้งเฉพาะ driver บางตัว:
+```bash
+pip install pymysql              # MySQL เท่านั้น
+pip install psycopg2-binary      # PostgreSQL เท่านั้น
+```
+
+### 5. ดาวน์โหลด LLM Model
+```bash
+ollama pull qwen2.5-coder:7b
+```
+*โมเดลนี้มีขนาดประมาณ 4.7GB (ดาวน์โหลดครั้งแรกอาจใช้เวลาสักครู่)*
+
+### 6. สร้าง Mock Database (สำหรับทดสอบ - Optional)
 ```bash
 python setup_db.py
 ```
+*สคริปต์นี้จะสร้างไฟล์ `local_database.db` (SQLite) พร้อมข้อมูล receipt ตัวอย่าง*
 
-### 4. Run App
+### 7. เริ่มใช้งาน
 ```bash
 streamlit run app.py
 ```
+จากนั้นเปิดเว็บเบราว์เซอร์ที่ `http://localhost:8501`
+
+---
+
+## 🔗 การเชื่อมต่อ Database
+
+### SQLite (ไฟล์ในเครื่อง)
+1. เลือก Database Type: **SQLite**
+2. ใส่ชื่อไฟล์: `local_database.db` (หรือไฟล์ .db ของคุณ)
+3. กด **Connect**
+
+### MySQL
+1. เลือก Database Type: **MySQL**
+2. ใส่ข้อมูลการเชื่อมต่อ:
+   - **Host**: `localhost` (หรือ IP ของ MySQL Server)
+   - **Port**: `3306`
+   - **Username**: `root` (หรือ username ของคุณ)
+   - **Password**: รหัสผ่าน
+   - **Database Name**: ชื่อ Database ที่ต้องการใช้
+3. กด **Connect**
+
+**หมายเหตุ**: ต้องมี MySQL Server รันอยู่ และมี Database พร้อมแล้ว
+
+### PostgreSQL
+1. เลือก Database Type: **PostgreSQL**
+2. ใส่ข้อมูลการเชื่อมต่อ:
+   - **Host**: `localhost` (หรือ IP ของ PostgreSQL Server)
+   - **Port**: `5432`
+   - **Username**: `postgres` (หรือ username ของคุณ)
+   - **Password**: รหัสผ่าน
+   - **Database Name**: ชื่อ Database ที่ต้องการใช้
+3. กด **Connect**
+
+**หมายเหตุ**: ต้องมี PostgreSQL Server รันอยู่ และมี Database พร้อมแล้ว
 
 ---
 
