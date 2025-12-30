@@ -14,8 +14,7 @@ This guide documents all tuning techniques implemented and available for the Tha
 3. [Advanced Techniques (Guide)](#advanced-techniques-guide)
    - [Fine-tuning with LoRA/QLoRA](#4-fine-tuning-with-loraqra)
    - [Model Comparison](#5-model-comparison)
-4. [Git Commit History](#git-commit-history)
-5. [Evaluation Metrics](#evaluation-metrics)
+4. [Evaluation Metrics](#evaluation-metrics)
 
 ---
 
@@ -420,22 +419,6 @@ for model in ["qwen2.5-coder:7b", "qwen2.5-coder:14b"]:
 | Execution Accuracy | SQL runs without error | > 90% |
 | Result Accuracy | SQL returns correct data | > 80% |
 | Latency | Time to generate SQL | < 5s |
-
----
-
-## Git Commit History
-
-All changes were committed following **Conventional Commits** standard:
-
-| Order | Commit Message | Description |
-|-------|----------------|-------------|
-| 1 | `feat(prompt): add few-shot examples for Thai-to-SQL mapping` | Added 7 static examples + CoT instructions |
-| 2 | `feat(agent): implement self-correction loop for SQL error recovery` | Added retry logic with error feedback |
-| 3 | `build(deps): add chromadb and sentence-transformers for RAG` | Added dependencies for vector store |
-| 4 | `feat(data): add Thai-to-SQL example dataset for RAG retrieval` | Created 25 example pairs |
-| 5 | `feat(rag): implement ChromaDB-based example retrieval system` | Built ExampleStore class |
-| 6 | `feat(app): integrate RAG-based dynamic few-shot into query pipeline` | Connected all components |
-| 7 | `docs: add comprehensive LLM tuning guide for Thai NLP-to-SQL` | This documentation |
 
 ---
 
