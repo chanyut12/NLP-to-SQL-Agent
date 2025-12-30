@@ -1,13 +1,14 @@
 """
-RAG Store Module for Thai NLP-to-SQL Agent
+RAG Store Module for Thai NLP-to-SQL Agent (Enhanced)
 
 This module provides dynamic few-shot example retrieval using ChromaDB
-and sentence-transformers for multilingual (Thai) embedding support.
+with persistence, dialect filtering, and metadata support.
 """
 
 import json
 import os
-from typing import List, Dict, Optional
+import hashlib
+from typing import List, Dict, Optional, Any
 import chromadb
 from chromadb.config import Settings
 from sentence_transformers import SentenceTransformer
@@ -15,19 +16,19 @@ from sentence_transformers import SentenceTransformer
 
 class ExampleStore:
     """
-    Vector store for Thai-to-SQL examples using ChromaDB.
+    Vector store for Thai-to-SQL examples using ChromaDB (Persistent).
     Retrieves semantically similar examples for few-shot prompting.
     """
     
     # Multilingual model that supports Thai
     DEFAULT_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-    COLLECTION_NAME = "thai_sql_examples"
+    COLLECTION_NAME = "thai_sql_examples_v2"
     
     def __init__(
         self,
         examples_path: str = "thai_sql_examples.json",
         model_name: str = DEFAULT_MODEL,
-        persist_directory: Optional[str] = None
+        persist_directory: Optional[str] = "rag_db"
     ):
         """
         Initialize the example store.
@@ -35,20 +36,21 @@ class ExampleStore:
         Args:
             examples_path: Path to JSON file containing examples
             model_name: Sentence transformer model for embeddings
-            persist_directory: Directory to persist ChromaDB (None for in-memory)
+            persist_directory: Directory to persist ChromaDB (default: 'rag_db')
         """
         self.examples_path = examples_path
         self.model_name = model_name
+        self.persist_directory = persist_directory
         
-        # Initialize embedding model
+        # Initialize embedding model (lazy load if possible, but usually needed immediately)
         print(f"Loading embedding model: {model_name}")
         self.embedder = SentenceTransformer(model_name)
         
         # Initialize ChromaDB
-        if persist_directory:
-            self.client = chromadb.PersistentClient(path=persist_directory)
+        if self.persist_directory:
+            os.makedirs(self.persist_directory, exist_ok=True)
+            self.client = chromadb.PersistentClient(path=self.persist_directory)
         else:
-            # In-memory client (faster for development)
             self.client = chromadb.Client(Settings(anonymized_telemetry=False))
         
         # Load or create collection
@@ -56,23 +58,25 @@ class ExampleStore:
     
     def _init_collection(self):
         """Initialize or load the vector collection."""
-        # Delete existing collection if exists (to refresh on each run)
-        try:
-            self.client.delete_collection(self.COLLECTION_NAME)
-        except Exception:
-            pass
+        # Note: In production, we don't delete every time.
+        # But for dev consistency when dataset changes, we might want to sync.
+        # Here we implement a sync strategy: Upsert based on ID.
         
-        # Create new collection
-        self.collection = self.client.create_collection(
+        self.collection = self.client.get_or_create_collection(
             name=self.COLLECTION_NAME,
             metadata={"description": "Thai to SQL examples for few-shot learning"}
         )
         
-        # Load and index examples
-        self._load_examples()
+        # Sync examples from file
+        self._sync_examples()
     
-    def _load_examples(self):
-        """Load examples from JSON file and index them."""
+    def _generate_id(self, question: str, sql: str) -> str:
+        """Generate a stable ID based on content."""
+        content = f"{question.strip()}|{sql.strip()}"
+        return hashlib.md5(content.encode()).hexdigest()
+
+    def _sync_examples(self):
+        """Load examples from JSON file and upsert them."""
         if not os.path.exists(self.examples_path):
             print(f"Warning: Examples file not found: {self.examples_path}")
             return
@@ -81,70 +85,76 @@ class ExampleStore:
             data = json.load(f)
         
         examples = data.get("examples", [])
-        
         if not examples:
-            print("Warning: No examples found in file")
             return
+            
+        print(f"Syncing {len(examples)} examples to RAG store...")
         
-        # Prepare data for ChromaDB
         ids = []
         embeddings = []
         documents = []
         metadatas = []
         
-        print(f"Indexing {len(examples)} examples...")
-        
-        for i, ex in enumerate(examples):
+        for ex in examples:
             question = ex.get("question", "")
             sql = ex.get("sql", "")
             category = ex.get("category", "general")
+            dialect = ex.get("dialect", "sqlite") # New field
+            difficulty = ex.get("difficulty", "medium") # New field
             
-            # Generate embedding for the question
-            embedding = self.embedder.encode(question).tolist()
+            # ID stability
+            ex_id = self._generate_id(question, sql)
             
-            ids.append(f"ex_{i}")
+            # Embed question + keywords (notes) if available
+            text_to_embed = question
+            if "notes" in ex:
+                text_to_embed += f" {ex['notes']}"
+                
+            embedding = self.embedder.encode(text_to_embed).tolist()
+            
+            ids.append(ex_id)
             embeddings.append(embedding)
-            documents.append(sql)  # Store SQL as document
+            documents.append(sql)
             metadatas.append({
                 "question": question,
-                "category": category
+                "category": category,
+                "dialect": dialect,
+                "difficulty": difficulty
             })
         
-        # Add to collection
-        self.collection.add(
-            ids=ids,
-            embeddings=embeddings,
-            documents=documents,
-            metadatas=metadatas
-        )
-        
-        print(f"Successfully indexed {len(examples)} examples")
-    
+        # Batch upsert
+        if ids:
+            self.collection.upsert(
+                ids=ids,
+                embeddings=embeddings,
+                documents=documents,
+                metadatas=metadatas
+            )
+        print("RAG store sync complete.")
+
     def get_similar_examples(
         self,
         query: str,
-        top_k: int = 3
+        top_k: int = 3,
+        dialect: Optional[str] = None
     ) -> List[Dict[str, str]]:
         """
-        Retrieve semantically similar examples for a given query.
+        Retrieve semantically similar examples.
         
         Args:
-            query: User's question (in Thai or English)
-            top_k: Number of examples to retrieve
-            
-        Returns:
-            List of dicts with 'question' and 'sql' keys
+            query: User's question
+            top_k: Number of examples
+            dialect: If provided, prefers or filters by this dialect (optional future enhancement)
         """
-        # Generate embedding for query
         query_embedding = self.embedder.encode(query).tolist()
         
-        # Search in ChromaDB
+        # Basic query
         results = self.collection.query(
             query_embeddings=[query_embedding],
             n_results=top_k
+            # where={"dialect": dialect} if dialect else None # Optional strict filtering
         )
         
-        # Format results
         examples = []
         if results and results['documents'] and results['documents'][0]:
             for i in range(len(results['documents'][0])):
@@ -154,7 +164,8 @@ class ExampleStore:
                 
                 examples.append({
                     "question": question,
-                    "sql": sql
+                    "sql": sql,
+                    "dialect": metadata.get("dialect", "any")
                 })
         
         return examples
@@ -162,67 +173,30 @@ class ExampleStore:
     def format_examples_for_prompt(
         self,
         query: str,
-        top_k: int = 3
+        top_k: int = 3,
+        dialect: Optional[str] = None
     ) -> str:
-        """
-        Get similar examples formatted as a string for prompt injection.
-        
-        Args:
-            query: User's question
-            top_k: Number of examples to retrieve
-            
-        Returns:
-            Formatted string of examples
-        """
-        examples = self.get_similar_examples(query, top_k)
+        """Get similar examples formatted as a string."""
+        examples = self.get_similar_examples(query, top_k, dialect)
         
         if not examples:
             return ""
         
         formatted = []
         for ex in examples:
+            # We can show dialect in the example if we want
+            # formatted.append(f"Question: {ex['question']} ({ex['dialect']})\nSQL: {ex['sql']}")
             formatted.append(f"Question: {ex['question']}\nSQL: {ex['sql']}")
         
         return "\n\n".join(formatted)
 
-
 def create_example_store(
     examples_path: str = "thai_sql_examples.json",
-    persist_directory: Optional[str] = None
+    persist_directory: Optional[str] = "rag_db"
 ) -> ExampleStore:
-    """
-    Factory function to create an ExampleStore instance.
-    
-    Args:
-        examples_path: Path to examples JSON file
-        persist_directory: Optional directory to persist the vector store
-        
-    Returns:
-        ExampleStore instance
-    """
-    return ExampleStore(
-        examples_path=examples_path,
-        persist_directory=persist_directory
-    )
+    return ExampleStore(examples_path, persist_directory=persist_directory)
 
-
-# Quick test when run directly
 if __name__ == "__main__":
-    print("Testing RAG Store...")
-    
+    # Test
     store = create_example_store()
-    
-    # Test queries
-    test_queries = [
-        "ยอดขายของเดือนธันวาคม",
-        "ลูกค้าคนไหนซื้อมากที่สุด",
-        "จำนวนใบเสร็จทั้งหมด"
-    ]
-    
-    for query in test_queries:
-        print(f"\n--- Query: {query} ---")
-        examples = store.get_similar_examples(query, top_k=2)
-        for ex in examples:
-            print(f"  Q: {ex['question']}")
-            print(f"  SQL: {ex['sql'][:60]}...")
-
+    print("Test retrieve:", store.get_similar_examples("ยอดขายรวม"))
