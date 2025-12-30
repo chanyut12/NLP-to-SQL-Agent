@@ -9,9 +9,10 @@ venv/
 env/
 .env
 
-# Database (Mock DB อาจจะเอาขึ้นได้ถ้าไฟล์เล็ก แต่ปกติไม่นิยม)
-local_database.db  <-- ผม comment ไว้ก่อน เผื่อคุณอยากเอา mock data ขึ้นโชว์
+# Database
+local_database.db
 *.sqlite3
+rag_db/
 
 # IDE
 .vscode/
@@ -23,5 +24,6 @@ local_database.db  <-- ผม comment ไว้ก่อน เผื่อค�
 
 # Logs & Runtime Data
 query_logs.csv
+query_logs.jsonl
 logs.csv
-
+golden_dataset.json
