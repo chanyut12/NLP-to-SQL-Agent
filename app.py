@@ -10,6 +10,7 @@ import os
 import csv
 import json # added for jsonl logging
 import uuid
+import plotly.express as px
 
 # RAG Store for dynamic few-shot examples
 from rag_store import create_example_store
@@ -19,6 +20,9 @@ from sql_safety import SQLSafetyError, validate_and_sanitize_sql
 
 # Schema Utils
 from schema_utils import get_database_schema, filter_schema, format_schema_for_prompt
+
+# Viz Utils
+from viz_recommender import recommend_chart, get_chart_options
 
 # --- 1. ตั้งค่า Page ---
 st.set_page_config(page_title="Thai NLP to SQL Agent", layout="wide")
@@ -504,33 +508,46 @@ if df_result is not None:
     if df_result.empty:
         st.warning("ไม่พบข้อมูลตามเงื่อนไขที่ค้นหา")
     else:
+        # Auto-Viz Logic
+        rec_type, rec_x, rec_y = recommend_chart(df_result)
+        
         st.dataframe(df_result, use_container_width=True)
 
         st.subheader("📈 Visualization")
-
-        numeric_cols = df_result.select_dtypes(include=["float64", "int64"]).columns
-        object_cols = df_result.select_dtypes(include=["object"]).columns
-
-        if len(numeric_cols) > 0 and len(object_cols) > 0:
-            # ใช้ unique key เพื่อป้องกัน Duplicate Widget ID error
-            x_axis = st.selectbox("เลือกแกน X (หมวดหมู่/เวลา)", object_cols, index=0, key="x_axis_v2")
-            y_axis = st.selectbox("เลือกแกน Y (ค่าตัวเลข)", numeric_cols, index=0, key="y_axis_v2")
-
-            chart_type = st.radio(
-                "เลือกประเภทกราฟ",
-                ["Bar Chart", "Line Chart", "Area Chart"],
-                horizontal=True,
-                key="chart_type_v2",
-            )
-
-            series = df_result.set_index(x_axis)[y_axis]
-            if chart_type == "Bar Chart":
-                st.bar_chart(series)
-            elif chart_type == "Line Chart":
-                st.line_chart(series)
-            elif chart_type == "Area Chart":
-                st.area_chart(series)
-        elif len(numeric_cols) >= 2:
-            st.scatter_chart(df_result)
-        else:
-            st.info("ข้อมูลไม่เพียงพอสำหรับการสร้างกราฟ (ต้องการอย่างน้อย 1 คอลัมน์ตัวเลข และ 1 คอลัมน์หมวดหมู่)")
+        
+        if rec_type != "none" and rec_type != "table":
+            # Controls
+            with st.expander("⚙️ ตั้งค่ากราฟ", expanded=False):
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    chart_type = st.selectbox(
+                        "ประเภทกราฟ", 
+                        ["Bar Chart", "Line Chart", "Area Chart", "Pie Chart", "Scatter Plot"],
+                        index=0 if rec_type == "bar" else 1 if rec_type == "line" else 0
+                    )
+                with col2:
+                    numeric_cols = df_result.select_dtypes(include=['number']).columns.tolist()
+                    object_cols = df_result.columns.tolist()
+                    x_axis = st.selectbox("แกน X", object_cols, index=object_cols.index(rec_x) if rec_x in object_cols else 0)
+                with col3:
+                    y_axis = st.selectbox("แกน Y", numeric_cols, index=numeric_cols.index(rec_y) if rec_y in numeric_cols else 0)
+            
+            # Plot
+            try:
+                if chart_type == "Bar Chart":
+                    fig = px.bar(df_result, x=x_axis, y=y_axis, title=f"{y_axis} by {x_axis}", text_auto=True)
+                elif chart_type == "Line Chart":
+                    fig = px.line(df_result, x=x_axis, y=y_axis, markers=True, title=f"{y_axis} over {x_axis}")
+                elif chart_type == "Area Chart":
+                    fig = px.area(df_result, x=x_axis, y=y_axis, title=f"{y_axis} over {x_axis}")
+                elif chart_type == "Pie Chart":
+                    fig = px.pie(df_result, names=x_axis, values=y_axis, title=f"{y_axis} distribution")
+                elif chart_type == "Scatter Plot":
+                    fig = px.scatter(df_result, x=x_axis, y=y_axis, title=f"{y_axis} vs {x_axis}")
+                
+                st.plotly_chart(fig, use_container_width=True)
+            except Exception as e:
+                st.error(f"ไม่สามารถสร้างกราฟได้: {e}")
+                
+        elif len(df_result) > 0 and len(df_result.columns) >= 2:
+             st.info("💡 ข้อมูลนี้แสดงเป็นตารางเหมาะสมที่สุด (หรือลองปรับแกนในตั้งค่า)")
