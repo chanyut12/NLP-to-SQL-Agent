@@ -16,6 +16,9 @@ from rag_store import create_example_store
 # SQL Safety (read-only, single statement, limit clamp)
 from sql_safety import SQLSafetyError, validate_and_sanitize_sql
 
+# Schema Utils
+from schema_utils import get_database_schema, filter_schema, format_schema_for_prompt
+
 # --- 1. ตั้งค่า Page ---
 st.set_page_config(page_title="Thai NLP to SQL Agent", layout="wide")
 st.title("🤖 AI Data Analyst (Thai Supported)")
@@ -136,15 +139,23 @@ def generate_sql_with_retry(
     # Get dynamic examples from RAG store
     dynamic_examples = example_store.format_examples_for_prompt(question, top_k=3)
     
-    # Get schema from current database
-    db = SQLDatabase(engine)
-    schema = db.get_table_info()
+    # Get and Filter Schema (Smart Schema Injection)
+    raw_schema = get_database_schema(engine)
+    filtered_schema = filter_schema(raw_schema, question)
+    schema_text = format_schema_for_prompt(filtered_schema)
+    
+    # Prepare allowed tables for safety check
+    # If filtered schema is used, we might restrict to those tables, 
+    # BUT for safety, we should probably allow all tables existing in DB 
+    # (or strictly what was passed to prompt? Strict is safer but might hallucinate tables not in prompt)
+    # Let's start with allowing all tables in DB to avoid false positives if heuristic missed something
+    all_tables = list(raw_schema.keys())
     
     # Create chain with dynamic examples and schema
     chain = (
         prompt.partial(
             dynamic_examples=dynamic_examples,
-            schema=schema,
+            schema=schema_text,
             dialect=dialect,
             max_limit=max_limit,
         )
@@ -163,7 +174,7 @@ def generate_sql_with_retry(
                 sql,
                 dialect=dialect,
                 max_limit=max_limit,
-                allowed_tables=allowed_tables,
+                allowed_tables=all_tables,
             )
             sql = safe.sql
 
