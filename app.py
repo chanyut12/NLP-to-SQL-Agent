@@ -13,6 +13,9 @@ import uuid
 # RAG Store for dynamic few-shot examples
 from rag_store import create_example_store
 
+# SQL Safety (read-only, single statement, limit clamp)
+from sql_safety import SQLSafetyError, validate_and_sanitize_sql
+
 # --- 1. ตั้งค่า Page ---
 st.set_page_config(page_title="Thai NLP to SQL Agent", layout="wide")
 st.title("🤖 AI Data Analyst (Thai Supported)")
@@ -55,15 +58,20 @@ def get_llm_chain():
     
     # 3. Setup Prompt with Dynamic Few-shot Examples (RAG-based)
     # Note: {dynamic_examples} will be filled at runtime with semantically similar examples
-    template = """You are a SQLite expert specialized in Thai language understanding.
-Given an input question (possibly in Thai), create a syntactically correct SQLite query.
+    template = """You are an expert SQL analyst specialized in Thai language understanding.
+Given an input question (possibly in Thai), create a syntactically correct, read-only SQL query for the target database dialect.
+
+### Target Dialect:
+{dialect}
 
 ### Instructions:
 1. Interpret Thai keywords and map them to English column names
 2. Determine the appropriate SQL operation (SELECT, COUNT, SUM, AVG, etc.)
 3. Apply filters (WHERE) and groupings (GROUP BY) as needed
-4. Limit results to 100 unless specified otherwise
-5. Return ONLY the SQL query without markdown or explanations
+4. Return ONLY a single statement (WITH ... SELECT is OK). Never generate multiple statements.
+5. READ-ONLY ONLY: Never use INSERT/UPDATE/DELETE/DROP/ALTER/CREATE/TRUNCATE/PRAGMA/ATTACH.
+6. Always include LIMIT {max_limit} unless the user explicitly requests fewer.
+7. Return ONLY the SQL query without markdown or explanations.
 
 ### Thai-to-English Schema Mapping:
 - "ยอดขาย" / "ยอดรวม" -> total_price (use SUM for aggregation)
@@ -106,7 +114,10 @@ def generate_sql_with_retry(
     llm,
     engine,
     example_store,
-    max_retries: int = 2
+    dialect: str,
+    max_limit: int = 500,
+    allowed_tables=None,
+    max_retries: int = 2,
 ):
     """
     Generate SQL with RAG-based few-shot and self-correction loop.
@@ -130,7 +141,16 @@ def generate_sql_with_retry(
     schema = db.get_table_info()
     
     # Create chain with dynamic examples and schema
-    chain = prompt.partial(dynamic_examples=dynamic_examples, schema=schema) | llm | StrOutputParser()
+    chain = (
+        prompt.partial(
+            dynamic_examples=dynamic_examples,
+            schema=schema,
+            dialect=dialect,
+            max_limit=max_limit,
+        )
+        | llm
+        | StrOutputParser()
+    )
     
     # First attempt
     response = chain.invoke({"question": question})
@@ -138,6 +158,15 @@ def generate_sql_with_retry(
     
     for attempt in range(max_retries + 1):
         try:
+            # Safety gate: read-only, single statement, enforce LIMIT, optional table allowlist
+            safe = validate_and_sanitize_sql(
+                sql,
+                dialect=dialect,
+                max_limit=max_limit,
+                allowed_tables=allowed_tables,
+            )
+            sql = safe.sql
+
             # Try to execute SQL
             df = pd.read_sql(sql, engine)
             return sql, df, None, attempt  # Success
@@ -147,7 +176,14 @@ def generate_sql_with_retry(
             
             if attempt < max_retries:
                 # Create correction prompt
-                correction_prompt = f"""The following SQL query failed with an error.
+                correction_prompt = f"""The following SQL query failed with an error OR violated safety constraints.
+
+Target dialect: {dialect}
+Safety requirements:
+- Single statement only (WITH ... SELECT allowed)
+- Read-only only: SELECT queries only
+- Never use INSERT/UPDATE/DELETE/DROP/ALTER/CREATE/TRUNCATE/PRAGMA/ATTACH
+- Always include LIMIT {max_limit} unless the user explicitly requests fewer
 
 Error: {error_msg}
 
@@ -355,6 +391,12 @@ if run_clicked:
         prompt_template = st.session_state.prompt_template
         example_store = st.session_state.example_store
         engine = st.session_state.engine
+
+        # Map UI db_type to sqlglot dialect names
+        dialect_map = {"SQLite": "sqlite", "MySQL": "mysql", "PostgreSQL": "postgres"}
+        dialect = dialect_map.get(db_type, "sqlite")
+        # Hard cap for safety; can be made configurable later
+        max_limit = 500
         
         with st.spinner("🤖 AI กำลังเขียน SQL และดึงข้อมูล..."):
             start_time = time.time()
@@ -366,6 +408,9 @@ if run_clicked:
                 llm=llm,
                 engine=engine,
                 example_store=example_store,
+                dialect=dialect,
+                max_limit=max_limit,
+                allowed_tables=None,
                 max_retries=2
             )
             

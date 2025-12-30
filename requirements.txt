@@ -6,7 +6,11 @@ langchain-community
 langchain-ollama
 matplotlib
 plotly
+pymysql
 
 # RAG Dependencies (for dynamic few-shot retrieval)
 chromadb>=0.4.0
 sentence-transformers>=2.2.0
+
+# SQL Safety / Parsing
+sqlglot>=23.0.0
