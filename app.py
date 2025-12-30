@@ -8,6 +8,7 @@ from langchain_core.output_parsers import StrOutputParser
 import time
 import os
 import csv
+import json # added for jsonl logging
 import uuid
 
 # RAG Store for dynamic few-shot examples
@@ -436,7 +437,14 @@ if run_clicked:
                 
                 # Log with retry info
                 status = "Success" if retry_count == 0 else f"Success (Retry {retry_count})"
-                log_id = log_query(user_question, final_sql, status, duration=duration)
+                log_id = log_query(
+                    question=user_question, 
+                    sql=final_sql, 
+                    status=status, 
+                    duration=duration,
+                    dialect=dialect,
+                    retry_count=retry_count
+                )
                 st.session_state.last_log_id = log_id
             else:
                 # Error after all retries
@@ -445,7 +453,15 @@ if run_clicked:
                 st.session_state.last_df = None
                 
                 # Log Error
-                log_id = log_query(user_question, final_sql, "Error", error_msg, duration)
+                log_id = log_query(
+                    question=user_question, 
+                    sql=final_sql, 
+                    status="Error", 
+                    error_msg=error_msg, 
+                    duration=duration,
+                    dialect=dialect,
+                    retry_count=retry_count
+                )
                 st.session_state.last_log_id = log_id
 
 # Display Logic
