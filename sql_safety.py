@@ -36,7 +36,6 @@ _DISALLOWED_NODE_TYPES: tuple[type[exp.Expression], ...] = (
     exp.Drop,
     exp.Alter,
     exp.Create,
-    exp.Truncate,
     exp.Command,  # e.g. PRAGMA / SHOW / other commands
     exp.Transaction,
 )
