@@ -225,51 +225,92 @@ Corrected SQL:"""
     return sql, None, "Max retries exceeded", max_retries
 
 # --- 3. Logging & Feedback Functions (Metrics) ---
-LOG_FILE = 'query_logs.csv'
+LOG_FILE_CSV = 'query_logs.csv'
+LOG_FILE_JSONL = 'query_logs.jsonl'
 
-def log_query(question, sql, status, error_msg="", duration=0):
-    """บันทึกข้อมูลการใช้งานลงไฟล์ CSV เพื่อวัดผล"""
-    file_exists = os.path.isfile(LOG_FILE)
-    
-    # สร้าง ID สำหรับ Log นี้เพื่อให้ update feedback ทีหลังได้
+def log_query(question, sql, status, error_msg="", duration=0, **kwargs):
+    """
+    Log query execution details to both CSV (legacy) and JSONL (rich data).
+    kwargs allows passing extra fields like dialect, db_type, retry_count, etc.
+    """
     log_id = str(uuid.uuid4())
+    timestamp = pd.Timestamp.now().isoformat()
     
-    with open(LOG_FILE, 'a', newline='', encoding='utf-8') as f:
-        writer = csv.writer(f)
-        # Check header mismatch (migration)
-        if not file_exists:
-            writer.writerow(['LogID', 'Timestamp', 'Question', 'SQL', 'Status', 'Error', 'Duration_Sec', 'Feedback'])
-            
-        writer.writerow([log_id, pd.Timestamp.now(), question, sql, status, error_msg, f"{duration:.2f}", ""])
+    # 1. Write to JSONL (Preferred for structured data)
+    log_entry = {
+        "log_id": log_id,
+        "timestamp": timestamp,
+        "question": question,
+        "sql": sql,
+        "status": status,
+        "error_msg": error_msg,
+        "duration_sec": duration,
+        "feedback": "",
+        **kwargs # store extra metadata
+    }
+    
+    try:
+        with open(LOG_FILE_JSONL, 'a', encoding='utf-8') as f:
+            f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
+    except Exception as e:
+        print(f"Error writing JSONL log: {e}")
+
+    # 2. Write to CSV (Legacy support)
+    file_exists = os.path.isfile(LOG_FILE_CSV)
+    try:
+        with open(LOG_FILE_CSV, 'a', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            if not file_exists:
+                writer.writerow(['LogID', 'Timestamp', 'Question', 'SQL', 'Status', 'Error', 'Duration_Sec', 'Feedback'])
+                
+            writer.writerow([log_id, timestamp, question, sql, status, error_msg, f"{duration:.2f}", ""])
+    except Exception as e:
+        print(f"Error writing CSV log: {e}")
         
     return log_id
 
 def update_feedback(log_id, feedback_value):
-    """อัปเดตค่า Feedback ในไฟล์ CSV ตาม LogID"""
-    if not os.path.isfile(LOG_FILE):
-        return
-
-    # อ่านข้อมูลทั้งหมดมาก่อน (สำหรับ Local App ไฟล์ไม่ใหญ่มากใช้วิธีนี้ง่ายสุด)
-    rows = []
-    updated = False
-    with open(LOG_FILE, 'r', encoding='utf-8') as f:
-        reader = csv.reader(f)
-        header = next(reader)
-        rows.append(header)
-        
-        for row in reader:
-            if row[0] == log_id:  # เจอ LogID ที่ตรงกัน (Column 0)
-                # Column Index: 7 is Feedback
-                # ถ้าไฟล์เก่า column ไม่ครบ ต้องระวัง index error แต่ assume ว่าไฟล์ใหม่ถูกสร้างแล้ว
-                while len(row) < 8: row.append("")
-                row[7] = feedback_value
-                updated = True
-            rows.append(row)
+    """Update feedback in both CSV and JSONL."""
     
-    if updated:
-        with open(LOG_FILE, 'w', newline='', encoding='utf-8') as f:
-            writer = csv.writer(f)
-            writer.writerows(rows)
+    # Update CSV
+    if os.path.isfile(LOG_FILE_CSV):
+        rows = []
+        updated = False
+        with open(LOG_FILE_CSV, 'r', encoding='utf-8') as f:
+            reader = csv.reader(f)
+            try:
+                header = next(reader)
+                rows.append(header)
+                for row in reader:
+                    if row and row[0] == log_id:
+                        while len(row) < 8: row.append("")
+                        row[7] = feedback_value
+                        updated = True
+                    rows.append(row)
+            except StopIteration:
+                pass
+        
+        if updated:
+            with open(LOG_FILE_CSV, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerows(rows)
+
+    # Update JSONL
+    if os.path.isfile(LOG_FILE_JSONL):
+        logs = []
+        with open(LOG_FILE_JSONL, 'r', encoding='utf-8') as f:
+            for line in f:
+                try:
+                    entry = json.loads(line)
+                    if entry.get("log_id") == log_id:
+                        entry["feedback"] = feedback_value
+                    logs.append(entry)
+                except:
+                    continue
+        
+        with open(LOG_FILE_JSONL, 'w', encoding='utf-8') as f:
+            for entry in logs:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 # --- 4. User Interface (UI) ---
 
@@ -366,8 +407,10 @@ with st.sidebar:
     st.code("ยอดขายรวมของเดือน December")
     st.code("ลูกค้าคนไหนมียอดซื้อเยอะที่สุด 5 อันดับแรก")
 
-# Input Box
-user_question = st.text_input("💬 ถามข้อมูลของคุณ (ภาษาไทยได้เลย):", placeholder="เช่น ยอดขายรวมทั้งหมดของปีนี้แบ่งตามเดือน")
+# Input Form (Prevents reset on submit)
+with st.form(key="query_form"):
+    user_question = st.text_input("💬 ถามข้อมูลของคุณ (ภาษาไทยได้เลย):", placeholder="เช่น ยอดขายรวมทั้งหมดของปีนี้แบ่งตามเดือน")
+    run_clicked = st.form_submit_button("🚀 ค้นหาข้อมูล")
 
 # Initialize Session State
 if "last_sql" not in st.session_state:
@@ -378,8 +421,6 @@ if "last_error" not in st.session_state:
     st.session_state.last_error = None
 if "last_log_id" not in st.session_state:
     st.session_state.last_log_id = None
-
-run_clicked = st.button("🚀 ค้นหาข้อมูล")
 
 if run_clicked:
     st.session_state.last_error = None
