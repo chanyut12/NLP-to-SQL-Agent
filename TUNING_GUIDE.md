@@ -167,7 +167,7 @@ def generate_sql_with_retry(question, prompt, llm, engine, example_store, max_re
 
 **Files:** 
 - `rag_store.py` - Vector store implementation
-- `thai_sql_examples.json` - Example dataset (25 examples)
+- `thai_sql_examples.json` - Example dataset (26 examples)
 - `app.py` - Integration
 
 #### What it does:
@@ -467,6 +467,274 @@ print(f"User Satisfaction: {positive_rate:.1f}%")
 
 ---
 
-**Created by:** Thai NLP-to-SQL Agent Development Team  
-**Last Updated:** December 2024
+## Future Development Roadmap
+
+This section outlines potential features and enhancements to consider for future development. These are derived from stakeholder requirements analysis.
+
+### 1. User Management & Access Control
+
+**Priority:** High (for production deployment)
+
+| Feature | Description | Complexity |
+|---------|-------------|------------|
+| User Authentication | Login/logout with username/password | Medium |
+| Role-based Access | Admin, Analyst, Viewer roles | Medium |
+| Table-level Permissions | Restrict access to sensitive tables/columns | High |
+| Audit Trail | Log who queried what and when | Low |
+
+**Implementation Approach:**
+```python
+# Example: Streamlit-Authenticator integration
+import streamlit_authenticator as stauth
+
+authenticator = stauth.Authenticate(
+    credentials, cookie_name, key, cookie_expiry_days
+)
+name, authentication_status, username = authenticator.login()
+
+# Role-based table filtering
+ROLE_PERMISSIONS = {
+    "admin": ["*"],  # All tables
+    "analyst": ["receipt", "products", "customers"],
+    "viewer": ["receipt_summary"]  # Aggregated views only
+}
+```
+
+---
+
+### 2. Query History & Favorites
+
+**Priority:** Medium
+
+| Feature | Description | Complexity |
+|---------|-------------|------------|
+| Query History | View past queries with results | Low |
+| Save as Favorite | Bookmark frequently used queries | Low |
+| Query Templates | Pre-defined queries with parameters | Medium |
+| Share Queries | Share saved queries with team | Medium |
+
+**Data Model:**
+```python
+# Store in SQLite or session state
+saved_queries = {
+    "id": "uuid",
+    "user_id": "user123",
+    "name": "Monthly Sales Report",
+    "question": "ยอดขายรายเดือน",
+    "sql": "SELECT month, SUM(total_price) ...",
+    "created_at": "2025-01-01",
+    "is_favorite": True
+}
+```
+
+---
+
+### 3. Export & Sharing
+
+**Priority:** High
+
+| Feature | Description | Complexity |
+|---------|-------------|------------|
+| Export to Excel/CSV | Download query results | Low |
+| Export Chart as Image | PNG/SVG export | Low |
+| PDF Report | Generate formatted reports | Medium |
+| Email Delivery | Send results via email | Medium |
+| API Endpoint | REST API for external integration | High |
+
+**Quick Implementation (Excel/CSV):**
+```python
+import io
+
+# Add to Streamlit UI
+col1, col2 = st.columns(2)
+with col1:
+    csv = df.to_csv(index=False).encode('utf-8')
+    st.download_button("Download CSV", csv, "result.csv", "text/csv")
+with col2:
+    buffer = io.BytesIO()
+    df.to_excel(buffer, index=False)
+    st.download_button("Download Excel", buffer.getvalue(), "result.xlsx")
+```
+
+---
+
+### 4. Scheduling & Automation
+
+**Priority:** Low (for advanced use cases)
+
+| Feature | Description | Complexity |
+|---------|-------------|------------|
+| Scheduled Queries | Run queries on schedule (daily/weekly) | High |
+| Email Reports | Auto-send results to stakeholders | Medium |
+| Alerts | Notify when metrics exceed thresholds | Medium |
+| Dashboard Refresh | Auto-refresh dashboards | Low |
+
+**Technology Options:**
+- **APScheduler**: Python-native scheduling
+- **Celery + Redis**: Distributed task queue
+- **Airflow**: Enterprise-grade orchestration
+
+---
+
+### 5. Multi-turn Conversation
+
+**Priority:** Medium
+
+| Feature | Description | Complexity |
+|---------|-------------|------------|
+| Context Memory | Remember previous queries in session | Medium |
+| Follow-up Questions | "แล้วถ้าเฉพาะเดือนนี้ล่ะ?" | High |
+| Query Refinement | "เพิ่ม filter ลูกค้าชื่อ X" | High |
+| Undo/Modify | Adjust previous query conditions | Medium |
+
+**Implementation Approach:**
+```python
+# Add conversation memory
+from langchain.memory import ConversationBufferWindowMemory
+
+memory = ConversationBufferWindowMemory(k=5)  # Remember last 5 turns
+
+# Enhanced prompt with context
+template = """
+Previous conversation:
+{history}
+
+Current question: {question}
+Generate SQL considering the context above.
+"""
+```
+
+---
+
+### 6. Extended Data Source Support
+
+**Priority:** Medium
+
+| Data Source | Driver/Library | Status |
+|-------------|---------------|--------|
+| SQLite | Built-in | ✅ Implemented |
+| MySQL | pymysql | ✅ Implemented |
+| PostgreSQL | psycopg2 | ✅ Implemented |
+| Microsoft SQL Server | pyodbc | 🔲 Planned |
+| Oracle | cx_Oracle | 🔲 Planned |
+| BigQuery | google-cloud-bigquery | 🔲 Planned |
+| CSV/Excel Files | pandas | 🔲 Planned |
+| REST APIs | requests + pandas | 🔲 Planned |
+
+**Adding New Database:**
+```python
+# In app.py, extend get_engine()
+elif db_type == "mssql":
+    url = f"mssql+pyodbc://{user}:{password}@{host}:{port}/{database}?driver=ODBC+Driver+17+for+SQL+Server"
+elif db_type == "oracle":
+    url = f"oracle+cx_oracle://{user}:{password}@{host}:{port}/{database}"
+```
+
+---
+
+### 7. Enhanced Visualization
+
+**Priority:** Medium
+
+| Feature | Description | Complexity |
+|---------|-------------|------------|
+| Dashboard Builder | Create multi-chart dashboards | High |
+| Chart Customization | Colors, labels, themes | Low |
+| Drill-down | Click chart to filter data | Medium |
+| Map Visualization | Geographic data on maps | Medium |
+| Real-time Charts | Auto-updating visualizations | High |
+
+---
+
+### 8. Performance & Scalability
+
+**Priority:** High (for production)
+
+| Concern | Solution | Complexity |
+|---------|----------|------------|
+| Query Caching | Cache frequent query results | Medium |
+| Connection Pooling | SQLAlchemy pool configuration | Low |
+| Async Execution | Background query processing | Medium |
+| Rate Limiting | Prevent API abuse | Low |
+| Load Balancing | Multiple Streamlit instances | High |
+
+**Query Caching Example:**
+```python
+from functools import lru_cache
+import hashlib
+
+@lru_cache(maxsize=100)
+def cached_query(sql_hash: str, engine_url: str):
+    # Execute and cache results
+    return pd.read_sql(sql, engine)
+
+# Usage
+sql_hash = hashlib.md5(sql.encode()).hexdigest()
+df = cached_query(sql_hash, str(engine.url))
+```
+
+---
+
+### 9. Error Handling & UX Improvements
+
+**Priority:** Medium
+
+| Feature | Description | Complexity |
+|---------|-------------|------------|
+| Friendly Error Messages | Thai error explanations | Low |
+| Query Suggestions | "Did you mean...?" | Medium |
+| Schema Explorer | Interactive table/column browser | Low |
+| SQL Preview & Edit | Allow manual SQL adjustment | Low |
+| Progress Indicator | Show generation steps | Low |
+
+---
+
+### 10. Evaluation & Monitoring
+
+**Priority:** High
+
+| Feature | Description | Complexity |
+|---------|-------------|------------|
+| Accuracy Dashboard | Track success rate over time | Medium |
+| A/B Testing | Compare model/prompt versions | High |
+| Error Analysis | Categorize failure patterns | Medium |
+| User Feedback Loop | Improve from user corrections | Medium |
+| Cost Tracking | Monitor API/compute usage | Low |
+
+---
+
+### Implementation Priority Matrix
+
+```
+                    High Impact
+                         │
+    ┌────────────────────┼────────────────────┐
+    │                    │                    │
+    │  Export/Sharing    │  User Management   │
+    │  Error Handling    │  Performance       │
+    │                    │  Evaluation        │
+    │                    │                    │
+Low ├────────────────────┼────────────────────┤ High
+Effort                   │                    Effort
+    │                    │                    │
+    │  Query History     │  Multi-turn Conv.  │
+    │  Visualization     │  Scheduling        │
+    │                    │  Dashboard Builder │
+    │                    │                    │
+    └────────────────────┼────────────────────┘
+                         │
+                    Low Impact
+```
+
+**Recommended Implementation Order:**
+1. Export to CSV/Excel (Quick win, high value)
+2. Query History & Favorites (Improves UX)
+3. User Authentication (Required for production)
+4. Error Message Improvements (Better UX)
+5. Multi-turn Conversation (Advanced feature)
+
+---
+
+**Created by:** Thai NLP-to-SQL Agent Development Team
+**Last Updated:** December 2025
 
