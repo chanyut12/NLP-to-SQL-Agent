@@ -23,6 +23,9 @@ from schema_utils import get_database_schema, filter_schema, format_schema_for_p
 # Viz Utils
 from viz_recommender import recommend_chart, get_chart_options
 
+# Query History & Favorites
+from query_history import QueryHistoryManager, truncate_text, format_timestamp
+
 # --- 1. ตั้งค่า Page ---
 st.set_page_config(page_title="Thai NLP to SQL Agent", layout="wide")
 st.title("🤖 AI Data Analyst (Thai Supported)")
@@ -462,6 +465,12 @@ if "last_error" not in st.session_state:
     st.session_state.last_error = None
 if "last_log_id" not in st.session_state:
     st.session_state.last_log_id = None
+
+# Query History & Favorites Session State
+if "history_manager" not in st.session_state:
+    st.session_state.history_manager = QueryHistoryManager()
+if "rerun_query" not in st.session_state:
+    st.session_state.rerun_query = None
 
 if run_clicked:
     st.session_state.last_error = None
