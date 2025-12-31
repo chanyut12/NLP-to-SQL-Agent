@@ -678,8 +678,8 @@ if df_result is not None:
     with col2:
         # Feedback Loop (Real Metrics)
         st.caption("ผลลัพธ์ถูกต้องไหม?")
-        c1, c2 = st.columns(2)
-        
+        c1, c2, c3 = st.columns(3)
+
         # ใช้ callback เพื่อ update feedback โดยไม่ต้อง rerun logic หลัก
         def on_feedback_click(rating):
             if st.session_state.last_log_id:
@@ -692,6 +692,26 @@ if df_result is not None:
         with c2:
             if st.button("👎"):
                 on_feedback_click("Negative")
+        with c3:
+            # Save as Favorite button
+            current_sql = st.session_state.last_sql or ""
+            current_question = user_question or ""
+            current_is_fav = st.session_state.history_manager.is_favorite(
+                current_question, current_sql
+            )
+            if current_is_fav:
+                st.button("⭐", disabled=True, key="fav_saved", help="Already saved")
+            else:
+                if st.button("⭐", key="save_current_fav", help="Save to favorites"):
+                    if current_question and current_sql:
+                        st.session_state.history_manager.save_favorite(
+                            question=current_question,
+                            sql=current_sql,
+                            dialect=st.session_state.get("last_dialect", "sqlite"),
+                            log_id=st.session_state.last_log_id
+                        )
+                        st.toast("Saved to favorites!")
+                        st.rerun()
 
     st.subheader("📊 ผลลัพธ์")
     if df_result.empty:
