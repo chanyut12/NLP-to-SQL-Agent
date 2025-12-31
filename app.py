@@ -358,6 +358,10 @@ def update_feedback(log_id, feedback_value):
 
 # --- 4. User Interface (UI) ---
 
+# Initialize Query History Manager early (needed for sidebar)
+if "history_manager" not in st.session_state:
+    st.session_state.history_manager = QueryHistoryManager()
+
 # Sidebar: Database Connection Settings
 with st.sidebar:
     st.header("🔌 Database Connection")
@@ -558,9 +562,7 @@ if "last_error" not in st.session_state:
 if "last_log_id" not in st.session_state:
     st.session_state.last_log_id = None
 
-# Query History & Favorites Session State
-if "history_manager" not in st.session_state:
-    st.session_state.history_manager = QueryHistoryManager()
+# Re-run query session state
 if "rerun_query" not in st.session_state:
     st.session_state.rerun_query = None
 

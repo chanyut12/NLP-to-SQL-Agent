@@ -12,7 +12,7 @@ import os
 import uuid
 from datetime import datetime
 from typing import List, Dict, Optional, Any
-from dataclasses import dataclass, asdict, field
+from dataclasses import dataclass, asdict
 
 
 # File paths
