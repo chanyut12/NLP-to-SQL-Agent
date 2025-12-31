@@ -564,6 +564,61 @@ if "history_manager" not in st.session_state:
 if "rerun_query" not in st.session_state:
     st.session_state.rerun_query = None
 
+# Handle re-run from history or favorites
+if st.session_state.rerun_query is not None:
+    rerun_data = st.session_state.rerun_query
+    st.session_state.rerun_query = None  # Clear after use
+
+    rerun_sql = rerun_data.get("sql", "")
+    rerun_question = rerun_data.get("question", "")
+    rerun_dialect = rerun_data.get("dialect", "sqlite")
+
+    st.info(f"Re-running: {truncate_text(rerun_question, 60)}")
+
+    if rerun_sql and st.session_state.db_connected:
+        engine = st.session_state.engine
+        try:
+            with st.spinner("Executing saved SQL..."):
+                start_time = time.time()
+                df_result = pd.read_sql(rerun_sql, engine)
+                duration = time.time() - start_time
+
+            # Store results in session state
+            st.session_state.last_sql = rerun_sql
+            st.session_state.last_df = df_result
+            st.session_state.last_error = None
+            st.session_state.last_dialect = rerun_dialect
+            st.session_state.last_retry_count = 0
+
+            # Log the re-run query
+            log_id = log_query(
+                question=rerun_question,
+                sql=rerun_sql,
+                status="Success (Re-run)",
+                duration=duration,
+                dialect=rerun_dialect,
+                retry_count=0
+            )
+            st.session_state.last_log_id = log_id
+
+        except Exception as e:
+            st.session_state.last_error = str(e)
+            st.session_state.last_sql = rerun_sql
+            st.session_state.last_df = None
+            st.session_state.last_dialect = rerun_dialect
+
+            # Log the error
+            log_id = log_query(
+                question=rerun_question,
+                sql=rerun_sql,
+                status="Error (Re-run)",
+                error_msg=str(e),
+                duration=0,
+                dialect=rerun_dialect,
+                retry_count=0
+            )
+            st.session_state.last_log_id = log_id
+
 if run_clicked:
     st.session_state.last_error = None
     st.session_state.last_log_id = None  # Reset Log ID
