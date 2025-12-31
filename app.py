@@ -451,6 +451,98 @@ with st.sidebar:
     st.code("ยอดขายรวมของเดือน December")
     st.code("ลูกค้าคนไหนมียอดซื้อเยอะที่สุด 5 อันดับแรก")
 
+    # --- Query History & Favorites Section ---
+    st.markdown("---")
+    st.header("📜 History & Favorites")
+
+    history_tab, favorites_tab = st.tabs(["History", "Favorites"])
+
+    with history_tab:
+        # Filter options
+        col1, col2 = st.columns(2)
+        with col1:
+            history_status_filter = st.selectbox(
+                "Status",
+                ["All", "Success", "Error"],
+                key="history_status_filter"
+            )
+        with col2:
+            history_limit = st.selectbox(
+                "Show",
+                [10, 25, 50],
+                index=0,
+                key="history_limit"
+            )
+
+        # Load and display history
+        status_filter = None if history_status_filter == "All" else history_status_filter
+        history_entries = st.session_state.history_manager.load_history(
+            limit=history_limit,
+            status_filter=status_filter
+        )
+
+        if history_entries:
+            for entry in history_entries:
+                status_icon = "✅" if "Success" in entry.status else "❌"
+                with st.expander(f"{status_icon} {truncate_text(entry.question, 35)}", expanded=False):
+                    st.caption(f"🕐 {format_timestamp(entry.timestamp)}")
+                    st.code(entry.sql, language="sql")
+
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        if st.button("🔄 Re-run", key=f"rerun_{entry.log_id}"):
+                            st.session_state.rerun_query = {
+                                "question": entry.question,
+                                "sql": entry.sql,
+                                "dialect": entry.dialect
+                            }
+                            st.rerun()
+                    with col2:
+                        # Check if already favorite
+                        fav_id = st.session_state.history_manager.is_favorite(
+                            entry.question, entry.sql
+                        )
+                        if fav_id:
+                            st.caption("⭐ Saved")
+                        else:
+                            if st.button("⭐ Save", key=f"save_{entry.log_id}"):
+                                st.session_state.history_manager.save_favorite_from_history(
+                                    entry.log_id
+                                )
+                                st.toast("Saved to favorites!")
+                                st.rerun()
+        else:
+            st.info("No query history yet")
+
+    with favorites_tab:
+        favorites = st.session_state.history_manager.load_favorites()
+
+        if favorites:
+            for fav in favorites:
+                display_name = fav.name or truncate_text(fav.question, 35)
+                with st.expander(f"⭐ {display_name}", expanded=False):
+                    st.caption(f"Used {fav.use_count}x | Last: {format_timestamp(fav.last_used)}")
+                    st.code(fav.sql, language="sql")
+
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        if st.button("🔄 Run", key=f"run_fav_{fav.favorite_id}"):
+                            st.session_state.history_manager.record_favorite_use(fav.favorite_id)
+                            st.session_state.rerun_query = {
+                                "question": fav.question,
+                                "sql": fav.sql,
+                                "dialect": fav.dialect,
+                                "favorite_id": fav.favorite_id
+                            }
+                            st.rerun()
+                    with col2:
+                        if st.button("🗑️ Remove", key=f"del_fav_{fav.favorite_id}"):
+                            st.session_state.history_manager.delete_favorite(fav.favorite_id)
+                            st.toast("Removed from favorites")
+                            st.rerun()
+        else:
+            st.info("No favorites saved yet")
+
 # Input Form (Prevents reset on submit)
 with st.form(key="query_form"):
     user_question = st.text_input("💬 ถามข้อมูลของคุณ (ภาษาไทยได้เลย):", placeholder="เช่น ยอดขายรวมทั้งหมดของปีนี้แบ่งตามเดือน")
