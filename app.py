@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 from sqlalchemy import create_engine, inspect
 from langchain_community.utilities import SQLDatabase
-from langchain_ollama import ChatOllama
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 import time
@@ -27,7 +26,10 @@ from viz_recommender import recommend_chart, get_chart_options
 # --- 1. ตั้งค่า Page ---
 st.set_page_config(page_title="Thai NLP to SQL Agent", layout="wide")
 st.title("🤖 AI Data Analyst (Thai Supported)")
-st.caption("Powered by Qwen2.5-Coder & Streamlit")
+
+# Detect model provider from secrets (default: ollama for local)
+model_provider = st.secrets.get("MODEL_PROVIDER", "ollama").lower()
+st.caption(f"Powered by {'OpenAI' if model_provider == 'openai' else 'Qwen2.5-Coder (Ollama)'} & Streamlit")
 
 # --- 2. Caching Resources (Performance Optimization) ---
 def get_db_engine(db_type, db_config):
@@ -57,12 +59,39 @@ def get_example_store():
 
 @st.cache_resource
 def get_llm_chain():
-    """โหลด Model และสร้าง Prompt Chain เก็บไว้"""
+    """โหลด Model และสร้าง Prompt Chain เก็บไว้ (รองรับทั้ง Ollama และ OpenAI)"""
     
     # Note: Schema will be injected dynamically at runtime based on connected database
     
-    # 2. Setup LLM
-    llm = ChatOllama(model="qwen2.5-coder:7b", temperature=0)
+    # Detect model provider from secrets (default: ollama for local development)
+    model_provider = st.secrets.get("MODEL_PROVIDER", "ollama").lower()
+    
+    # Setup LLM based on provider
+    if model_provider == "openai":
+        # OpenAI API (for cloud deployment)
+        from langchain_openai import ChatOpenAI
+        
+        api_key = st.secrets.get("OPENAI_API_KEY")
+        if not api_key:
+            st.error("❌ OpenAI API Key not found! Please set OPENAI_API_KEY in secrets.")
+            st.stop()
+        
+        llm = ChatOpenAI(
+            model=st.secrets.get("OPENAI_MODEL", "gpt-4o-mini"),  # configurable model
+            temperature=0,
+            api_key=api_key
+        )
+        st.info("🤖 Using OpenAI API")
+    
+    else:  # default: ollama
+        # Ollama (for local development)
+        from langchain_ollama import ChatOllama
+        
+        llm = ChatOllama(
+            model=st.secrets.get("OLLAMA_MODEL", "qwen2.5-coder:7b"),  # configurable model
+            temperature=0
+        )
+        st.info("🤖 Using Ollama (Local)")
     
     # 3. Setup Prompt with Dynamic Few-shot Examples (RAG-based)
     # Note: {dynamic_examples} will be filled at runtime with semantically similar examples

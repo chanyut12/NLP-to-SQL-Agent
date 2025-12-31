@@ -3,7 +3,8 @@ pandas
 sqlalchemy
 langchain
 langchain-community
-langchain-ollama
+langchain-ollama      # For local development (Ollama)
+langchain-openai      # For cloud deployment (OpenAI API)
 matplotlib
 plotly
 
