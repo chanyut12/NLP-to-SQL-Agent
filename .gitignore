@@ -30,3 +30,21 @@ query_logs.csv
 query_logs.jsonl
 logs.csv
 golden_dataset.json
+
+# TestSprite Tests
+testsprite_tests/
+
+# Analyze Feedback
+analyze_feedback.py
+
+# Product Specification Document for Testing
+PRODUCT_SPEC_TESTING.md
+
+# Git Visualizer
+git_visualizer.py
+
+# Local Favorites data
+favorites.json
+
+# Local helper scripts
+fix_git.sh
