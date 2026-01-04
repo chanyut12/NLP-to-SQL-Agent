@@ -131,7 +131,16 @@
       "question": "ยอดขายเดือนมกรา",
       "sql": "SELECT SUM(total_price) AS total_sales FROM receipt WHERE month = 'January';",
       "category": "aggregation_filter"
+    },
+    {
+      "question": "ยอดขายรวมปี 2004 แบ่งตาม Product Line",
+      "sql": "SELECT p.productLine, SUM(od.quantityOrdered * od.priceEach) AS total_sales FROM orders o JOIN orderdetails od ON o.orderNumber = od.orderNumber JOIN products p ON od.productCode = p.productCode WHERE strftime('%Y', o.orderDate) = '2004' GROUP BY p.productLine ORDER BY total_sales DESC;",
+      "category": "join_aggregation"
+    },
+    {
+      "question": "ลูกค้าคนไหนซื้อเยอะที่สุด",
+      "sql": "SELECT c.customerName, SUM(od.quantityOrdered * od.priceEach) AS total_spent FROM customers c JOIN orders o ON c.customerNumber = o.customerNumber JOIN orderdetails od ON o.orderNumber = od.orderNumber GROUP BY c.customerName ORDER BY total_spent DESC LIMIT 1;",
+      "category": "join_ranking"
     }
   ]
 }
-
