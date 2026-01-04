@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Thai NLP to SQL Agent</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=Inter:wght@300;400;500;600;700&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
+    <!-- Highlight.js for Syntax Highlighting -->
+    <link rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/sql.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+
+<body>
+    <div class="sidebar">
+        <div class="brand">🤖 NLP2SQL Agent</div>
+
+        <div class="tabs">
+            <div class="tab active" onclick="switchTab('connection')">🔌 Connect</div>
+            <div class="tab" onclick="switchTab('schema')">🗄️ Schema</div>
+            <div class="tab" onclick="switchTab('history')">📜 History</div>
+            <div class="tab" onclick="switchTab('favorites')">⭐ Favs</div>
+        </div>
+
+        <!-- Tab Content: Connection -->
+        <div id="tab-connection" class="tab-content active">
+            <div class="control-group">
+                <label>Database Type</label>
+                <select id="db-type">
+                    <option value="SQLite">SQLite</option>
+                    <option value="MySQL">MySQL</option>
+                    <option value="PostgreSQL">PostgreSQL</option>
+                </select>
+            </div>
+
+            <div id="sqlite-config" class="control-group">
+                <label>Database File</label>
+                <input type="text" id="db-path" value="local_database.db" placeholder="database.db">
+            </div>
+
+            <div id="sql-config" class="control-group" style="display: none;">
+                <label>Host</label>
+                <input type="text" id="db-host" value="localhost">
+                <label>Port</label>
+                <input type="text" id="db-port" value="3306">
+                <label>User</label>
+                <input type="text" id="db-user" placeholder="username">
+                <label>Password</label>
+                <input type="password" id="db-pass" placeholder="••••••">
+                <label>Database Name</label>
+                <input type="text" id="db-name" placeholder="mydb">
+            </div>
+
+            <button id="connect-btn" class="primary-btn">Connect Database</button>
+            <div id="connection-status" class="status-badge disconnected">Disconnected</div>
+        </div>
+
+        <!-- Tab Content: Schema -->
+        <div id="tab-schema" class="tab-content">
+            <div id="schema-container">
+                <p style="color: #94a3b8; font-size: 0.9em; text-align: center; margin-top: 20px;">
+                    Please connect to a database to view schema.
+                </p>
+            </div>
+        </div>
+
+        <!-- Tab Content: History -->
+        <div id="tab-history" class="tab-content">
+            <div id="history-container">
+                <!-- History Items -->
+            </div>
+        </div>
+
+        <!-- Tab Content: Favorites -->
+        <div id="tab-favorites" class="tab-content">
+            <div id="favorites-container">
+                <!-- Favorite Items -->
+            </div>
+        </div>
+    </div>
+
+    <div class="chat-container">
+        <div class="chat-history" id="chat-history">
+            <!-- Messages will appear here -->
+            <div class="message bot-message">
+                สวัสดีครับ! ผมคือ AI Assistant ที่ช่วยคุณเขียน SQL Query ภาษาไทย<br>
+                กรุณาเชื่อมต่อ Database ด้านซ้ายก่อนเริ่มใช้งานนะครับ
+            </div>
+        </div>
+
+        <div class="input-area">
+            <input type="text" id="user-input" placeholder="ถามเกี่ยวกับข้อมูลของคุณ... (เช่น ยอดขายเดือนนี้เท่าไหร่)"
+                onkeypress="handleKeyPress(event)">
+
+            <!-- Chart Type Selector (Dynamic) -->
+            <select id="chart-type-selector"
+                style="display:none; max-width: 120px; font-size: 0.8rem; margin-right: 10px;">
+                <option value="auto">✨ Auto</option>
+                <option value="bar">Bar Chart</option>
+                <option value="line">Line Chart</option>
+                <option value="pie">Pie Chart</option>
+                <option value="scatter">Scatter Plot</option>
+            </select>
+
+            <button class="primary-btn" onclick="sendMessage()">Send 🚀</button>
+        </div>
+    </div>
+
+    <script src="js/main.js"></script>
+</body>
+
+</html>
