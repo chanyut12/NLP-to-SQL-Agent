@@ -18,3 +18,9 @@ sentence-transformers>=2.2.0
 
 # SQL Safety / Parsing
 sqlglot>=23.0.0
+
+# API Dependencies [NEW]
+fastapi
+uvicorn
+python-multipart
+pydantic
