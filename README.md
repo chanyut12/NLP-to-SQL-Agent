@@ -1,167 +1,352 @@
-# 🇹🇭 Thai NLP-to-SQL Agent (Multi-DB & Hardened)
+# 🇹🇭 Thai NLP-to-SQL Agent
 
-โปรเจกต์นี้คือ **AI Data Analyst** อัจฉริยะที่ช่วยให้คุณสอบถามข้อมูลจาก Database ได้ด้วย **"ภาษาไทยธรรมชาติ"** แปลงเป็น SQL Query และแสดงผลกราฟให้อัตโนมัติ รองรับทั้ง SQLite, MySQL และ PostgreSQL พร้อมระบบความปลอดภัยและการวัดผลที่รัดกุม
+**AI Data Analyst** ที่ช่วยให้คุณสอบถามข้อมูลจาก Database ได้ด้วย **ภาษาไทยธรรมชาติ** พร้อมแสดงผลเป็นกราฟอัตโนมัติ
 
-![Streamlit](https://img.shields.io/badge/Streamlit-FF4B4B?style=for-the-badge&logo=Streamlit&logoColor=white) ![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white) ![Ollama](https://img.shields.io/badge/Ollama-Local_LLM-000000?style=for-the-badge) ![LangChain](https://img.shields.io/badge/LangChain-🦜️🔗-319795?style=for-the-badge)
-
----
-
-## 🌟 ฟีเจอร์ใหม่ (v2.0 Upgrade)
-
--   🛡️ **Enterprise-Grade SQL Safety:**
-    -   **Read-Only Guarantee:** บล็อกคำสั่งอันตราย (INSERT/UPDATE/DELETE/DROP) ทันที
-    -   **Limit Enforcement:** บังคับใส่ `LIMIT 500` อัตโนมัติ ป้องกันข้อมูลล้น
-    -   **Dialect-Aware:** รองรับ syntax เฉพาะของ SQLite, MySQL, PostgreSQL อย่างถูกต้อง
--   🧠 **Smart Schema Injection:** คัดเลือกเฉพาะตารางที่เกี่ยวข้องส่งให้ AI เพื่อลด token และเพิ่มความแม่นยำ
--   📊 **Auto Visualization:** เลือกกราฟที่เหมาะสม (Bar/Line/Scatter/Pie) ให้อัตโนมัติด้วย **Plotly**
--   📈 **Evaluation Baseline:** ระบบวัดผล (Success Rate, Execution Match) จาก Log การใช้งานจริง
--   🤝 **Team Sharing:** รองรับ JSONL logs และ Persisted RAG Store สำหรับทำงานร่วมกัน
+![Architecture](https://img.shields.io/badge/Architecture-Client_Server-blue?style=for-the-badge) ![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white) ![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white) ![Chart.js](https://img.shields.io/badge/Chart.js-FF6384?style=for-the-badge&logo=chartdotjs&logoColor=white)
 
 ---
 
-## 🛠️ Tech Stack
+## ✨ Features
 
--   **Frontend:** [Streamlit](https://streamlit.io/) + Plotly
--   **LLM Orchestration:** [LangChain](https://www.langchain.com/)
--   **Model:** Qwen2.5-Coder:7b (via Ollama)
--   **Vector Store:** ChromaDB (Persisted in `rag_db/`)
--   **SQL Parsing:** sqlglot
--   **Database:** SQLite, MySQL, PostgreSQL (via SQLAlchemy)
+- 🇹🇭 **Thai Language Understanding** - ใช้ RAG (Retrieval-Augmented Generation) พร้อม Few-Shot Learning
+- 🔐 **SQL Safety** - Read-Only Enforcement, ป้องกันคำสั่งทำลายข้อมูล
+- 📊 **Auto Visualization** - แนะนำกราฟอัตโนมัติ (Bar, Line, Pie, Scatter) พร้อมให้เปลี่ยนได้
+- 🔄 **Self-Correction** - แก้ไข SQL อัตโนมัติถ้าเจอ Error
+- 🗄️ **Multi-Database** - รองรับ SQLite, MySQL, PostgreSQL
+- 📝 **Query History** - บันทึกประวัติพร้อมระบบ Feedback (👍/👎)
+- ⭐ **Favorites** - บันทึก Query ที่ชอบไว้ใช้ซ้ำ
 
 ---
 
-## ⚙️ การติดตั้ง (Installation)
+## 🏗️ Architecture
 
-### 1. Prerequisites
--   **Python 3.10+**
--   **[Ollama](https://ollama.com/)** - สำหรับรัน LLM ในเครื่อง
-    ```bash
-    # Download จาก https://ollama.com/download
-    # แล้วรัน Ollama server
-    ollama serve
-    ```
+```
+┌─────────────────────┐
+│   Web Frontend      │  HTML/CSS/JS + Chart.js
+│   web/              │
+└──────────┬──────────┘
+           │ REST API (FastAPI)
+           ▼
+┌─────────────────────┐
+│   Backend Server    │  Python + LangChain
+│   api/ + core/      │
+└──────────┬──────────┘
+           │
+      ┌────┴─────┐
+      ▼          ▼
+  ┌──────┐  ┌─────────┐
+  │  LLM │  │Database │
+  │Ollama│  │SQLAlchemy│
+  └──────┘  └─────────┘
+```
 
-### 2. Clone Repository
+### Request Flow
+
+1. **User** → ถามคำถามภาษาไทย
+2. **RAG** → ค้นหาตัวอย่างคล้ายกันจาก `thai_sql_examples.json`
+3. **LLM** → สร้าง SQL จาก Prompt + Examples + Schema
+4. **Validation** → ตรวจสอบความปลอดภัย
+5. **Execution** → รัน Query
+6. **Visualization** → แนะนำชนิดกราฟและแสดงผล
+
+---
+
+## ⚙️ Installation
+
+### Prerequisites
+
+- **Python 3.10+**
+- **[Ollama](https://ollama.com/)** (สำหรับรัน LLM ในเครื่อง)
+
+### Quick Start
+
 ```bash
+# 1. Clone repository
 git clone <your-repo-url>
 cd nlp_sql_project
-```
 
-### 3. สร้าง Virtual Environment
-```bash
+# 2. Create virtual environment
 python -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
-```
 
-### 4. ติดตั้ง Dependencies
-```bash
+# 3. Install dependencies
 pip install -r requirements.txt
-```
 
-**📦 Database Drivers (รวมอยู่ใน requirements.txt แล้ว):**
--   **SQLite**: มาพร้อม Python (ไม่ต้องติดตั้งเพิ่ม)
--   **MySQL**: `pymysql`
--   **PostgreSQL**: `psycopg2-binary`
-
-หากต้องการติดตั้งเฉพาะ driver บางตัว:
-```bash
-pip install pymysql              # MySQL เท่านั้น
-pip install psycopg2-binary      # PostgreSQL เท่านั้น
-```
-
-### 5. ดาวน์โหลด LLM Model
-```bash
+# 4. Download LLM model
 ollama pull qwen2.5-coder:7b
-```
-*โมเดลนี้มีขนาดประมาณ 4.7GB (ดาวน์โหลดครั้งแรกอาจใช้เวลาสักครู่)*
 
-### 6. สร้าง Mock Database (สำหรับทดสอบ - Optional)
-```bash
-python setup_db.py
-```
-*สคริปต์นี้จะสร้างไฟล์ `local_database.db` (SQLite) พร้อมข้อมูล receipt ตัวอย่าง*
+# 5. Start backend API
+uvicorn api.main:app --reload
 
-### 7. เริ่มใช้งาน
-```bash
-streamlit run app.py
+# 6. Open frontend
+# เปิดไฟล์ web/index.html ในเบราว์เซอร์
+# หรือใช้ live server (e.g., VSCode Live Server extension)
 ```
-จากนั้นเปิดเว็บเบราว์เซอร์ที่ `http://localhost:8501`
+
+Server จะรันที่ `http://localhost:8000`  
+Frontend เปิดได้ที่ `file:///.../web/index.html` หรือใช้ live server
 
 ---
 
-## 🔗 การเชื่อมต่อ Database
+## 🗄️ Database Connection
 
 ### SQLite (ไฟล์ในเครื่อง)
-1. เลือก Database Type: **SQLite**
-2. ใส่ชื่อไฟล์: `local_database.db` (หรือไฟล์ .db ของคุณ)
+
+1. เลือก **SQLite** ในหน้า Connection
+2. ใส่ Path: `/absolute/path/to/database.db`
 3. กด **Connect**
+
+**ตัวอย่าง:**
+```
+/Users/yourname/Documents/nlp_sql_project/classicmodels.db
+```
 
 ### MySQL
-1. เลือก Database Type: **MySQL**
-2. ใส่ข้อมูลการเชื่อมต่อ:
-   - **Host**: `localhost` (หรือ IP ของ MySQL Server)
-   - **Port**: `3306`
-   - **Username**: `root` (หรือ username ของคุณ)
-   - **Password**: รหัสผ่าน
-   - **Database Name**: ชื่อ Database ที่ต้องการใช้
-3. กด **Connect**
 
-**หมายเหตุ**: ต้องมี MySQL Server รันอยู่ และมี Database พร้อมแล้ว
+1. เลือก **MySQL**
+2. ใส่ข้อมูล:
+   - Host: `localhost`
+   - Port: `3306`
+   - User: `root`
+   - Password: `yourpassword` (หรือเว้นว่างถ้าไม่มี)
+   - Database: `yourdatabase`
+3. กด **Connect**
 
 ### PostgreSQL
-1. เลือก Database Type: **PostgreSQL**
-2. ใส่ข้อมูลการเชื่อมต่อ:
-   - **Host**: `localhost` (หรือ IP ของ PostgreSQL Server)
-   - **Port**: `5432`
-   - **Username**: `postgres` (หรือ username ของคุณ)
-   - **Password**: รหัสผ่าน
-   - **Database Name**: ชื่อ Database ที่ต้องการใช้
-3. กด **Connect**
 
-**หมายเหตุ**: ต้องมี PostgreSQL Server รันอยู่ และมี Database พร้อมแล้ว
+1. เลือก **PostgreSQL**
+2. ใส่ข้อมูลเช่นเดียวกับ MySQL (Port: `5432`)
+
+---
+
+## 🎯 Usage Examples
+
+### การถามคำถาม
+
+```
+✅ ยอดขายรวมทั้งหมด
+✅ ลูกค้าที่ซื้อเยอะที่สุด 5 อันดับแรก
+✅ ยอดขายปี 2004 แบ่งตาม Product Line ขอเป็นกราฟวงกลม
+✅ แนวโน้มยอดขายรายเดือนปี 2004
+```
+
+### Chart Type Keywords
+
+ระบบจะจับคำสั่งจากคำถาม:
+- **"กราฟวงกลม"** / **"pie"** → Pie Chart
+- **"กราฟแท่ง"** / **"bar"** → Bar Chart
+- **"แนวโน้ม"** / **"line"** → Line Chart
+
+หรือเปลี่ยนภายหลังได้จาก Dropdown (มีตัวเลือก **✨ Auto** ที่ให้ระบบเลือกให้)
+
+---
+
+## 📁 Project Structure
+
+```
+nlp_sql_project/
+├── api/                      # Backend API
+│   ├── main.py              # FastAPI entry point
+│   ├── routes.py            # API endpoints
+│   ├── schemas.py           # Request/Response models
+│   └── dependencies.py      # Dependency injection
+│
+├── core/                     # Core logic
+│   ├── engine.py            # NLP orchestration
+│   ├── database.py          # DB connection
+│   ├── rag_store.py         # RAG with ChromaDB
+│   ├── schema_utils.py      # Schema extraction
+│   ├── sql_safety.py        # SQL validation
+│   ├── viz_recommender.py   # Chart recommendation
+│   ├── query_history.py     # History management
+│   └── config.py            # Settings
+│
+├── web/                      # Frontend
+│   ├── index.html           # Main UI
+│   ├── css/style.css        # Styling
+│   └── js/main.js           # Client logic
+│
+├── scripts/                  # Utilities
+│   └── convert_mysql_to_sqlite.py
+│
+├── thai_sql_examples.json    # RAG training data
+├── requirements.txt          # Python dependencies
+└── PRODUCT_SPEC.md          # Developer guide
+```
+
+---
+
+## 🔧 Configuration
+
+### Environment Variables
+
+สร้างไฟล์ `.env` (optional):
+
+```bash
+# LLM Provider (ollama or openai)
+MODEL_PROVIDER=ollama
+
+# Ollama Settings
+OLLAMA_MODEL=qwen2.5-coder:7b
+OLLAMA_BASE_URL=http://localhost:11434
+
+# OpenAI Settings (if using OpenAI)
+OPENAI_API_KEY=sk-...
+OPENAI_MODEL=gpt-4o-mini
+```
 
 ---
 
 ## 🛡️ Security & Safety
 
-ระบบนี้ออกแบบมาให้ปลอดภัยสำหรับการใช้งานแบบ Read-Only:
-1.  **Parser Check:** ใช้ `sqlglot` ตรวจสอบ structure ของ SQL ว่าเป็น `SELECT` เท่านั้น
-2.  **Keyword Block:** ปฏิเสธคำสั่ง destructive (DROP, TRUNCATE, ALTER)
-3.  **Output Clamp:** ป้องกันการดึงข้อมูลเกินขนาดด้วยการ inject `LIMIT`
+ระบบป้องกันคำสั่งอันตราย:
+
+1. ✅ **Read-Only Enforcement** - บล็อก `INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`
+2. ✅ **LIMIT Auto-Injection** - บังคับ `LIMIT 500` เพื่อป้องกันดึงข้อมูลมากเกิน
+3. ✅ **SQL Parsing** - ใช้ `sqlglot` ตรวจสอบ syntax
+4. ✅ **Table Validation** - ตรวจว่าเข้าถึงเฉพาะตารางที่มีจริง
 
 ---
 
-## 📊 Evaluation & Development
+## 📊 Improving Accuracy
 
-### การสร้าง Dataset จาก Log
-เมื่อใช้งานไปสักพัก ให้แปลง Log ที่ได้ Feedback ดีเป็นชุดทดสอบ:
+### เพิ่มตัวอย่างใหม่
+
+แก้ไขไฟล์ `thai_sql_examples.json`:
+
+```json
+{
+  "description": "Thai to SQL examples",
+  "version": "1.0",
+  "examples": [
+    {
+      "question": "คำถามภาษาไทย",
+      "sql": "SELECT ...",
+      "category": "aggregation"
+    }
+  ]
+}
+```
+
+**Tips:**
+- เพิ่มตัวอย่างที่เฉพาะเจาะจงกับ Database ของคุณ
+- ใส่ตัวอย่าง JOIN ที่ซับซ้อน
+- ครอบคลุมทุก category (aggregation, filter, ranking, etc.)
+
+### ปรับ Prompt
+
+แก้ไขไฟล์ `core/engine.py` (line 56-91) เพื่อปรับ System Prompt
+
+---
+
+## 🧪 Testing
+
+### การทดสอบ Database
+
+1. **ClassicModels Sample DB:**
+   ```bash
+   # Convert MySQL dump to SQLite
+   python scripts/convert_mysql_to_sqlite.py
+   
+   # Result: classicmodels.db
+   ```
+
+2. **Test Queries:**
+   ```
+   ยอดขายปี 2004 แบ่งตาม Product Line
+   ลูกค้าที่ใช้เงินมากที่สุด 5 อันดับแรก
+   ```
+
+### การตรวจสอบ Code
+
 ```bash
-python eval/build_dataset.py --log-file query_logs.jsonl --output eval/golden_dataset.json
-```
+# Validate Python syntax
+python -m py_compile core/*.py api/*.py
 
-### การรันวัดผล (Evaluation)
-รันสคริปต์เพื่อวัด Success Rate เทียบกับ Dataset:
-```bash
-python eval/run_eval.py eval/golden_dataset.json
-```
-
----
-
-## 📂 โครงสร้างโปรเจกต์
-```text
-nlp_sql_project/
-├── app.py                  # Main Application
-├── sql_safety.py           # 🛡️ SQL Guardrails & Sanitization
-├── schema_utils.py         # 🧠 Schema Summarization
-├── rag_store.py            # 🔍 Persisted RAG Store (ChromaDB)
-├── viz_recommender.py      # 📊 Auto-Chart Logic
-├── eval/                   # 📈 Evaluation Scripts
-│   ├── build_dataset.py
-│   └── run_eval.py
-├── thai_sql_examples.json  # Base Dataset
-└── query_logs.jsonl        # Rich Event Logs
+# Check API health
+curl http://localhost:8000/api/health
 ```
 
 ---
 
-Made with ❤️ for Thai Developers.
+## 📈 Query History & Feedback
+
+- ทุก Query จะบันทึกใน `query_logs.jsonl`
+- กด 👍 หรือ 👎 ในหน้า History เพื่อให้ Feedback
+- Query ที่ถูกต้องสามารถเพิ่มเข้า `thai_sql_examples.json` เพื่อปรับปรุงระบบ
+
+---
+
+## 🚀 Production Deployment
+
+### Checklist
+
+- [ ] ใช้ `MODEL_PROVIDER=openai` สำหรับความแม่นยำสูงสุด
+- [ ] เพิ่ม Rate Limiting (e.g., SlowAPI)
+- [ ] ตั้งค่า CORS อย่างถูกต้อง
+- [ ] ใช้ HTTPS
+- [ ] เพิ่ม Authentication/Authorization
+- [ ] ตั้ง Database Connection Pool
+- [ ] เพิ่ม Monitoring (Prometheus/Grafana)
+
+### Docker (Coming Soon)
+
+```dockerfile
+# Dockerfile example
+FROM python:3.10-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+COPY . .
+CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+---
+
+## 🤝 Contributing
+
+1. Fork the project
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Open a Pull Request
+
+ดูรายละเอียดเพิ่มเติมที่ `PRODUCT_SPEC.md`
+
+---
+
+## 📚 Documentation
+
+- [Product Specification](PRODUCT_SPEC.md) - Developer guide
+- [Model Setup](MODEL_SETUP.md) - LLM configuration
+- [Tuning Guide](TUNING_GUIDE.md) - Performance optimization
+
+---
+
+## 🐛 Known Issues
+
+1. **Chart Memory Leak** - Chart.js instances ไม่ได้ destroy อัตโนมัติ
+2. **Large Result Sets** - ไม่มี pagination สำหรับตารางขนาดใหญ่
+3. **Query Cancellation** - ไม่สามารถยกเลิก Query ที่ใช้เวลานานได้
+
+---
+
+## 📝 License
+
+MIT License - feel free to use for commercial or personal projects
+
+---
+
+## 🙏 Acknowledgments
+
+- **LangChain** - LLM orchestration framework
+- **Ollama** - Local LLM runtime
+- **Chart.js** - Beautiful charts
+- **FastAPI** - Modern Python web framework
+- **Qwen Team** - Excellent coding model
+
+---
+
+**Made with ❤️ for Thai Developers**
+
+สร้างโดยนักพัฒนาไทย เพื่อนักพัฒนาไทย 🇹🇭
