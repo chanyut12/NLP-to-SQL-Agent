@@ -12,9 +12,11 @@ env/
 # Streamlit Secrets (NEVER commit API keys!)
 .streamlit/secrets.toml
 
-# Database
+# Database Files
 local_database.db
+*.sqlite
 *.sqlite3
+*.db
 rag_db/
 
 # IDE
@@ -30,6 +32,7 @@ query_logs.csv
 query_logs.jsonl
 logs.csv
 golden_dataset.json
+*.log
 
 # TestSprite Tests
 testsprite_tests/
@@ -48,3 +51,13 @@ favorites.json
 
 # Local helper scripts
 fix_git.sh
+setup_db.py
+
+# Sample/Test databases (keep structure, not data)
+classicmodels.sql
+classicmodels.db
+classicmodels.sqlite
+
+# Evaluation results
+eval/results/
+eval/*.csv
