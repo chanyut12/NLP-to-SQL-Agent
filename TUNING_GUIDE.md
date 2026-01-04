@@ -76,7 +76,7 @@ This guide documents all tuning techniques implemented and available for the Tha
 
 **Status:** ✅ Implemented
 
-**File:** `app.py` - `get_llm_chain()` function
+**File:** `core/engine.py` - `_create_prompt_template()` method
 
 #### What it does:
 - Provides structured instructions with Chain-of-Thought (CoT) reasoning
@@ -116,7 +116,7 @@ Given an input question (possibly in Thai), create a syntactically correct SQLit
 
 **Status:** ✅ Implemented
 
-**File:** `app.py` - `generate_sql_with_retry()` function
+**File:** `core/engine.py` - `query_database()` method
 
 #### What it does:
 - Attempts to execute generated SQL
@@ -166,9 +166,9 @@ def generate_sql_with_retry(question, prompt, llm, engine, example_store, max_re
 **Status:** ✅ Implemented
 
 **Files:** 
-- `rag_store.py` - Vector store implementation
-- `thai_sql_examples.json` - Example dataset (26 examples)
-- `app.py` - Integration
+- `core/rag_store.py` - Vector store implementation
+- `thai_sql_examples.json` - Example dataset (28 examples)
+- `core/engine.py` - Integration
 
 #### What it does:
 - Stores Thai→SQL examples in ChromaDB vector database
