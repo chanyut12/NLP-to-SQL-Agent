@@ -12,6 +12,7 @@ from core.schema_utils import get_database_schema
 from sqlalchemy import inspect
 import uuid
 import json
+import csv
 import time
 from datetime import datetime
 import os
@@ -20,12 +21,16 @@ router = APIRouter()
 
 # --- Helper: Logging ---
 LOG_FILE_JSONL = "query_logs.jsonl"
+LOG_FILE_CSV = "query_logs.csv"
 
 def log_query_to_file(question, sql, status, error_msg="", duration=0, dialect="sqlite", retry_count=0):
     log_id = str(uuid.uuid4())
+    timestamp = datetime.now().isoformat()
+    
+    # 1. JSONL Logging (Rich Data)
     entry = {
         "log_id": log_id,
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": timestamp,
         "question": question,
         "sql": sql,
         "status": status,
@@ -39,7 +44,31 @@ def log_query_to_file(question, sql, status, error_msg="", duration=0, dialect="
         with open(LOG_FILE_JSONL, 'a', encoding='utf-8') as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
     except Exception as e:
-        print(f"Logging error: {e}")
+        print(f"JSONL Logging error: {e}")
+
+    # 2. CSV Logging (Excel/Human Readable)
+    try:
+        file_exists = os.path.isfile(LOG_FILE_CSV)
+        with open(LOG_FILE_CSV, 'a', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            # Write header if new file
+            if not file_exists:
+                writer.writerow(['LogID', 'Timestamp', 'Question', 'SQL', 'Status', 'Error', 'Duration_Sec', 'Dialect', 'Retry_Count'])
+            
+            writer.writerow([
+                log_id, 
+                timestamp, 
+                question, 
+                sql, 
+                status, 
+                error_msg, 
+                f"{duration:.2f}",
+                dialect,
+                retry_count
+            ])
+    except Exception as e:
+        print(f"CSV Logging error: {e}")
+
     return log_id
 
 @router.post("/connect", response_model=ConnectResponse)
