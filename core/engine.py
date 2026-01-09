@@ -66,6 +66,14 @@ Given an input question (possibly in Thai), create a syntactically correct, read
 7. Return ONLY the SQL query without markdown or explanations.
 8. DO NOT format percentages with '%' symbol in SQL (e.g., CONCAT(..., '%')). Return raw numbers. Frontend will handle formatting.
 
+### Dialect-Specific Functions (Cheat Sheet):
+- **Date extraction**: 
+  - MySQL: YEAR(date_col), MONTH(date_col)
+  - SQLite: strftime('%Y', date_col), strftime('%m', date_col)
+- **String concat**: 
+  - MySQL: CONCAT(a, b)
+  - SQLite: a || b
+
 ### Thai-to-English Schema Mapping:
 - "ยอดขาย" / "ยอดรวม" -> total_price (use SUM for aggregation)
 - "จำนวนใบเสร็จ" / "กี่ใบ" -> COUNT(receipt_id)
@@ -85,6 +93,13 @@ Given an input question (possibly in Thai), create a syntactically correct, read
 
 ### Your Task (IMPORTANT: Use ONLY the tables and columns from the schema above):
 Question: {question}
+
+Think step by step:
+1. Identify which tables match the entities in the question.
+2. Check if tables need to be joined (look for common columns).
+3. Use the correct dialect functions for dates/strings.
+4. Write the SQL query.
+
 SQL:"""
         return PromptTemplate.from_template(template)
 
@@ -110,7 +125,8 @@ SQL:"""
         engine: Engine,
         dialect: str = "sqlite",
         max_limit: int = 500,
-        max_retries: int = 2
+        max_retries: int = 2,
+        preferred_chart_type: str = None
     ):
         """
         Main entry point to generate SQL and execute it against the DB.
@@ -171,8 +187,8 @@ SQL:"""
                 # Using 'records' orientation: [{'col1': val, 'col2': val}, ...]
                 result_data = df.to_dict(orient='records')
 
-                # Visualization Recommendation
-                chart_type, x_col, y_col = recommend_chart(df, question)
+                # Visualization Recommendation (use user preference if provided)
+                chart_type, x_col, y_col = recommend_chart(df, question, preferred_chart_type)
                 viz_config = {
                     "chart_type": chart_type,
                     "x_col": x_col,
