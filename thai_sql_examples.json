@@ -141,6 +141,41 @@
       "question": "ลูกค้าคนไหนซื้อเยอะที่สุด",
       "sql": "SELECT c.customerName, SUM(od.quantityOrdered * od.priceEach) AS total_spent FROM customers c JOIN orders o ON c.customerNumber = o.customerNumber JOIN orderdetails od ON o.orderNumber = od.orderNumber GROUP BY c.customerName ORDER BY total_spent DESC LIMIT 1;",
       "category": "join_ranking"
+    },
+    {
+      "question": "ยอดขายรวมทั้งหมดแบบไม่มีเงื่อนไข",
+      "sql": "SELECT SUM(quantityOrdered * priceEach) AS total_sales FROM orderdetails;",
+      "category": "aggregation",
+      "dialect": "mysql",
+      "notes": "classicmodels example"
+    },
+    {
+      "question": "เปรียบเทียบยอดขายรายปี",
+      "sql": "SELECT YEAR(orderDate) as year, SUM(quantityOrdered * priceEach) as total_sales FROM orders JOIN orderdetails ON orders.orderNumber = orderdetails.orderNumber GROUP BY YEAR(orderDate) ORDER BY total_sales DESC;",
+      "category": "groupby",
+      "dialect": "mysql",
+      "notes": "Yearly sales using MySQL YEAR()"
+    },
+    {
+      "question": "สินค้าที่ขายดีที่สุด 5 อันดับแรก",
+      "sql": "SELECT p.productName, SUM(od.quantityOrdered) as total_sold FROM products p JOIN orderdetails od ON p.productCode = od.productCode GROUP BY p.productName ORDER BY total_sold DESC LIMIT 5;",
+      "category": "join_ranking",
+      "dialect": "mysql",
+      "notes": "Best selling products"
+    },
+    {
+      "question": "สัดส่วนยอดขายตาม Product Line",
+      "sql": "SELECT p.productLine, SUM(od.quantityOrdered * od.priceEach) as sales FROM products p JOIN orderdetails od ON p.productCode = od.productCode GROUP BY p.productLine ORDER BY sales DESC;",
+      "category": "groupby",
+      "dialect": "mysql",
+      "notes": "Sales by category"
+    },
+    {
+      "question": "จำนวนออเดอร์แยกตามสถานะ",
+      "sql": "SELECT status, COUNT(*) as count FROM orders GROUP BY status ORDER BY count DESC;",
+      "category": "groupby",
+      "dialect": "mysql",
+      "notes": "Order status count"
     }
   ]
 }
