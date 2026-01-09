@@ -23,39 +23,102 @@ A Thai-language Natural Language Processing system that converts Thai questions 
 
 ## 🏗️ Architecture
 
+### System Overview
+
 ```
-┌─────────────────┐
-│  Web Frontend   │  (HTML/CSS/JS + Chart.js)
-│  web/           │
-└────────┬────────┘
-         │ HTTP REST API
-         ▼
-┌─────────────────┐
-│  FastAPI Server │  (Python)
-│  api/           │
-└────────┬────────┘
-         │
-    ┌────┴────┐
-    ▼         ▼
-┌──────┐  ┌──────────┐
-│  LLM │  │ Database │
-│      │  │ Engine   │
-└──────┘  └──────────┘
-Ollama/      SQLAlchemy
-OpenAI
+┌─────────────────────────────────────────────────────────────────┐
+│                        WEB FRONTEND                             │
+│    web/index.html  +  js/main.js  +  css/style.css  +  Chart.js │
+└──────────────────────────────┬──────────────────────────────────┘
+                               │ HTTP REST API (JSON)
+                               ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                       FASTAPI SERVER                            │
+│         api/main.py ─► api/routes.py ─► api/schemas.py          │
+└──────────────────────────────┬──────────────────────────────────┘
+                               │
+         ┌─────────────────────┼─────────────────────┐
+         ▼                     ▼                     ▼
+┌─────────────────┐   ┌─────────────────┐   ┌─────────────────┐
+│   Query History │   │    NLPEngine    │   │   SQL Safety    │
+│query_history.py │   │   engine.py     │   │  sql_safety.py  │
+│  (Logging/      │   │  (Orchestrator) │   │  (Validation)   │
+│   Feedback)     │   └────────┬────────┘   └─────────────────┘
+└─────────────────┘            │
+              ┌────────────────┼────────────────┐
+              ▼                ▼                ▼
+    ┌─────────────────┐ ┌─────────────┐ ┌──────────────────┐
+    │    RAG Store    │ │Schema Utils │ │ Viz Recommender  │
+    │  rag_store.py   │ │schema_utils │ │viz_recommender.py│
+    │  + ChromaDB     │ │    .py      │ │ (Chart Suggest)  │
+    └────────┬────────┘ └──────┬──────┘ └──────────────────┘
+             │                 │
+             │                 ▼
+             │         ┌──────────────────┐
+             │         │     Database     │
+             │         │   database.py    │
+             │         │   (SQLAlchemy)   │
+             │         └──────────────────┘
+             ▼
+    ┌─────────────────────────────────────┐
+    │      LLM Provider (config.py)       │
+    │  ┌─────────────┐  ┌──────────────┐  │
+    │  │   Ollama    │  │   OpenAI     │  │
+    │  │  (Local)    │  │  (Cloud)     │  │
+    │  └─────────────┘  └──────────────┘  │
+    │      + Self-Correction Loop         │
+    └─────────────────────────────────────┘
 ```
+
+### Component Descriptions
+
+| Component | File(s) | Responsibility |
+|-----------|---------|----------------|
+| **Web Frontend** | `web/` | UI, Chart.js rendering, API calls |
+| **FastAPI Server** | `api/` | REST endpoints, request validation |
+| **NLPEngine** | `engine.py` | Main orchestrator - coordinates all steps |
+| **RAG Store** | `rag_store.py` | Semantic search for similar examples (ChromaDB) |
+| **Schema Utils** | `schema_utils.py` | Extract & filter database schema |
+| **SQL Safety** | `sql_safety.py` | Block destructive SQL, enforce LIMIT |
+| **Viz Recommender** | `viz_recommender.py` | Suggest chart type based on data shape |
+| **Query History** | `query_history.py` | Log queries, manage feedback |
+| **Database** | `database.py` | SQLAlchemy connection management |
+| **Config** | `config.py` | LLM provider settings (Ollama/OpenAI) |
 
 ### Data Flow
 
-1. **User Input** → Frontend sends Thai question to `/api/query`
-2. **RAG Retrieval** → Backend finds similar examples from `thai_sql_examples.json`
-3. **Schema Analysis** → Extracts database schema and filters relevant tables
-4. **LLM Generation** → Generates SQL using prompt + examples + schema
-5. **Validation** → Checks SQL safety (no destructive operations)
-6. **Execution** → Runs query against database
-7. **Visualization** → Recommends chart type based on data shape
-8. **Response** → Returns SQL + data + chart config to frontend
-9. **Rendering** → Frontend displays table + chart
+```
+User Question (Thai)
+        │
+        ▼
+┌───────────────────┐
+│ 1. RAG Retrieval  │ ─── Find similar examples from thai_sql_examples.json
+└─────────┬─────────┘
+          ▼
+┌───────────────────┐
+│ 2. Schema Extract │ ─── Get tables/columns from database
+└─────────┬─────────┘
+          ▼
+┌───────────────────┐
+│ 3. LLM Generation │ ─── Prompt + Examples + Schema → SQL
+└─────────┬─────────┘
+          ▼
+┌───────────────────┐
+│ 4. SQL Validation │ ─── Check safety, add LIMIT
+└─────────┬─────────┘
+          ▼
+┌───────────────────┐     ┌─────────────────┐
+│ 5. Execute Query  │────►│ Error? Retry    │ (Self-Correction Loop)
+└─────────┬─────────┘     └─────────────────┘
+          ▼
+┌───────────────────┐
+│ 6. Viz Recommend  │ ─── Analyze DataFrame → Suggest chart type
+└─────────┬─────────┘
+          ▼
+┌───────────────────┐
+│ 7. Return Result  │ ─── SQL + Data + Chart Config → Frontend
+└───────────────────┘
+```
 
 ---
 
