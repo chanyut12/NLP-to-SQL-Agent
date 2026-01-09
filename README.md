@@ -75,10 +75,13 @@ pip install -r requirements.txt
 # 4. Download LLM model
 ollama pull qwen2.5-coder:7b
 
-# 5. Start backend API
+# 5. Create sample database (for testing)
+python scripts/setup_db.py
+
+# 6. Start backend API
 uvicorn api.main:app --reload
 
-# 6. Open frontend
+# 7. Open frontend
 # เปิดไฟล์ web/index.html ในเบราว์เซอร์
 # หรือใช้ live server (e.g., VSCode Live Server extension)
 ```

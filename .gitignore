@@ -53,7 +53,7 @@ favorites.json
 
 # Local helper scripts
 fix_git.sh
-setup_db.py
+# setup_db.py - now tracked, used for creating sample database
 
 # Sample/Test databases (keep structure, not data)
 classicmodels.sql
