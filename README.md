@@ -10,10 +10,10 @@
 
 - 🇹🇭 **Thai Language Understanding** - ใช้ RAG (Retrieval-Augmented Generation) พร้อม Few-Shot Learning
 - 🔐 **SQL Safety** - Read-Only Enforcement, ป้องกันคำสั่งทำลายข้อมูล
-- 📊 **Auto Visualization** - แนะนำกราฟอัตโนมัติ (Bar, Line, Pie, Scatter) พร้อมให้เปลี่ยนได้
-- 🔄 **Self-Correction** - แก้ไข SQL อัตโนมัติถ้าเจอ Error
-- 🗄️ **Multi-Database** - รองรับ SQLite, MySQL, PostgreSQL
-- 📝 **Query History** - บันทึกประวัติพร้อมระบบ Feedback (👍/👎)
+- 📊 **Smart Visualization** - แนะนำกราฟอัตโนมัติ พร้อม Logic แยกแยะ Metric vs Dimension
+- 🔄 **Self-Correction** - แก้ไข SQL อัตโนมัติถ้าเจอ Error พร้อม Context ช่วยเหลือ
+- 🗄️ **Multi-Database** - รองรับ SQLite, MySQL, PostgreSQL พร้อม Dialect Hints
+- 📝 **Query History** - บันทึกประวัติพร้อมระบบ Feedback (👍/👎 + ข้อความ)
 - ⭐ **Favorites** - บันทึก Query ที่ชอบไว้ใช้ซ้ำ
 
 ---
@@ -320,12 +320,13 @@ CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
 - [Product Specification](PRODUCT_SPEC.md) - Developer guide
 - [Model Setup](MODEL_SETUP.md) - LLM configuration
 - [Tuning Guide](TUNING_GUIDE.md) - Performance optimization
+- [Issues & Roadmap](ISSUES_ROADMAP.md) - Known issues and development plan
 
 ---
 
 ## 🐛 Known Issues
 
-1. **Chart Memory Leak** - Chart.js instances ไม่ได้ destroy อัตโนมัติ
+1. **Complex JOINs** - LLM อาจเลือก table ผิดเมื่อต้อง JOIN หลายตาราง (ดู [Issues Roadmap](ISSUES_ROADMAP.md))
 2. **Large Result Sets** - ไม่มี pagination สำหรับตารางขนาดใหญ่
 3. **Query Cancellation** - ไม่สามารถยกเลิก Query ที่ใช้เวลานานได้
 

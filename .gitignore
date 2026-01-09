@@ -42,6 +42,8 @@ analyze_feedback.py
 
 # Product Specification Document for Testing
 PRODUCT_SPEC_TESTING.md
+ISSUES_ROADMAP.md
+MIGRATION_GUIDE.md
 
 # Git Visualizer
 git_visualizer.py
