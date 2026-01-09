@@ -114,6 +114,22 @@
         </div>
     </div>
 
+    <!-- Feedback Modal -->
+    <div id="feedback-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>💬 Add Feedback</h3>
+                <button class="close-btn" onclick="closeFeedbackModal()">&times;</button>
+            </div>
+            <textarea id="feedback-text-input"
+                placeholder="พิมพ์ feedback ของคุณ... (เช่น SQL ผิด, ต้องการ JOIN อีกตาราง, etc.)" rows="4"></textarea>
+            <div class="modal-actions">
+                <button class="secondary-btn" onclick="closeFeedbackModal()">Cancel</button>
+                <button class="primary-btn" onclick="submitFeedbackWithText()">Submit 💬</button>
+            </div>
+        </div>
+    </div>
+
     <script src="js/main.js"></script>
 </body>
 

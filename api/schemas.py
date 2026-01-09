@@ -19,6 +19,7 @@ class ConnectResponse(BaseModel):
 class QueryRequest(BaseModel):
     question: str
     dialect: str = "sqlite"
+    preferred_chart_type: Optional[str] = None  # User selected chart type from dropdown
 
 # Visualization Model
 class VizConfig(BaseModel):
@@ -56,6 +57,7 @@ class HistoryItem(BaseModel):
     status: str
     dialect: str
     feedback: Optional[str] = None
+    feedback_text: Optional[str] = None  # User-typed feedback comment
 
 class HistoryResponse(BaseModel):
     history: List[HistoryItem]
@@ -80,5 +82,6 @@ class CreateFavoriteRequest(BaseModel):
     name: Optional[str] = None
 
 class FeedbackRequest(BaseModel):
-    feedback: str # "positive" or "negative"
+    feedback: str  # "positive" or "negative"
+    feedback_text: Optional[str] = None  # Optional user-typed comment
 

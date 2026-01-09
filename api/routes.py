@@ -97,7 +97,8 @@ async def query_data(
         sql, data, error, retry_count, viz_config = engine.query_database(
             question=request.question,
             engine=state.db_engine,
-            dialect=request.dialect if request.dialect else "sqlite"
+            dialect=request.dialect if request.dialect else "sqlite",
+            preferred_chart_type=request.preferred_chart_type
         )
         duration = time.time() - start_time
         
@@ -166,7 +167,8 @@ async def get_history(
             sql=e.sql,
             status=e.status,
             dialect=e.dialect,
-            feedback=e.feedback
+            feedback=e.feedback,
+            feedback_text=e.feedback_text
         ) for e in entries
     ]
     return HistoryResponse(history=history_items)
@@ -177,10 +179,14 @@ async def update_feedback(
     req: FeedbackRequest,
     state: GlobalStateManager = Depends(get_state_manager)
 ):
-    success = state.history_manager.update_feedback(log_id, req.feedback)
+    success = state.history_manager.update_feedback(
+        log_id, 
+        req.feedback, 
+        feedback_text=req.feedback_text
+    )
     if not success:
         raise HTTPException(status_code=404, detail="Log entry not found")
-    return {"status": "success", "feedback": req.feedback} 
+    return {"status": "success", "feedback": req.feedback, "feedback_text": req.feedback_text} 
 
 @router.get("/favorites", response_model=FavoritesResponse)
 async def get_favorites(state: GlobalStateManager = Depends(get_state_manager)):

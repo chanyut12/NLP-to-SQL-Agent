@@ -31,6 +31,7 @@ class HistoryEntry:
     error_msg: str = ""
     duration_sec: float = 0.0
     feedback: str = ""
+    feedback_text: str = ""  # User-typed feedback comment
     dialect: str = "sqlite"
     retry_count: int = 0
 
@@ -109,6 +110,7 @@ class QueryHistoryManager:
                             error_msg=data.get("error_msg", ""),
                             duration_sec=data.get("duration_sec", 0.0),
                             feedback=data.get("feedback", ""),
+                            feedback_text=data.get("feedback_text", ""),
                             dialect=data.get("dialect", "sqlite"),
                             retry_count=data.get("retry_count", 0)
                         )
@@ -160,6 +162,7 @@ class QueryHistoryManager:
                                 error_msg=data.get("error_msg", ""),
                                 duration_sec=data.get("duration_sec", 0.0),
                                 feedback=data.get("feedback", ""),
+                                feedback_text=data.get("feedback_text", ""),
                                 dialect=data.get("dialect", "sqlite"),
                                 retry_count=data.get("retry_count", 0)
                             )
@@ -168,13 +171,14 @@ class QueryHistoryManager:
         except Exception:
             pass
 
-    def update_feedback(self, log_id: str, feedback: str) -> bool:
+    def update_feedback(self, log_id: str, feedback: str, feedback_text: str = None) -> bool:
         """
         Update feedback for a history entry.
 
         Args:
             log_id: The log ID to update
             feedback: "positive" or "negative"
+            feedback_text: Optional user-typed comment
 
         Returns:
             True if updated, False otherwise
@@ -194,6 +198,8 @@ class QueryHistoryManager:
                         data = json.loads(line)
                         if data.get("log_id") == log_id:
                             data["feedback"] = feedback
+                            if feedback_text is not None:
+                                data["feedback_text"] = feedback_text
                             updated = True
                         f_out.write(json.dumps(data, ensure_ascii=False) + "\n")
                     except json.JSONDecodeError:

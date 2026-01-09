@@ -79,14 +79,21 @@ async function fetchHistory() {
         container.innerHTML = data.history.map(item => {
             const isPos = item.feedback === 'positive';
             const isNeg = item.feedback === 'negative';
+            const hasFeedbackText = item.feedback_text && item.feedback_text.trim().length > 0;
+
+            // Escape quotes for onclick handlers
+            const escapedQuestion = item.question.replace(/'/g, "\\'").replace(/"/g, "&quot;");
+            const escapedSql = item.sql.replace(/'/g, "\\'").replace(/"/g, "&quot;");
+
             return `
-            <div class="history-item" onclick="loadSQL('${item.question}', '${item.sql}')">
+            <div class="history-item" onclick="loadSQL('${escapedQuestion}', '${escapedSql}')">
                 <div class="item-header">
                     <span>${new Date(item.timestamp).toLocaleString()}</span>
                     <span style="color: ${item.status.includes('Success') ? '#22c55e' : '#ef4444'}">${item.status}</span>
                 </div>
                 <div class="item-question">${item.question}</div>
                 <div class="item-sql">${item.sql}</div>
+                ${hasFeedbackText ? `<div class="feedback-comment" title="User Feedback">💬 ${item.feedback_text}</div>` : ''}
                 <div class="actions">
                     <button class="icon-btn" onclick="sendFeedback(event, '${item.log_id}', 'positive')" 
                         style="${isPos ? 'color: #22c55e; font-weight: bold;' : ''}" title="Good Response">
@@ -96,10 +103,13 @@ async function fetchHistory() {
                         style="${isNeg ? 'color: #ef4444; font-weight: bold;' : ''}" title="Bad Response">
                         👎
                     </button>
-                    <button class="icon-btn" onclick="saveFavoriteFromHistory(event, '${item.log_id}', '${item.question}', '${item.sql}', '${item.dialect}')" title="Save as Favorite">
+                    <button class="icon-btn" onclick="showFeedbackModal(event, '${item.log_id}')" title="Add Comment">
+                        💬
+                    </button>
+                    <button class="icon-btn" onclick="saveFavoriteFromHistory(event, '${item.log_id}', '${escapedQuestion}', '${escapedSql}', '${item.dialect}')" title="Save as Favorite">
                         ⭐
                     </button>
-                    <button class="icon-btn" onclick="rerunQuery(event, '${item.question}', '${item.dialect}')" title="Re-run">
+                    <button class="icon-btn" onclick="rerunQuery(event, '${escapedQuestion}', '${item.dialect}')" title="Re-run">
                         🔄
                     </button>
                 </div>
@@ -145,13 +155,58 @@ async function fetchFavorites() {
 }
 
 // --- Interaction Logic ---
-async function sendFeedback(e, logId, feedback) {
+let currentFeedbackLogId = null;
+
+// Show feedback modal for text input
+function showFeedbackModal(e, logId) {
+    e.stopPropagation();
+    currentFeedbackLogId = logId;
+    const modal = document.getElementById('feedback-modal');
+    const textarea = document.getElementById('feedback-text-input');
+    textarea.value = '';
+    modal.style.display = 'flex';
+    textarea.focus();
+}
+
+// Close feedback modal
+function closeFeedbackModal() {
+    const modal = document.getElementById('feedback-modal');
+    modal.style.display = 'none';
+    currentFeedbackLogId = null;
+}
+
+// Submit feedback with text from modal
+async function submitFeedbackWithText() {
+    const textarea = document.getElementById('feedback-text-input');
+    const feedbackText = textarea.value.trim();
+
+    if (!currentFeedbackLogId) return;
+
+    try {
+        // Default to neutral feedback type when just adding comment
+        await fetch(`${API_URL}/history/${currentFeedbackLogId}/feedback`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                feedback: 'comment',  // New type for text-only feedback
+                feedback_text: feedbackText
+            })
+        });
+        closeFeedbackModal();
+        fetchHistory(); // Refresh to show new comment
+    } catch (e) {
+        console.error("Feedback error", e);
+        alert("Failed to save feedback");
+    }
+}
+
+async function sendFeedback(e, logId, feedback, feedbackText = null) {
     e.stopPropagation();
     try {
         await fetch(`${API_URL}/history/${logId}/feedback`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ feedback })
+            body: JSON.stringify({ feedback, feedback_text: feedbackText })
         });
         fetchHistory(); // Refresh to show result
     } catch (e) {
@@ -343,10 +398,18 @@ async function sendMessage() {
     document.getElementById('chart-type-selector').style.display = 'none';
 
     try {
+        // Get selected chart type from dropdown
+        const chartSelector = document.getElementById('chart-type-selector');
+        const preferredChartType = chartSelector.value !== 'auto' ? chartSelector.value : null;
+
         const res = await fetch(`${API_URL}/query`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ question: text, dialect: dbTypeSelect.value.toLowerCase() }) // Dialect heuristic
+            body: JSON.stringify({
+                question: text,
+                dialect: dbTypeSelect.value.toLowerCase(),
+                preferred_chart_type: preferredChartType
+            })
         });
 
         const data = await res.json();
