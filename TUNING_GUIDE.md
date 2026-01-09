@@ -2,6 +2,8 @@
 
 This guide documents all tuning techniques implemented and available for the Thai NLP-to-SQL Agent project. It covers both **implemented features** and **advanced techniques** you can explore further.
 
+**Last Updated:** 2026-01-09
+
 ---
 
 ## Table of Contents
@@ -109,6 +111,19 @@ Given an input question (possibly in Thai), create a syntactically correct SQLit
 2. **Provide mappings**: Thai keywords → SQL columns/functions
 3. **Include constraints**: LIMIT, ORDER BY preferences
 4. **Use examples**: Few-shot examples help pattern recognition
+5. **Dialect hints**: Include function cheat sheet for MySQL/SQLite differences
+
+#### New: Dialect Cheat Sheet (Added 2026-01)
+The prompt now includes database-specific function hints:
+```
+### Dialect-Specific Functions (Cheat Sheet):
+- **Date extraction**: 
+  - MySQL: YEAR(date_col), MONTH(date_col)
+  - SQLite: strftime('%Y', date_col), strftime('%m', date_col)
+- **String concat**: 
+  - MySQL: CONCAT(a, b)
+  - SQLite: a || b
+```
 
 ---
 
@@ -736,5 +751,5 @@ Effort                   │                    Effort
 ---
 
 **Created by:** Thai NLP-to-SQL Agent Development Team
-**Last Updated:** December 2025
+**Last Updated:** January 2026
 

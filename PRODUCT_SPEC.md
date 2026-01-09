@@ -1,7 +1,7 @@
 # 📋 Product Specification: Thai NLP-to-SQL Agent
 
-**Version:** 2.0  
-**Last Updated:** 2026-01-04  
+**Version:** 2.1  
+**Last Updated:** 2026-01-09  
 **Architecture:** Client-Server (REST API)
 
 ---
@@ -13,10 +13,11 @@ A Thai-language Natural Language Processing system that converts Thai questions 
 ### Key Features
 - 🇹🇭 Thai language understanding (with RAG-based few-shot learning)
 - 🔐 SQL safety validation (read-only enforcement)
-- 📊 Automatic visualization (Bar, Line, Pie, Scatter charts)
-- 🔄 Self-correction mechanism (retry on error)
-- 📝 Query history with feedback system
+- 📊 Smart visualization (auto chart type with metric vs dimension detection)
+- 🔄 Self-correction mechanism (retry on error with schema context)
+- 📝 Query history with feedback system (👍/👎 + text comments)
 - ⭐ Favorite queries management
+- 🎯 Dialect-aware prompting (MySQL/SQLite function hints)
 
 ---
 
@@ -139,10 +140,11 @@ The brain of the system. Orchestrates:
 8. Retry logic
 
 **Modify here to:**
-- Change LLM prompt template (line 56-91)
+- Change LLM prompt template (line 55-100)
 - Adjust retry strategy
-- Add new LLM providers
+- Add new LLM providers (Claude, etc.)
 - Modify SQL formatting rules
+- Update dialect cheat sheet
 
 #### `rag_store.py` - RAG System
 Uses FAISS + Sentence Transformers for semantic search.
@@ -165,7 +167,12 @@ Validates SQL to prevent:
 - Add custom security rules
 
 #### `viz_recommender.py` - Smart Visualization
-Analyzes DataFrame and recommends chart type.
+Analyzes DataFrame and recommends chart type with intelligent column selection.
+
+**Key Logic:**
+- Detects metric columns (count, sum, total) for Y-axis
+- Identifies dimension columns (year, month, id) for X-axis
+- Supports user keyword preferences ("สัดส่วน", "แนวโน้ม")
 
 **Modify here to:**
 - Add new chart types
