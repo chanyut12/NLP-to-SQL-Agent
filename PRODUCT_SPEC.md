@@ -1,7 +1,7 @@
 # 📋 Product Specification: Thai NLP-to-SQL Agent
 
-**Version:** 2.1  
-**Last Updated:** 2026-01-09  
+**Version:** 2.2  
+**Last Updated:** 2026-01-11  
 **Architecture:** Client-Server (REST API)
 
 ---
@@ -11,13 +11,14 @@
 A Thai-language Natural Language Processing system that converts Thai questions into SQL queries, executes them against databases, and automatically generates visualizations. Supports multiple database types (SQLite, MySQL, PostgreSQL) with intelligent chart recommendations.
 
 ### Key Features
-- 🇹🇭 Thai language understanding (with RAG-based few-shot learning)
+- 🇹🇭 Thai language understanding (with RAG-based few-shot learning + Dialect Filter)
 - 🔐 SQL safety validation (read-only enforcement)
 - 📊 Smart visualization (auto chart type with metric vs dimension detection)
-- 🔄 Self-correction mechanism (retry on error with schema context)
+- 🔄 Self-correction mechanism (retry on error with expanded schema context)
 - 📝 Query history with feedback system (👍/👎 + text comments)
 - ⭐ Favorite queries management
-- 🎯 Dialect-aware prompting (MySQL/SQLite function hints)
+- 🎯 Dialect-aware prompting and examples (MySQL/SQLite)
+- 🧠 Smart Schema Retrieval (reduces prompt tokens by ~50%)
 
 ---
 
@@ -59,7 +60,15 @@ A Thai-language Natural Language Processing system that converts Thai questions 
              │         │   database.py    │
              │         │   (SQLAlchemy)   │
              │         └──────────────────┘
-             ▼
+             │                  ▲
+             │                  │
+             │          ┌───────┴───────┐
+             │          │  Schema RAG   │
+             │          │ schema_rag.py │
+             │          │ schema_rag_db │
+             │          └───────┬───────┘
+             │                  │
+             ▼                  ▼
     ┌─────────────────────────────────────┐
     │      LLM Provider (config.py)       │
     │  ┌─────────────┐  ┌──────────────┐  │
@@ -77,8 +86,9 @@ A Thai-language Natural Language Processing system that converts Thai questions 
 | **Web Frontend** | `web/` | UI, Chart.js rendering, API calls |
 | **FastAPI Server** | `api/` | REST endpoints, request validation |
 | **NLPEngine** | `engine.py` | Main orchestrator - coordinates all steps |
-| **RAG Store** | `rag_store.py` | Semantic search for similar examples (ChromaDB) |
-| **Schema Utils** | `schema_utils.py` | Extract & filter database schema |
+| **RAG Store** | `rag_store.py` | Semantic search for similar examples (`rag_db`) |
+| **Schema RAG** | `schema_rag.py` | [NEW] Semantic search for relevant tables (`schema_rag_db`) |
+| **Schema Utils** | `schema_utils.py` | Extract & filter database schema (Hybrid Search) |
 | **SQL Safety** | `sql_safety.py` | Block destructive SQL, enforce LIMIT |
 | **Viz Recommender** | `viz_recommender.py` | Suggest chart type based on data shape |
 | **Query History** | `query_history.py` | Log queries, manage feedback |
@@ -95,9 +105,14 @@ User Question (Thai)
 │ 1. RAG Retrieval  │ ─── Find similar examples from thai_sql_examples.json
 └─────────┬─────────┘
           ▼
-┌───────────────────┐
-│ 2. Schema Extract │ ─── Get tables/columns from database
-└─────────┬─────────┘
+┌───────────────────┐     ┌───────────────────┐
+│ 2. Schema Finding │ ─── │ 2.1 Schema RAG    │ (Find relevant tables via vector search)
+└─────────┬─────────┘     └─────────┬─────────┘
+          │                         │
+          ▼                         ▼
+┌───────────────────┐     ┌───────────────────┐
+│ 3. Schema Filter  │ ─── │ 3.1 Keyword Map   │ (Thai-English Mapping)
+└─────────┬─────────┘     └───────────────────┘
           ▼
 ┌───────────────────┐
 │ 3. LLM Generation │ ─── Prompt + Examples + Schema → SQL
@@ -135,8 +150,9 @@ nlp_sql_project/
 ├── core/                   # Core Business Logic
 │   ├── engine.py          # NLPEngine - main query orchestration
 │   ├── database.py        # Database connection management
-│   ├── rag_store.py       # RAG vector store (FAISS + embeddings)
-│   ├── schema_utils.py    # Schema extraction and filtering
+│   ├── rag_store.py       # RAG vector store for examples
+│   ├── schema_rag.py      # [NEW] RAG vector store for schema metadata
+│   ├── schema_utils.py    # Schema extraction and smart filtering
 │   ├── sql_safety.py      # SQL validation and sanitization
 │   ├── viz_recommender.py # Chart type recommendation
 │   ├── query_history.py   # History and feedback management

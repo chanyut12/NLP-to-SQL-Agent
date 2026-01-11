@@ -8,11 +8,12 @@
 
 ## ✨ Features
 
-- 🇹🇭 **Thai Language Understanding** - ใช้ RAG (Retrieval-Augmented Generation) พร้อม Few-Shot Learning
+- 🇹🇭 **Thai Language Understanding** - ใช้ RAG พร้อม 50+ examples และ Dialect Filter
+- 🧠 **Smart Schema Retrieval** - ค้นหา Table ที่เกี่ยวข้องอัตโนมัติ ลดขนาด Prompt
 - 🔐 **SQL Safety** - Read-Only Enforcement, ป้องกันคำสั่งทำลายข้อมูล
 - 📊 **Smart Visualization** - แนะนำกราฟอัตโนมัติ พร้อม Logic แยกแยะ Metric vs Dimension
-- 🔄 **Self-Correction** - แก้ไข SQL อัตโนมัติถ้าเจอ Error พร้อม Context ช่วยเหลือ
-- 🗄️ **Multi-Database** - รองรับ SQLite, MySQL, PostgreSQL พร้อม Dialect Hints
+- 🔄 **Self-Correction** - แก้ไข SQL อัตโนมัติถ้าเจอ Error พร้อม context ช่วยเหลือ
+- 🗄️ **Multi-Database** - รองรับ SQLite, MySQL, PostgreSQL พร้อม Dialect-aware Examples
 - 📝 **Query History** - บันทึกประวัติพร้อมระบบ Feedback (👍/👎 + ข้อความ)
 - ⭐ **Favorites** - บันทึก Query ที่ชอบไว้ใช้ซ้ำ
 

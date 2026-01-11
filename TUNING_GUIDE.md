@@ -13,9 +13,11 @@ This guide documents all tuning techniques implemented and available for the Tha
    - [Advanced Prompt Engineering](#1-advanced-prompt-engineering)
    - [Self-Correction Loop](#2-self-correction-loop)
    - [RAG-based Dynamic Few-shot](#3-rag-based-dynamic-few-shot)
+   - [Smart Schema Retrieval](#4-smart-schema-retrieval-schema-rag)
 3. [Advanced Techniques (Guide)](#advanced-techniques-guide)
-   - [Fine-tuning with LoRA/QLoRA](#4-fine-tuning-with-loraqra)
-   - [Model Comparison](#5-model-comparison)
+   - [Fine-tuning with LoRA/QLoRA](#5-fine-tuning-with-loraqra)
+   - [Model Comparison](#6-model-comparison)
+   - [Technical Optimization Priorities](#7-technical-optimization-priorities)
 4. [Evaluation Metrics](#evaluation-metrics)
 
 ---
@@ -233,9 +235,29 @@ class ExampleStore:
 
 ---
 
+### 4. Smart Schema Retrieval (Schema RAG)
+
+**Status:** ✅ Implemented (v2.0)
+
+**File:** `core/schema_rag.py`
+
+#### What it does:
+- Uses a separate Vector Store (`schema_rag_db`) to index database tables and columns.
+- Retrieves only relevant tables (top-k) based on the user's question.
+- **Why?** Local LLMs have small context windows. Sending 100 tables confuses them. Sending 5 relevant tables improves accuracy and speed.
+
+#### Difference from RAG Store (`rag_db`):
+| Feature | `rag_db` | `schema_rag_db` |
+|---------|----------|-----------------|
+| **Content** | SQL Examples (Few-shot) | Database Schema (Metadata) |
+| **Purpose** | Teach LLM *how* to write SQL | Tell LLM *what* tables exist |
+| **Source** | `thai_sql_examples.json` | Live Database Connection |
+
+---
+
 ## Advanced Techniques (Guide)
 
-### 4. Fine-tuning with LoRA/QLoRA
+### 5. Fine-tuning with LoRA/QLoRA
 
 **Status:** 📚 Guide Only (Not Implemented)
 
@@ -351,7 +373,7 @@ llm = ChatOllama(model="thai-sql-qwen", temperature=0)
 
 ---
 
-### 5. Model Comparison
+### 6. Model Comparison
 
 **Status:** 📚 Guide Only (Not Implemented)
 
@@ -434,6 +456,20 @@ for model in ["qwen2.5-coder:7b", "qwen2.5-coder:14b"]:
 | Execution Accuracy | SQL runs without error | > 90% |
 | Result Accuracy | SQL returns correct data | > 80% |
 | Latency | Time to generate SQL | < 5s |
+
+---
+
+### 7. Technical Optimization Priorities
+
+Based on research papers (Automatic Metadata Extraction, LGESQL, MaskSQL).
+
+| Priority | Technique | Effort | Impact | Description |
+|----------|-----------|--------|--------|-------------|
+| 1 | **Schema Linking** | Medium | High | **✅ Done (Smart Schema)**. Identifying relevant tables/columns before generation. |
+| 2 | **Auto Metadata Extraction** | Medium | High | Extracting semantics from column names (e.g., `price` -> "ราคา") for better Thai mapping. |
+| 3 | **MaskSQL** | Medium | High | masking real schema names (e.g., `Table_A`) for privacy when using Cloud LLMs. |
+| 4 | **Chain-of-Thought** | Low | Medium | Forcing LLM to "think" in steps ("First, I need table X...") before writing SQL. |
+| 5 | **Graph-based Linking** | High | Medium | Using GNNs to map question words to schema graph (Complex to implement). |
 
 ---
 
