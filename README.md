@@ -158,8 +158,9 @@ nlp_sql_project/
 ├── core/                     # Core logic
 │   ├── engine.py            # NLP orchestration
 │   ├── database.py          # DB connection
-│   ├── rag_store.py         # RAG with ChromaDB
-│   ├── schema_utils.py      # Schema extraction
+│   ├── rag_store.py         # Example RAG with ChromaDB
+│   ├── schema_rag.py        # Schema RAG for smart filtering
+│   ├── schema_utils.py      # Schema extraction & filtering
 │   ├── sql_safety.py        # SQL validation
 │   ├── viz_recommender.py   # Chart recommendation
 │   ├── query_history.py     # History management
@@ -171,6 +172,7 @@ nlp_sql_project/
 │   └── js/main.js           # Client logic
 │
 ├── scripts/                  # Utilities
+│   ├── setup_db.py          # สร้าง sample database
 │   └── convert_mysql_to_sqlite.py
 │
 ├── thai_sql_examples.json    # RAG training data
