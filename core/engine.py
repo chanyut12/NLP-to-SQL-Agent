@@ -51,6 +51,17 @@ class NLPEngine:
                 temperature=0,
                 api_key=settings.OPENAI_API_KEY
             )
+        elif settings.MODEL_PROVIDER == "google":
+            from langchain_google_genai import ChatGoogleGenerativeAI
+            if not settings.GOOGLE_API_KEY:
+                raise ValueError("GOOGLE_API_KEY not found in environment variables")
+            
+            self._llm = ChatGoogleGenerativeAI(
+                model=settings.GOOGLE_MODEL,
+                temperature=0,
+                google_api_key=settings.GOOGLE_API_KEY,
+                convert_system_message_to_human=True
+            )
         else:
             from langchain_ollama import ChatOllama
             self._llm = ChatOllama(
