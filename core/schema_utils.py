@@ -4,6 +4,8 @@ Helps reduce prompt token usage by filtering relevant tables.
 """
 from typing import Dict, List, Any, Optional, Set, TYPE_CHECKING
 from sqlalchemy import Engine, inspect, text
+from langchain_core.prompts import PromptTemplate
+from langchain_core.output_parsers import StrOutputParser
 import re
 
 if TYPE_CHECKING:
@@ -89,19 +91,70 @@ def filter_schema(schema: Dict[str, List[Dict[str, Any]]], question: str) -> Dic
 # Smart Schema Filtering (New)
 # =============================================================================
 
+def _llm_guess_tables(question: str, all_tables: List[str], llm) -> Set[str]:
+    """
+    Tier 3: Ask LLM to guess relevant tables from the full list.
+    Used when keyword matching fails.
+    """
+    if not llm:
+        return set()
+        
+    print("🕵️ Keyword match failed. Asking AI to guess tables...")
+    
+    prompt = PromptTemplate(
+        template="""You are an expert SQL assistant.
+Given the user query: "{question}"
+And the list of available tables: {all_tables}
+
+Identify the top 3 most relevant tables needed to answer this query.
+Return ONLY the table names separated by commas. Do not explain.
+If you are unsure, return the most likely ones.
+
+Relevant Tables:""",
+        input_variables=["question", "all_tables"]
+    )
+    
+    chain = prompt | llm | StrOutputParser()
+    
+    try:
+        response = chain.invoke({
+            "question": question,
+            "all_tables": ", ".join(all_tables)
+        })
+        
+        guessed = set()
+        # Clean up response (handle commas, newlines, extra spaces)
+        raw_names = [n.strip() for n in response.replace('\n', ',').split(',')]
+        
+        for name in raw_names:
+            # Case-insensitive match against real table names
+            for real_table in all_tables:
+                if name.lower() == real_table.lower():
+                    guessed.add(real_table)
+                    break
+                    
+        print(f"🤖 AI Guessed: {guessed}")
+        return guessed
+        
+    except Exception as e:
+        print(f"⚠️ AI Guessing failed: {e}")
+        return set()
+
 def smart_filter_schema(
     schema: Dict[str, List[Dict[str, Any]]],
     question: str,
     schema_rag: Optional["SchemaRAG"] = None,
+    llm: Optional[Any] = None,
     top_k: int = 5
 ) -> Dict[str, List[Dict[str, Any]]]:
     """
-    Smart schema filtering using semantic search + Thai mapping + keyword matching.
+    Smart schema filtering using semantic search + Thai mapping + keyword matching + LLM guessing.
     
     Args:
         schema: Full database schema
         question: User's question (Thai or English)
         schema_rag: Optional SchemaRAG instance for semantic search
+        llm: Optional LangChain LLM object for fallback guessing
         top_k: Maximum number of tables to return
         
     Returns:
@@ -116,7 +169,7 @@ def smart_filter_schema(
     
     relevant_tables: Set[str] = set()
     
-    # 1. Use SchemaRAG if available (semantic + Thai mapping)
+    # 1. Use SchemaRAG if available (Tier 1 - Semantic + Thai mapping)
     if schema_rag is not None:
         try:
             rag_tables = schema_rag.get_relevant_tables(question, top_k=top_k)
@@ -124,7 +177,7 @@ def smart_filter_schema(
         except Exception as e:
             print(f"Warning: SchemaRAG search failed: {e}")
     
-    # 2. Fallback: Use keyword matching
+    # 2. Keyworld matching (Tier 2)
     question_lower = question.lower()
     for table, columns in schema.items():
         # Check table name in question
@@ -137,8 +190,14 @@ def smart_filter_schema(
             if col['name'].lower() in question_lower:
                 relevant_tables.add(table)
                 break
+                
+    # 3. LLM Guessing (Tier 3 - Fallback)
+    # If we still haven't found any tables, ask the LLM
+    if not relevant_tables and llm:
+        guessed_tables = _llm_guess_tables(question, list(schema.keys()), llm)
+        relevant_tables.update(guessed_tables)
     
-    # 3. If we found some tables, include their related tables for JOINs
+    # 4. If we found some tables, include their related tables for JOINs
     if schema_rag is not None and relevant_tables:
         try:
             from core.schema_rag import expand_tables_with_relationships
@@ -152,11 +211,13 @@ def smart_filter_schema(
         except Exception:
             pass
     
-    # 4. If still nothing found, return all (safer fallback)
+    # 5. Fallback: If still nothing found, return all
     if not relevant_tables:
+        # Optimization: If very large schema, maybe just return top 5 alphabetical? 
+        # For now, return all (safe but potentially token-heavy)
         return schema
     
-    # 5. Build filtered schema
+    # 6. Build filtered schema
     filtered = {t: schema[t] for t in relevant_tables if t in schema}
     
     return filtered if filtered else schema

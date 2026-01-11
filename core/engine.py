@@ -212,6 +212,7 @@ SQL:"""
                 raw_schema, 
                 question, 
                 schema_rag=self._schema_rag,
+                llm=self._llm,  # Send LLM for Tier 3 Guessing
                 top_k=5
             )
             
