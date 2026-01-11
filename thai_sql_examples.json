@@ -134,8 +134,9 @@
     },
     {
       "question": "ยอดขายรวมปี 2004 แบ่งตาม Product Line",
-      "sql": "SELECT p.productLine, SUM(od.quantityOrdered * od.priceEach) AS total_sales FROM orders o JOIN orderdetails od ON o.orderNumber = od.orderNumber JOIN products p ON od.productCode = p.productCode WHERE strftime('%Y', o.orderDate) = '2004' GROUP BY p.productLine ORDER BY total_sales DESC;",
-      "category": "join_aggregation"
+      "sql": "SELECT p.productLine, SUM(od.quantityOrdered * od.priceEach) AS total_sales FROM orders o JOIN orderdetails od ON o.orderNumber = od.orderNumber JOIN products p ON od.productCode = p.productCode WHERE YEAR(o.orderDate) = 2004 GROUP BY p.productLine ORDER BY total_sales DESC;",
+      "category": "join_aggregation",
+      "dialect": "mysql"
     },
     {
       "question": "ลูกค้าคนไหนซื้อเยอะที่สุด",
@@ -174,8 +175,123 @@
       "question": "จำนวนออเดอร์แยกตามสถานะ",
       "sql": "SELECT status, COUNT(*) as count FROM orders GROUP BY status ORDER BY count DESC;",
       "category": "groupby",
+      "dialect": "mysql"
+    },
+    {
+      "question": "ยอดขายรวมทั้งหมด",
+      "sql": "SELECT SUM(od.quantityOrdered * od.priceEach) AS total_sales FROM orderdetails od;",
+      "category": "aggregation",
+      "dialect": "mysql"
+    },
+    {
+      "question": "ยอดขายรวมปี 2004",
+      "sql": "SELECT SUM(od.quantityOrdered * od.priceEach) AS total_sales FROM orders o JOIN orderdetails od ON o.orderNumber = od.orderNumber WHERE YEAR(o.orderDate) = 2004;",
+      "category": "aggregation",
+      "dialect": "mysql"
+    },
+    {
+      "question": "ยอดขายรวมปี 2003",
+      "sql": "SELECT SUM(od.quantityOrdered * od.priceEach) AS total_sales FROM orders o JOIN orderdetails od ON o.orderNumber = od.orderNumber WHERE YEAR(o.orderDate) = 2003;",
+      "category": "aggregation",
+      "dialect": "mysql"
+    },
+    {
+      "question": "ยอดขายแยกตามเดือน",
+      "sql": "SELECT MONTH(o.orderDate) as month, SUM(od.quantityOrdered * od.priceEach) AS monthly_sales FROM orders o JOIN orderdetails od ON o.orderNumber = od.orderNumber GROUP BY MONTH(o.orderDate) ORDER BY month;",
+      "category": "groupby",
+      "dialect": "mysql"
+    },
+    {
+      "question": "ลูกค้าที่มียอดซื้อสูงสุด",
+      "sql": "SELECT c.customerName, SUM(od.quantityOrdered * od.priceEach) AS total_spent FROM customers c JOIN orders o ON c.customerNumber = o.customerNumber JOIN orderdetails od ON o.orderNumber = od.orderNumber GROUP BY c.customerName ORDER BY total_spent DESC LIMIT 1;",
+      "category": "join_ranking",
+      "dialect": "mysql"
+    },
+    {
+      "question": "ลูกค้าที่ซื้อเยอะที่สุด 5 อันดับแรก",
+      "sql": "SELECT c.customerName, SUM(od.quantityOrdered * od.priceEach) AS total_spent FROM customers c JOIN orders o ON c.customerNumber = o.customerNumber JOIN orderdetails od ON o.orderNumber = od.orderNumber GROUP BY c.customerName ORDER BY total_spent DESC LIMIT 5;",
+      "category": "join_ranking",
+      "dialect": "mysql"
+    },
+    {
+      "question": "จำนวนลูกค้าทั้งหมด",
+      "sql": "SELECT COUNT(*) AS total_customers FROM customers;",
+      "category": "count",
+      "dialect": "mysql"
+    },
+    {
+      "question": "จำนวนออเดอร์ทั้งหมด",
+      "sql": "SELECT COUNT(*) AS total_orders FROM orders;",
+      "category": "count",
+      "dialect": "mysql"
+    },
+    {
+      "question": "จำนวนสินค้าทั้งหมด",
+      "sql": "SELECT COUNT(*) AS total_products FROM products;",
+      "category": "count",
+      "dialect": "mysql"
+    },
+    {
+      "question": "ยอดชำระเงินรวม",
+      "sql": "SELECT SUM(amount) AS total_payments FROM payments;",
+      "category": "aggregation",
+      "dialect": "mysql"
+    },
+    {
+      "question": "ยอดชำระเงินปี 2004",
+      "sql": "SELECT SUM(amount) AS total_payments FROM payments WHERE YEAR(paymentDate) = 2004;",
+      "category": "aggregation",
+      "dialect": "mysql"
+    },
+    {
+      "question": "รายชื่อพนักงานทั้งหมด",
+      "sql": "SELECT firstName, lastName, jobTitle FROM employees ORDER BY lastName;",
+      "category": "select",
+      "dialect": "mysql"
+    },
+    {
+      "question": "จำนวนพนักงานแต่ละสำนักงาน",
+      "sql": "SELECT o.city, COUNT(e.employeeNumber) AS employee_count FROM offices o JOIN employees e ON o.officeCode = e.officeCode GROUP BY o.city ORDER BY employee_count DESC;",
+      "category": "groupby",
+      "dialect": "mysql"
+    },
+    {
+      "question": "สินค้าในแต่ละ Product Line",
+      "sql": "SELECT productLine, COUNT(*) AS product_count FROM products GROUP BY productLine ORDER BY product_count DESC;",
+      "category": "groupby",
+      "dialect": "mysql"
+    },
+    {
+      "question": "ออเดอร์ล่าสุด 10 รายการ",
+      "sql": "SELECT orderNumber, orderDate, status, customerNumber FROM orders ORDER BY orderDate DESC LIMIT 10;",
+      "category": "select",
+      "dialect": "mysql"
+    },
+    {
+      "question": "ยอดขายรายไตรมาสปี 2004",
+      "sql": "SELECT QUARTER(o.orderDate) AS quarter, SUM(od.quantityOrdered * od.priceEach) AS quarterly_sales FROM orders o JOIN orderdetails od ON o.orderNumber = od.orderNumber WHERE YEAR(o.orderDate) = 2004 GROUP BY QUARTER(o.orderDate) ORDER BY quarter;",
+      "category": "groupby",
+      "dialect": "mysql"
+    },
+    {
+      "question": "ลูกค้าแต่ละประเทศ",
+      "sql": "SELECT country, COUNT(*) AS customer_count FROM customers GROUP BY country ORDER BY customer_count DESC;",
+      "category": "groupby",
+      "dialect": "mysql"
+    },
+    {
+      "question": "แสดงความสัมพันธ์ระหว่างวงเงินเครดิตกับยอดซื้อจริง scatter chart",
+      "sql": "SELECT c.creditLimit, SUM(od.quantityOrdered * od.priceEach) AS totalSpent FROM customers AS c JOIN orders AS o ON c.customerNumber = o.customerNumber JOIN orderdetails AS od ON o.orderNumber = od.orderNumber GROUP BY c.creditLimit ORDER BY creditLimit ASC",
+      "category": "join_complex",
       "dialect": "mysql",
-      "notes": "Order status count"
+      "notes": "User feedback: Credit Limit vs Total Spent"
+    },
+    {
+      "question": "แสดงความสัมพันธ์ระหว่างราคาสินค้ากับจำนวนที่ขายได้",
+      "sql": "SELECT productName, SUM(quantityOrdered) AS totalQuantity, AVG(priceEach) AS averagePrice FROM products JOIN orderdetails ON products.productCode = orderdetails.productCode GROUP BY productName ORDER BY totalQuantity DESC",
+      "category": "join_complex",
+      "dialect": "mysql",
+      "notes": "User feedback: Price vs Quantity"
     }
   ]
 }

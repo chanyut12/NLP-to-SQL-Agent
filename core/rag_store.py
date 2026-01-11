@@ -105,12 +105,9 @@ class ExampleStore:
             # ID stability
             ex_id = self._generate_id(question, sql)
             
-            # Embed question + keywords (notes) if available
-            text_to_embed = question
-            if "notes" in ex:
-                text_to_embed += f" {ex['notes']}"
-                
-            embedding = self.embedder.encode(text_to_embed).tolist()
+            # Embed question ONLY (notes ไม่รวมเพราะทำให้ similarity ลดลง)
+            # notes เก็บไว้ใน metadata สำหรับ reference เท่านั้น
+            embedding = self.embedder.encode(question).tolist()
             
             ids.append(ex_id)
             embeddings.append(embedding)
@@ -136,7 +133,8 @@ class ExampleStore:
         self,
         query: str,
         top_k: int = 3,
-        dialect: Optional[str] = None
+        dialect: Optional[str] = None,
+        threshold: Optional[float] = None
     ) -> List[Dict[str, str]]:
         """
         Retrieve semantically similar examples.
@@ -145,19 +143,29 @@ class ExampleStore:
             query: User's question
             top_k: Number of examples
             dialect: If provided, prefers or filters by this dialect (optional future enhancement)
+            threshold: Distance threshold for filtering (default: None)
         """
         query_embedding = self.embedder.encode(query).tolist()
-        
-        # Basic query
+
+        # Query with optional dialect filter
+        # ถ้าระบุ dialect จะ filter เฉพาะ examples ที่ตรงกับ dialect นั้น
+        where_filter = {"dialect": dialect} if dialect else None
+
         results = self.collection.query(
             query_embeddings=[query_embedding],
-            n_results=top_k
-            # where={"dialect": dialect} if dialect else None # Optional strict filtering
+            n_results=top_k,
+            where=where_filter,
+            include=["documents", "metadatas", "distances"]
         )
         
         examples = []
         if results and results['documents'] and results['documents'][0]:
             for i in range(len(results['documents'][0])):
+                # Filter by distance if threshold is set
+                distance = results['distances'][0][i]
+                if threshold is not None and distance > threshold:
+                    continue
+                    
                 sql = results['documents'][0][i]
                 metadata = results['metadatas'][0][i]
                 question = metadata.get('question', '')
@@ -165,7 +173,8 @@ class ExampleStore:
                 examples.append({
                     "question": question,
                     "sql": sql,
-                    "dialect": metadata.get("dialect", "any")
+                    "dialect": metadata.get("dialect", "any"),
+                    "distance": distance
                 })
         
         return examples
@@ -174,10 +183,11 @@ class ExampleStore:
         self,
         query: str,
         top_k: int = 3,
-        dialect: Optional[str] = None
+        dialect: Optional[str] = None,
+        threshold: Optional[float] = None
     ) -> str:
         """Get similar examples formatted as a string."""
-        examples = self.get_similar_examples(query, top_k, dialect)
+        examples = self.get_similar_examples(query, top_k, dialect, threshold)
         
         if not examples:
             return ""

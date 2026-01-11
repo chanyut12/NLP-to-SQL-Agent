@@ -8,7 +8,15 @@ import logging
 # Core Imports
 from core.rag_store import create_example_store
 from core.sql_safety import validate_and_sanitize_sql
-from core.schema_utils import get_database_schema, filter_schema, format_schema_for_prompt
+from core.schema_utils import (
+    get_database_schema, 
+    filter_schema, 
+    smart_filter_schema,
+    format_schema_for_prompt,
+    validate_sql_tables,
+    get_join_hints
+)
+from core.schema_rag import create_schema_rag, SchemaRAG
 from core.config import settings
 from core.viz_recommender import recommend_chart, get_chart_options
 
@@ -21,6 +29,8 @@ class NLPEngine:
         self._llm = None
         self._prompt = None
         self._example_store = None
+        self._schema_rag: SchemaRAG = None
+        self._current_engine: Engine = None  # Track for schema indexing
         self._initialize_resources()
 
     def _initialize_resources(self):
@@ -65,6 +75,7 @@ Given an input question (possibly in Thai), create a syntactically correct, read
 6. Always include LIMIT {max_limit} unless the user explicitly requests fewer.
 7. Return ONLY the SQL query without markdown or explanations.
 8. DO NOT format percentages with '%' symbol in SQL (e.g., CONCAT(..., '%')). Return raw numbers. Frontend will handle formatting.
+9. **IMPORTANT**: The "Similar Examples" below are automatically retrieved. If they rely on different tables or seem irrelevant to the current question, **IGNORE THEM** and rely on your own reasoning.
 
 ### Dialect-Specific Functions (Cheat Sheet):
 - **Date extraction**: 
@@ -104,15 +115,45 @@ SQL:"""
         return PromptTemplate.from_template(template)
 
     def clean_sql(self, response: str) -> str:
-        """Cleans and formats SQL."""
+        """Cleans and formats SQL from various LLM output formats."""
         import sqlglot
-        
+        import re
+
+        sql = response.strip()
+
+        # 1. Extract SQL from <sql>...</sql> tags (Arctic-Text2SQL format)
+        sql_tag_match = re.search(r'<sql>\s*(SELECT[^<]+)', sql, re.IGNORECASE | re.DOTALL)
+        if sql_tag_match:
+            sql = sql_tag_match.group(1).strip()
+
+        # 2. Extract SQL from ```sql...``` markdown blocks
+        sql_block_match = re.search(r'```sql\s*(SELECT[^`]+)', sql, re.IGNORECASE | re.DOTALL)
+        if sql_block_match:
+            sql = sql_block_match.group(1).strip()
+
+        # 3. If still contains explanatory text, find the last SELECT statement
+        if not sql.upper().startswith('SELECT'):
+            # Find all SELECT statements
+            select_matches = list(re.finditer(r'(SELECT\s+.+?;)', sql, re.IGNORECASE | re.DOTALL))
+            if select_matches:
+                sql = select_matches[-1].group(1).strip()
+            else:
+                # Try without semicolon
+                select_match = re.search(r'(SELECT\s+[^;]+)', sql, re.IGNORECASE | re.DOTALL)
+                if select_match:
+                    sql = select_match.group(1).strip()
+
+        # 4. Clean up common artifacts
         sql = (
-            response.strip()
-            .replace("```sql", "")
+            sql.replace("```sql", "")
             .replace("```", "")
             .strip()
         )
+
+        # 5. Remove trailing explanation text after semicolon
+        if ';' in sql:
+            sql = sql.split(';')[0] + ';'
+
         try:
             # Pretty print SQL
             return sqlglot.transpile(sql, read=None, write=None, pretty=True)[0]
@@ -132,13 +173,46 @@ SQL:"""
         Main entry point to generate SQL and execute it against the DB.
         Returns: (sql, dataframe_dict, error_message, retry_count)
         """
-        # 1. RAG Retrieval
-        dynamic_examples = self._example_store.format_examples_for_prompt(question, top_k=3)
+        # 1. RAG Retrieval (ส่ง dialect เพื่อ filter examples ที่ตรงกับ database)
+        dynamic_examples = self._example_store.format_examples_for_prompt(
+            question, 
+            top_k=3, 
+            dialect=dialect,
+            threshold=settings.RAG_DISTANCE_THRESHOLD
+        )
         
-        # 2. Schema Extraction
+        # 2. Schema Extraction with Smart Filtering
         raw_schema = get_database_schema(engine)
-        filtered_schema = filter_schema(raw_schema, question)
-        schema_text = format_schema_for_prompt(filtered_schema)
+        
+        
+        # Use smart filtering ONLY for local LLM (limited context window)
+        # Cloud LLMs (OpenAI, Claude) can handle full schema, so skip optimization
+        if settings.MODEL_PROVIDER == "ollama":
+            # Initialize & index SchemaRAG if needed (lazy, once per DB)
+            if self._schema_rag is None:
+                self._schema_rag = create_schema_rag()
+            
+            if self._current_engine != engine:
+                self._schema_rag.index_schema_from_db(engine)
+                self._current_engine = engine
+            
+            # Use smart filtering (semantic + Thai mapping)
+            filtered_schema = smart_filter_schema(
+                raw_schema, 
+                question, 
+                schema_rag=self._schema_rag,
+                top_k=5
+            )
+            
+            # Add JOIN hints if multiple tables
+            join_hints = get_join_hints(list(filtered_schema.keys()), filtered_schema)
+            schema_text = format_schema_for_prompt(filtered_schema)
+            if join_hints:
+                schema_text += f"\n\n{join_hints}"
+        else:
+            # Cloud LLM: use full schema (no filtering needed)
+            filtered_schema = raw_schema
+            schema_text = format_schema_for_prompt(raw_schema)
         
         # 3. Chain Execution
         chain = (
@@ -203,8 +277,34 @@ SQL:"""
                 logger.warning(f"Attempt {attempt} failed: {error_msg}")
                 
                 if attempt < max_retries:
-                    # Self-Correction
-                    correction_prompt = f"""The following SQL query failed with an error OR violated safety constraints.
+                    # Check if it's a "table not found" error
+                    is_table_error = any(phrase in error_msg.lower() for phrase in [
+                        "no such table", "table not found", "doesn't exist",
+                        "unknown table", "relation.*does not exist"
+                    ])
+                    
+                    # Enhanced correction with schema context
+                    if is_table_error:
+                        # Expand schema to include more tables
+                        logger.info("Table error detected. Expanding schema context...")
+                        expanded_schema = raw_schema  # Use full schema
+                        expanded_text = format_schema_for_prompt(expanded_schema)
+                        
+                        correction_prompt = f"""The SQL query failed because it used a table that doesn't exist.
+
+Target dialect: {dialect}
+Error: {error_msg}
+Failed SQL: {sql}
+
+### Available Tables (FULL LIST - Use ONLY these):
+{expanded_text}
+
+Rewrite the query using ONLY the tables listed above.
+Return ONLY the corrected SQL query without any explanation or markdown.
+Corrected SQL:"""
+                    else:
+                        # Standard correction prompt
+                        correction_prompt = f"""The following SQL query failed with an error OR violated safety constraints.
 
 Target dialect: {dialect}
 Error: {error_msg}
@@ -213,6 +313,7 @@ Failed SQL: {sql}
 Please analyze the error and provide a corrected SQL query.
 Return ONLY the corrected SQL query without any explanation or markdown.
 Corrected SQL:"""
+                    
                     corrected = self._llm.invoke(correction_prompt)
                     sql = self.clean_sql(corrected.content if hasattr(corrected, 'content') else str(corrected))
                 else:

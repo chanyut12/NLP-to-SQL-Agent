@@ -18,6 +18,7 @@ local_database.db
 *.sqlite3
 *.db
 rag_db/
+schema_rag_db/
 
 # IDE
 .vscode/
@@ -44,6 +45,7 @@ analyze_feedback.py
 PRODUCT_SPEC_TESTING.md
 ISSUES_ROADMAP.md
 MIGRATION_GUIDE.md
+PROGRESS_REPORT.md
 
 # Git Visualizer
 git_visualizer.py
@@ -63,3 +65,6 @@ classicmodels.sqlite
 # Evaluation results
 eval/results/
 eval/*.csv
+
+# paper PDFs
+*.pdf
