@@ -273,14 +273,32 @@ SQL:"""
                 # Using 'records' orientation: [{'col1': val, 'col2': val}, ...]
                 result_data = df.to_dict(orient='records')
 
-                # Visualization Recommendation (use user preference if provided)
-                chart_type, x_col, y_col = recommend_chart(df, question, preferred_chart_type)
-                viz_config = {
-                    "chart_type": chart_type,
-                    "x_col": x_col,
-                    "y_col": y_col,
-                    "options": get_chart_options(chart_type)
-                }
+                # Visualization Recommendation
+                # Priority 1: Use Intelligent Viz (if available)
+                # Priority 2: Use Rule-based (fallback)
+                viz_config = {}
+                
+                try:
+                    if self._llm:
+                        from core.viz_recommender import recommend_chart_intelligent
+                        viz_config = recommend_chart_intelligent(df, question, self._llm)
+                        
+                        # Add options (helper)
+                        viz_config["options"] = get_chart_options(viz_config.get("chart_type", "table"))
+                    else:
+                        raise ValueError("No LLM available for intelligent viz")
+                        
+                except Exception as e:
+                    # Fallback to Rule-based
+                    chart_type, x_col, y_col = recommend_chart(df, question, preferred_chart_type)
+                    viz_config = {
+                        "chart_type": chart_type,
+                        "x_col": x_col,
+                        "y_col": y_col,
+                        "options": get_chart_options(chart_type),
+                        "title": "Visualization",
+                        "reason": "Rule-based recommendation"
+                    }
                 
                 return sql, result_data, None, attempt, viz_config
                 

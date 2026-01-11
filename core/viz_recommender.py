@@ -3,7 +3,9 @@ Visualization Recommender System.
 Analyzes DataFrame content to suggest the best chart type.
 """
 import pandas as pd
-from typing import Tuple, Optional, List
+from typing import Tuple, Optional, List, Dict, Any
+from langchain_core.prompts import PromptTemplate
+from langchain_core.output_parsers import JsonOutputParser
 
 def recommend_chart(df: pd.DataFrame, question: str = "", preferred_chart_type: str = None) -> Tuple[str, Optional[str], Optional[str]]:
     """
@@ -136,4 +138,74 @@ def get_chart_options(chart_type: str) -> List[str]:
     elif chart_type == "scatter":
         return ["Scatter Plot", "Bar Chart"] + common
     return common
+
+
+def recommend_chart_intelligent(df: pd.DataFrame, question: str, llm) -> Dict[str, Any]:
+    """
+    Use AI to analyze dataframe and question to suggest best visualization in JSON.
+    Returns:
+        {
+            "chart_type": "bar" | "line" | "pie" | "scatter" | "table",
+            "x_col": str,
+            "y_col": str,
+            "title": str,
+            "reason": str
+        }
+    """
+    if df.empty:
+        return {"chart_type": "table", "title": "No Data"}
+
+    # Prepare data sample (first row + columns) to save tokens
+    columns = list(df.columns)
+    sample_data = df.iloc[0].to_dict() if not df.empty else {}
+    
+    parser = JsonOutputParser()
+    
+    prompt = PromptTemplate(
+        template="""
+        Analyze the user query and the returned data sample to suggest the best visualization.
+        
+        User Query: "{question}"
+        Data Columns: {columns}
+        First Row Data: {sample_data}
+        
+        Return a JSON object with these keys:
+        - "chart_type": One of ["bar", "line", "pie", "doughnut", "scatter", "table"].
+        - "title": A concise title for the chart (in Thai if query is Thai).
+        - "x_col": Column name for X-axis (labels).
+        - "y_col": Column name for Y-axis (values).
+        - "reason": Why you chose this chart.
+        
+        {format_instructions}
+        """,
+        input_variables=["question", "columns", "sample_data"],
+        partial_variables={"format_instructions": parser.get_format_instructions()}
+    )
+    
+    chain = prompt | llm | parser
+    
+    try:
+        config = chain.invoke({
+            "question": question,
+            "columns": str(columns),
+            "sample_data": str(sample_data)
+        })
+        
+        # Fallback validation
+        if not config.get("chart_type"):
+            config["chart_type"] = "table"
+            
+        return config
+        
+    except Exception as e:
+        print(f"⚠️ Viz AI Success Failed: {e}. Falling back to rule-based.")
+        # Fallback to rule-based
+        c_type, x, y = recommend_chart(df, question)
+        return {
+            "chart_type": c_type,
+            "x_col": x,
+            "y_col": y,
+            "title": "Visualization",
+            "reason": "Fallback to rule-based due to AI error"
+        }
 
