@@ -68,3 +68,4 @@ eval/*.csv
 
 # paper PDFs
 *.pdf
+*.xlsx
