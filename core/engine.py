@@ -31,6 +31,7 @@ class NLPEngine:
         self._example_store = None
         self._schema_rag: SchemaRAG = None
         self._current_engine: Engine = None  # Track for schema indexing
+        self._schema_cache: dict = None  # Cache for database schema
         self._initialize_resources()
 
     def _initialize_resources(self):
@@ -192,8 +193,17 @@ SQL:"""
             threshold=settings.RAG_DISTANCE_THRESHOLD
         )
         
-        # 2. Schema Extraction with Smart Filtering
-        raw_schema = get_database_schema(engine)
+        # 2. Schema Extraction with Caching
+        # Check if we have cached schema for this engine
+        engine_changed = (self._current_engine != engine)
+        
+        if not engine_changed and self._schema_cache is not None:
+            raw_schema = self._schema_cache
+        else:
+            # Cache miss or engine changed - fetch and cache
+            raw_schema = get_database_schema(engine)
+            self._schema_cache = raw_schema
+            self._current_engine = engine
         
         
         # Use smart filtering ONLY for local LLM (limited context window)
@@ -201,11 +211,12 @@ SQL:"""
         if settings.MODEL_PROVIDER == "ollama":
             # Initialize & index SchemaRAG if needed (lazy, once per DB)
             if self._schema_rag is None:
-                self._schema_rag = create_schema_rag()
+                # Share embedder from ExampleStore to save RAM
+                shared_embedder = self._example_store.embedder
+                self._schema_rag = create_schema_rag(embedder=shared_embedder)
             
-            if self._current_engine != engine:
+            if engine_changed:
                 self._schema_rag.index_schema_from_db(engine)
-                self._current_engine = engine
             
             # Use smart filtering (semantic + Thai mapping)
             filtered_schema = smart_filter_schema(
@@ -279,14 +290,15 @@ SQL:"""
                 viz_config = {}
                 
                 try:
-                    if self._llm:
+                    if self._llm and settings.ENABLE_INTELLIGENT_VIZ:
                         from core.viz_recommender import recommend_chart_intelligent
                         viz_config = recommend_chart_intelligent(df, question, self._llm)
                         
                         # Add options (helper)
                         viz_config["options"] = get_chart_options(viz_config.get("chart_type", "table"))
                     else:
-                        raise ValueError("No LLM available for intelligent viz")
+                        # Fallback to Rule-based if LLM not available OR disabled by config
+                        raise ValueError("Intelligent Viz disabled or no LLM")
                         
                 except Exception as e:
                     # Fallback to Rule-based
