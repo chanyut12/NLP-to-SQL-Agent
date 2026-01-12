@@ -19,6 +19,7 @@ class Settings:
     RAG_DISTANCE_THRESHOLD = 15.0
 
     # App Configuration
+    ENABLE_INTELLIGENT_VIZ = False  # Set to False to speed up response (disable extra LLM call)
     LOG_FILE_JSONL = "query_logs.jsonl"
     LOG_FILE_CSV = "query_logs.csv"
 
