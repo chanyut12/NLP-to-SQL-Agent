@@ -281,7 +281,7 @@
     },
     {
       "question": "แสดงความสัมพันธ์ระหว่างวงเงินเครดิตกับยอดซื้อจริง scatter chart",
-      "sql": "SELECT c.creditLimit, SUM(od.quantityOrdered * od.priceEach) AS totalSpent FROM customers AS c JOIN orders AS o ON c.customerNumber = o.customerNumber JOIN orderdetails AS od ON o.orderNumber = od.orderNumber GROUP BY c.creditLimit ORDER BY creditLimit ASC",
+      "sql": "SELECT c.customerName, c.creditLimit, COALESCE(SUM(od.quantityOrdered * od.priceEach), 0) AS totalSpent FROM customers c LEFT JOIN orders o ON c.customerNumber = o.customerNumber LEFT JOIN orderdetails od ON o.orderNumber = od.orderNumber GROUP BY c.customerNumber, c.customerName, c.creditLimit ORDER BY c.creditLimit;",
       "category": "join_complex",
       "dialect": "mysql",
       "notes": "User feedback: Credit Limit vs Total Spent"
