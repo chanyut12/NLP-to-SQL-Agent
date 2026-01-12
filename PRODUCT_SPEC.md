@@ -152,13 +152,13 @@ nlp_sql_project/
 ├── core/                   # Core Business Logic
 │   ├── engine.py          # NLPEngine - main query orchestration
 │   ├── database.py        # Database connection management
-│   ├── rag_store.py       # RAG vector store for examples
-│   ├── schema_rag.py      # [NEW] RAG vector store for schema metadata
+│   ├── rag_store.py       # RAG vector store for examples (Lazy Loading)
+│   ├── schema_rag.py      # RAG vector store for schema metadata (Shared Embedder)
 │   ├── schema_utils.py    # Schema extraction and smart filtering
 │   ├── sql_safety.py      # SQL validation and sanitization
-│   ├── viz_recommender.py # Chart type recommendation
+│   ├── viz_recommender.py # Chart type recommendation (Rule-based + AI)
 │   ├── query_history.py   # History and feedback management
-│   └── config.py          # Configuration settings
+│   └── config.py          # Configuration settings + Performance flags
 │
 ├── web/                    # Frontend
 │   ├── index.html         # Main UI
@@ -168,12 +168,25 @@ nlp_sql_project/
 │       └── main.js        # Frontend logic (API calls, rendering)
 │
 ├── scripts/                # Utility Scripts
+│   ├── setup_db.py        # Create sample database for testing
 │   └── convert_mysql_to_sqlite.py  # MySQL dump → SQLite converter
 │
-├── thai_sql_examples.json  # RAG Training Examples
+├── eval/                   # Evaluation & Testing
+├── paper/                  # Research Paper Resources
+│
+├── thai_sql_examples.json  # RAG Training Examples (50+ examples)
 ├── query_logs.jsonl        # Query execution logs
+├── favorites.json          # User's favorite queries
 ├── requirements.txt        # Python dependencies
-└── classicmodels.db        # Sample database (generated)
+├── classicmodels.db        # Sample database (MySQL dump converted)
+├── local_database.db       # Local testing database
+│
+├── README.md               # Quick start guide
+├── PRODUCT_SPEC.md         # Developer specification (this file)
+├── TUNING_GUIDE.md         # LLM tuning and optimization guide
+├── MODEL_SETUP.md          # LLM provider configuration
+├── ISSUES_ROADMAP.md       # Known issues and development plan
+└── PROGRESS_REPORT.md      # Development progress tracking
 ```
 
 ---
