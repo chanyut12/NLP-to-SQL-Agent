@@ -1,7 +1,7 @@
 # 📋 Product Specification: Thai NLP-to-SQL Agent
 
-**Version:** 2.2  
-**Last Updated:** 2026-01-11  
+**Version:** 2.3  
+**Last Updated:** 2026-01-12  
 **Architecture:** Client-Server (REST API)
 
 ---
@@ -13,12 +13,14 @@ A Thai-language Natural Language Processing system that converts Thai questions 
 ### Key Features
 - 🇹🇭 Thai language understanding (with RAG-based few-shot learning + Dialect Filter)
 - 🔐 SQL safety validation (read-only enforcement)
-- 📊 Smart visualization (auto chart type with metric vs dimension detection)
+- 📊 Smart visualization (Rule-based or AI-powered, configurable)
 - 🔄 Self-correction mechanism (retry on error with expanded schema context)
 - 📝 Query history with feedback system (👍/👎 + text comments)
 - ⭐ Favorite queries management
 - 🎯 Dialect-aware prompting and examples (MySQL/SQLite)
 - 🧠 Smart Schema Retrieval (reduces prompt tokens by ~50%)
+- ⚡ Performance Optimizations (Schema Caching, Lazy Loading, Shared Embedder)
+- 🤖 Multi-LLM Support (Ollama, OpenAI, Google Gemini)
 
 ---
 
@@ -71,10 +73,10 @@ A Thai-language Natural Language Processing system that converts Thai questions 
              ▼                  ▼
     ┌─────────────────────────────────────┐
     │      LLM Provider (config.py)       │
-    │  ┌─────────────┐  ┌──────────────┐  │
-    │  │   Ollama    │  │   OpenAI     │  │
-    │  │  (Local)    │  │  (Cloud)     │  │
-    │  └─────────────┘  └──────────────┘  │
+    │  ┌─────────┐ ┌────────┐ ┌────────┐  │
+    │  │ Ollama  │ │ OpenAI │ │ Gemini │  │
+    │  │ (Local) │ │ (Cloud)│ │(Google)│  │
+    │  └─────────┘ └────────┘ └────────┘  │
     │      + Self-Correction Loop         │
     └─────────────────────────────────────┘
 ```
@@ -93,7 +95,7 @@ A Thai-language Natural Language Processing system that converts Thai questions 
 | **Viz Recommender** | `viz_recommender.py` | Suggest chart type based on data shape |
 | **Query History** | `query_history.py` | Log queries, manage feedback |
 | **Database** | `database.py` | SQLAlchemy connection management |
-| **Config** | `config.py` | LLM provider settings (Ollama/OpenAI) |
+| **Config** | `config.py` | LLM provider settings (Ollama/OpenAI/Gemini), Performance flags |
 
 ### Data Flow
 
@@ -425,22 +427,34 @@ Use queries in `validation_report.md` → Test Recommendations section.
 ### Environment Variables
 ```bash
 # Required
-MODEL_PROVIDER=ollama|openai
-OPENAI_API_KEY=sk-...      # If using OpenAI
+MODEL_PROVIDER=ollama|openai|google
+GOOGLE_API_KEY=...       # If using Google Gemini
+OPENAI_API_KEY=sk-...    # If using OpenAI
 
 # Optional
 OLLAMA_MODEL=qwen2.5-coder:7b
 OLLAMA_BASE_URL=http://localhost:11434
+GOOGLE_MODEL=gemini-2.0-flash-exp
+OPENAI_MODEL=gpt-4o-mini
+
+# Performance Flags
+ENABLE_INTELLIGENT_VIZ=false  # Set true for AI-powered chart recommendations
 ```
 
 ---
 
 ## 📊 Performance Optimization
 
-### Backend
+### Implemented Optimizations
+1. **Schema Caching** - Database schema is cached in `NLPEngine` to avoid repeated metadata queries
+2. **Lazy Loading** - Embedding models load only when first needed, not at startup
+3. **Shared Embedder** - `ExampleStore` and `SchemaRAG` share the same `SentenceTransformer` instance (~50% RAM reduction)
+4. **Skip Redundant Encoding** - RAG store checks existing IDs before re-encoding examples
+5. **Configurable Viz** - `ENABLE_INTELLIGENT_VIZ=false` skips AI visualization call (~30-50% faster)
+
+### Backend (Future)
 1. **RAG Store** - Cache embeddings in Redis
-2. **Database** - Use connection pooling (SQLAlchemy already does this)
-3. **LLM** - Implement request batching for multiple queries
+2. **LLM** - Implement request batching for multiple queries
 
 ### Frontend
 1. **Chart Rendering** - Destroy old charts before creating new ones
