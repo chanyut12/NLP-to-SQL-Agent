@@ -171,22 +171,13 @@ nlp_sql_project/
 │   ├── setup_db.py        # Create sample database for testing
 │   └── convert_mysql_to_sqlite.py  # MySQL dump → SQLite converter
 │
-├── eval/                   # Evaluation & Testing
-├── paper/                  # Research Paper Resources
-│
 ├── thai_sql_examples.json  # RAG Training Examples (50+ examples)
-├── query_logs.jsonl        # Query execution logs
-├── favorites.json          # User's favorite queries
 ├── requirements.txt        # Python dependencies
-├── classicmodels.db        # Sample database (MySQL dump converted)
-├── local_database.db       # Local testing database
 │
 ├── README.md               # Quick start guide
 ├── PRODUCT_SPEC.md         # Developer specification (this file)
 ├── TUNING_GUIDE.md         # LLM tuning and optimization guide
-├── MODEL_SETUP.md          # LLM provider configuration
-├── ISSUES_ROADMAP.md       # Known issues and development plan
-└── PROGRESS_REPORT.md      # Development progress tracking
+└── MODEL_SETUP.md          # LLM provider configuration
 ```
 
 ---
