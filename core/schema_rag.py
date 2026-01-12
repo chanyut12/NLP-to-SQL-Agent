@@ -84,7 +84,8 @@ class SchemaRAG:
     def __init__(
         self,
         model_name: str = DEFAULT_MODEL,
-        persist_directory: Optional[str] = "schema_rag_db"
+        persist_directory: Optional[str] = "schema_rag_db",
+        embedder: Optional[SentenceTransformer] = None
     ):
         """
         Initialize the Schema RAG store.
@@ -92,16 +93,17 @@ class SchemaRAG:
         Args:
             model_name: Sentence transformer model for embeddings
             persist_directory: Directory to persist ChromaDB
+            embedder: Optional shared SentenceTransformer instance
         """
         self.model_name = model_name
         self.persist_directory = persist_directory
-        self._embedder = None
+        self._embedder = embedder
         self._client = None
         self._collection = None
         self._indexed_tables: Set[str] = set()
         
     def _get_embedder(self) -> SentenceTransformer:
-        """Lazy load the embedding model."""
+        """Get or lazy load the embedding model."""
         if self._embedder is None:
             print(f"Loading schema embedding model: {self.model_name}")
             self._embedder = SentenceTransformer(self.model_name)
@@ -344,9 +346,12 @@ class SchemaRAG:
 # Factory Function
 # =============================================================================
 
-def create_schema_rag(persist_directory: Optional[str] = "schema_rag_db") -> SchemaRAG:
+def create_schema_rag(
+    persist_directory: Optional[str] = "schema_rag_db",
+    embedder: Optional[SentenceTransformer] = None
+) -> SchemaRAG:
     """Create and return a SchemaRAG instance."""
-    return SchemaRAG(persist_directory=persist_directory)
+    return SchemaRAG(persist_directory=persist_directory, embedder=embedder)
 
 
 # =============================================================================
