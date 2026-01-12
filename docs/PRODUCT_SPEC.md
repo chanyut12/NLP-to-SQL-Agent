@@ -40,37 +40,35 @@ A Thai-language Natural Language Processing system that converts Thai questions 
 │         api/main.py ─► api/routes.py ─► api/schemas.py          │
 └──────────────────────────────┬──────────────────────────────────┘
                                │
-         ┌─────────────────────┼─────────────────────┐
-         ▼                     ▼                     ▼
-┌─────────────────┐   ┌─────────────────┐   ┌─────────────────┐
-│   Query History │   │    NLPEngine    │   │   SQL Safety    │
-│query_history.py │   │   engine.py     │   │  sql_safety.py  │
-│  (Logging/      │   │  (Orchestrator) │   │  (Validation)   │
-│   Feedback)     │   └────────┬────────┘   └─────────────────┘
-└─────────────────┘            │
-              ┌────────────────┼────────────────┐
-              ▼                ▼                ▼
-    ┌─────────────────┐ ┌─────────────┐ ┌──────────────────┐
-    │    RAG Store    │ │Schema Utils │ │ Viz Recommender  │
-    │  rag_store.py   │ │schema_utils │ │viz_recommender.py│
-    │  + ChromaDB     │ │    .py      │ │ (Chart Suggest)  │
-    └────────┬────────┘ └──────┬──────┘ └──────────────────┘
-             │                 │
-             │                 ▼
-             │         ┌──────────────────┐
-             │         │     Database     │
-             │         │   database.py    │
-             │         │   (SQLAlchemy)   │
-             │         └──────────────────┘
-             │                  ▲
-             │                  │
-             │          ┌───────┴───────┐
-             │          │  Schema RAG   │
-             │          │ schema_rag.py │
-             │          │ schema_rag_db │
-             │          └───────┬───────┘
-             │                  │
-             ▼                  ▼
+                               ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                     CORE: SERVICES LAYER                        │
+│   ┌─────────────────┐               ┌───────────────────────┐   │
+│   │    NLPEngine    │◄─────────────►│ QueryHistoryManager   │   │
+│   │ services/engine │               │ services/query_history│   │
+│   └────────┬────────┘               └───────────────────────┘   │
+└────────────┼────────────────────────────────────────────────────┘
+             │
+             ▼
+┌─────────────────────────────┐   ┌───────────────────────────────┐
+│     CORE: DOMAIN LAYER      │   │       CORE: DATA LAYER        │
+│ ┌──────────────┐ ┌────────┐ │   │ ┌────────┐ ┌──────┐ ┌───────┐ │
+│ │ SchemaUtils  │ │ Safety │ │   │ │Connect │ │ RAG  │ │Schema │ │
+│ │domain/schema_│ │ domain/│ │──►│ │Manager │ │ Store│ │ RAG   │ │
+│ │   utils.py   │ │ safety │ │   │ │data/db │ │ data/│ │ data/ │ │
+│ └──────────────┘ └────────┘ │   │ └────────┘ └──────┘ └───────┘ │
+└────────────┬────────────────┘   └───────────────┬───────────────┘
+             │                                    │
+             ▼                                    ▼
+    ┌──────────────────┐               ┌─────────────────────┐
+    │ CORE: VIZ LAYER  │               │    External Systems │
+    │ ┌──────────────┐ │               │ ┌────────┐ ┌──────┐ │
+    │ │ VizRecommen- │ │               │ │   DB   │ │ LLM  │ │
+    │ │ der (viz/)   │ │               │ │(MySQL/ │ │(GPT/ │ │
+    │ └──────────────┘ │               │ │SQLite) │ │Gemi) │ │
+    └──────────────────┘               │ └────────┘ └──────┘ │
+                                       └─────────────────────┘
+                                       
     ┌─────────────────────────────────────┐
     │      LLM Provider (config.py)       │
     │  ┌─────────┐ ┌────────┐ ┌────────┐  │
@@ -87,15 +85,15 @@ A Thai-language Natural Language Processing system that converts Thai questions 
 |-----------|---------|----------------|
 | **Web Frontend** | `web/` | UI, Chart.js rendering, API calls |
 | **FastAPI Server** | `api/` | REST endpoints, request validation |
-| **NLPEngine** | `engine.py` | Main orchestrator - coordinates all steps |
-| **RAG Store** | `rag_store.py` | Semantic search for similar examples (`rag_db`) |
-| **Schema RAG** | `schema_rag.py` | [NEW] Semantic search for relevant tables (`schema_rag_db`) |
-| **Schema Utils** | `schema_utils.py` | Extract & filter database schema (Hybrid Search) |
-| **SQL Safety** | `sql_safety.py` | Block destructive SQL, enforce LIMIT |
-| **Viz Recommender** | `viz_recommender.py` | Suggest chart type based on data shape |
-| **Query History** | `query_history.py` | Log queries, manage feedback |
-| **Database** | `database.py` | SQLAlchemy connection management |
-| **Config** | `config.py` | LLM provider settings (Ollama/OpenAI/Gemini), Performance flags |
+| **NLPEngine** | `core/services/engine.py` | Main orchestrator - coordinates all steps |
+| **RAG Store** | `core/data/rag_store.py` | Semantic search for similar examples (`rag_db`) |
+| **Schema RAG** | `core/data/schema_rag.py` | [NEW] Semantic search for relevant tables (`schema_rag_db`) |
+| **Schema Utils** | `core/domain/schema_utils.py` | Extract & filter database schema (Hybrid Search) |
+| **SQL Safety** | `core/domain/sql_safety.py` | Block destructive SQL, enforce LIMIT |
+| **Viz Recommender** | `core/viz/viz_recommender.py` | Suggest chart type based on data shape |
+| **Query History** | `core/services/query_history.py` | Log queries, manage feedback |
+| **Database** | `core/data/database.py` | SQLAlchemy connection management |
+| **Config** | `core/config.py` | LLM provider settings (Ollama/OpenAI/Gemini), Performance flags |
 
 ### Data Flow
 
@@ -150,15 +148,19 @@ nlp_sql_project/
 │   └── dependencies.py    # Dependency injection (DB state, LLM engine)
 │
 ├── core/                   # Core Business Logic
-│   ├── engine.py          # NLPEngine - main query orchestration
-│   ├── database.py        # Database connection management
-│   ├── rag_store.py       # RAG vector store for examples (Lazy Loading)
-│   ├── schema_rag.py      # RAG vector store for schema metadata (Shared Embedder)
-│   ├── schema_utils.py    # Schema extraction and smart filtering
-│   ├── sql_safety.py      # SQL validation and sanitization
-│   ├── viz_recommender.py # Chart type recommendation (Rule-based + AI)
-│   ├── query_history.py   # History and feedback management
-│   └── config.py          # Configuration settings + Performance flags
+│   ├── services/          # Apps Use Cases
+│   │   ├── engine.py
+│   │   └── query_history.py
+│   ├── domain/            # Business Rules
+│   │   ├── schema_utils.py
+│   │   └── sql_safety.py
+│   ├── data/              # Data Infrastructure
+│   │   ├── database.py
+│   │   ├── rag_store.py
+│   │   └── schema_rag.py
+│   ├── viz/               # Visualization
+│   │   └── viz_recommender.py
+│   └── config.py          # Configuration
 │
 ├── web/                    # Frontend
 │   ├── index.html         # Main UI
@@ -175,9 +177,10 @@ nlp_sql_project/
 ├── requirements.txt        # Python dependencies
 │
 ├── README.md               # Quick start guide
-├── PRODUCT_SPEC.md         # Developer specification (this file)
-├── TUNING_GUIDE.md         # LLM tuning and optimization guide
-└── MODEL_SETUP.md          # LLM provider configuration
+└── docs/                   # Documentation
+    ├── PRODUCT_SPEC.md     # Developer specification (this file)
+    ├── TUNING_GUIDE.md     # LLM tuning and optimization guide
+    └── MODEL_SETUP.md      # LLM provider configuration
 ```
 
 ---
@@ -213,7 +216,7 @@ Defines Pydantic models for type validation.
 
 ### 2. Core Engine (`core/`)
 
-#### `engine.py` - NLPEngine
+#### `core/services/engine.py` - NLPEngine
 The brain of the system. Orchestrates:
 1. RAG example retrieval
 2. Schema extraction
@@ -231,7 +234,7 @@ The brain of the system. Orchestrates:
 - Modify SQL formatting rules
 - Update dialect cheat sheet
 
-#### `rag_store.py` - RAG System
+#### `core/data/rag_store.py` - RAG System
 Uses FAISS + Sentence Transformers for semantic search.
 
 **Modify here to:**
@@ -240,7 +243,7 @@ Uses FAISS + Sentence Transformers for semantic search.
 - Add new example sources
 - Implement hybrid search (BM25 + semantic)
 
-#### `sql_safety.py` - Security Layer
+#### `core/domain/sql_safety.py` - Security Layer
 Validates SQL to prevent:
 - Destructive operations (DROP, DELETE, etc.)
 - Unauthorized table access
@@ -251,7 +254,7 @@ Validates SQL to prevent:
 - Change LIMIT enforcement rules
 - Add custom security rules
 
-#### `viz_recommender.py` - Smart Visualization
+#### `core/viz/viz_recommender.py` - Smart Visualization
 Analyzes DataFrame and recommends chart type with intelligent column selection.
 
 **Key Logic:**
@@ -299,14 +302,14 @@ Uses modern CSS with:
 ### 1. Add Support for a New Database Type
 
 **Files to modify:**
-1. `core/database.py` - Add connection string logic
-2. `core/sql_safety.py` - Add dialect-specific validation
+1. `core/data/database.py` - Add connection string logic
+2. `core/domain/sql_safety.py` - Add dialect-specific validation
 3. `web/index.html` - Add option to DB type selector
 4. `api/schemas.py` - Update DatabaseConfig model
 
 **Example:**
 ```python
-# core/database.py
+# core/data/database.py
 elif db_type == "Oracle":
     db_path = f"oracle+cx_oracle://{user}:{password}@{host}:{port}/{database}"
 ```
@@ -317,8 +320,8 @@ elif db_type == "Oracle":
 
 **Files to modify:**
 1. `thai_sql_examples.json` - Add more training examples
-2. `core/engine.py` - Update Thai-to-English mapping (line 72-80)
-3. `core/rag_store.py` - Adjust similarity threshold
+2. `core/services/engine.py` - Update Thai-to-English mapping (line 72-80)
+3. `core/data/rag_store.py` - Adjust similarity threshold
 
 **Best Practice:**
 - Add examples for new databases/schemas
@@ -330,7 +333,7 @@ elif db_type == "Oracle":
 ### 3. Add a New Chart Type
 
 **Files to modify:**
-1. `core/viz_recommender.py`:
+1. `core/viz/viz_recommender.py`:
    ```python
    # Add new chart condition
    if has_geolocation_data:
@@ -339,7 +342,7 @@ elif db_type == "Oracle":
 
 2. `web/js/main.js`:
    ```javascript
-   // Add rendering logic
+   # Add rendering logic
    type: config.chart_type === 'map' ? 'chartjs-chart-geo' : ...
    ```
 
@@ -354,7 +357,7 @@ elif db_type == "Oracle":
 
 **New files needed:**
 1. `api/auth.py` - JWT token management
-2. `core/users.py` - User database models
+2. `core/domain/users.py` - User database models
 
 **Files to modify:**
 1. `api/routes.py` - Add `Depends(get_current_user)`
@@ -366,7 +369,7 @@ elif db_type == "Oracle":
 ### 5. Add Model Fine-tuning Support
 
 **Files to modify:**
-1. `core/engine.py` - Add fine-tuned model loading
+1. `core/services/engine.py` - Add fine-tuned model loading
 2. `core/config.py` - Add fine-tuning config options
 3. Create new `training/` directory for fine-tuning scripts
 
@@ -376,7 +379,7 @@ elif db_type == "Oracle":
 
 **Files to modify:**
 1. `api/routes.py` - Add custom exception handlers
-2. `core/engine.py` - Add more specific error types
+2. `core/services/engine.py` - Add more specific error types
 3. `web/js/main.js` - Display user-friendly error messages
 
 **Example:**

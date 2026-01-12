@@ -157,15 +157,19 @@ nlp_sql_project/
 │   ├── schemas.py           # Request/Response models
 │   └── dependencies.py      # Dependency injection
 │
-├── core/                     # Core logic
-│   ├── engine.py            # NLP orchestration
-│   ├── database.py          # DB connection
-│   ├── rag_store.py         # Example RAG with ChromaDB
-│   ├── schema_rag.py        # Schema RAG for smart filtering
-│   ├── schema_utils.py      # Schema extraction & filtering
-│   ├── sql_safety.py        # SQL validation
-│   ├── viz_recommender.py   # Chart recommendation
-│   ├── query_history.py     # History management
+├── core/                     # Core Business Logic
+│   ├── services/            # Apps Use Cases
+│   │   ├── engine.py
+│   │   └── query_history.py
+│   ├── domain/              # Business Rules
+│   │   ├── schema_utils.py
+│   │   └── sql_safety.py
+│   ├── data/                # Data Infrastructure
+│   │   ├── database.py
+│   │   ├── rag_store.py
+│   │   └── schema_rag.py
+│   ├── viz/                 # Visualization
+│   │   └── viz_recommender.py
 │   └── config.py            # Settings
 │
 ├── web/                      # Frontend
@@ -179,7 +183,10 @@ nlp_sql_project/
 │
 ├── thai_sql_examples.json    # RAG training data
 ├── requirements.txt          # Python dependencies
-└── PRODUCT_SPEC.md          # Developer guide
+└── docs/                     # Documentation
+    ├── PRODUCT_SPEC.md      # Developer guide
+    ├── MODEL_SETUP.md       # LLM configuration
+    └── TUNING_GUIDE.md      # Performance optimization
 ```
 
 ---
@@ -326,22 +333,22 @@ CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
 4. Push to the branch
 5. Open a Pull Request
 
-ดูรายละเอียดเพิ่มเติมที่ `PRODUCT_SPEC.md`
+ดูรายละเอียดเพิ่มเติมที่ `docs/PRODUCT_SPEC.md`
 
 ---
 
 ## 📚 Documentation
 
-- [Product Specification](PRODUCT_SPEC.md) - Developer guide
-- [Model Setup](MODEL_SETUP.md) - LLM configuration
-- [Tuning Guide](TUNING_GUIDE.md) - Performance optimization
-- [Issues & Roadmap](ISSUES_ROADMAP.md) - Known issues and development plan
+- [Product Specification](docs/PRODUCT_SPEC.md) - Developer guide
+- [Model Setup](docs/MODEL_SETUP.md) - LLM configuration
+- [Tuning Guide](docs/TUNING_GUIDE.md) - Performance optimization
+- [Issues & Roadmap](docs/ISSUES_ROADMAP.md) - Known issues and development plan
 
 ---
 
 ## 🐛 Known Issues
 
-1. **Complex JOINs** - LLM อาจเลือก table ผิดเมื่อต้อง JOIN หลายตาราง (ดู [Issues Roadmap](ISSUES_ROADMAP.md))
+1. **Complex JOINs** - LLM อาจเลือก table ผิดเมื่อต้อง JOIN หลายตาราง (ดู [Issues Roadmap](docs/ISSUES_ROADMAP.md))
 2. **Large Result Sets** - ไม่มี pagination สำหรับตารางขนาดใหญ่
 3. **Query Cancellation** - ไม่สามารถยกเลิก Query ที่ใช้เวลานานได้
 

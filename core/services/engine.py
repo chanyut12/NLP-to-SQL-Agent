@@ -6,9 +6,9 @@ from sqlalchemy.engine import Engine
 import logging
 
 # Core Imports
-from core.rag_store import create_example_store
-from core.sql_safety import validate_and_sanitize_sql
-from core.schema_utils import (
+from core.data.rag_store import create_example_store
+from core.domain.sql_safety import validate_and_sanitize_sql
+from core.domain.schema_utils import (
     get_database_schema, 
     filter_schema, 
     smart_filter_schema,
@@ -16,9 +16,9 @@ from core.schema_utils import (
     validate_sql_tables,
     get_join_hints
 )
-from core.schema_rag import create_schema_rag, SchemaRAG
+from core.data.schema_rag import create_schema_rag, SchemaRAG
 from core.config import settings
-from core.viz_recommender import recommend_chart, get_chart_options
+from core.viz.viz_recommender import recommend_chart, get_chart_options
 
 # Setup Logger
 logging.basicConfig(level=logging.INFO)
@@ -291,7 +291,7 @@ SQL:"""
                 
                 try:
                     if self._llm and settings.ENABLE_INTELLIGENT_VIZ:
-                        from core.viz_recommender import recommend_chart_intelligent
+                        from core.viz.viz_recommender import recommend_chart_intelligent
                         viz_config = recommend_chart_intelligent(df, question, self._llm)
                         
                         # Add options (helper)

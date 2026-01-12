@@ -1,6 +1,6 @@
-from core.engine import NLPEngine
-from core.database import ConnectionManager
-from core.query_history import QueryHistoryManager
+from core.services.engine import NLPEngine
+from core.data.database import ConnectionManager
+from core.services.query_history import QueryHistoryManager
 from sqlalchemy.engine import Engine
 from typing import Optional
 

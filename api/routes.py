@@ -7,8 +7,8 @@ from api.schemas import (
     FeedbackRequest
 )
 from api.dependencies import get_state_manager, get_nlp_engine, GlobalStateManager
-from core.engine import NLPEngine
-from core.schema_utils import get_database_schema
+from core.services.engine import NLPEngine
+from core.domain.schema_utils import get_database_schema
 from sqlalchemy import inspect
 import uuid
 import json
