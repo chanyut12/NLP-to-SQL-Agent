@@ -18,7 +18,7 @@ from core.domain.schema_utils import (
 )
 from core.data.schema_rag import create_schema_rag, SchemaRAG
 from core.config import settings
-from core.viz.viz_recommender import recommend_chart, get_chart_options
+from core.viz.viz_recommender import recommend_chart_with_series, get_chart_options
 
 # Setup Logger
 logging.basicConfig(level=logging.INFO)
@@ -302,15 +302,18 @@ SQL:"""
                         
                 except Exception as e:
                     # Fallback to Rule-based
-                    chart_type, x_col, y_col = recommend_chart(df, question, preferred_chart_type)
+                    chart_type, x_col, y_col, series_col = recommend_chart_with_series(df, question, preferred_chart_type)
                     viz_config = {
                         "chart_type": chart_type,
                         "x_col": x_col,
                         "y_col": y_col,
+                        "series_col": series_col,  # NEW: Multi-series support
                         "options": get_chart_options(chart_type),
                         "title": "Visualization",
                         "reason": "Rule-based recommendation"
                     }
+                    # DEBUG: Log the viz config
+                    logger.info(f"VIZ_DEBUG: chart={chart_type}, x={x_col}, y={y_col}, series={series_col}")
                 
                 return sql, result_data, None, attempt, viz_config
                 

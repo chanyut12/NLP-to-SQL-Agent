@@ -178,9 +178,11 @@ nlp_sql_project/
 │
 ├── README.md               # Quick start guide
 └── docs/                   # Documentation
-    ├── PRODUCT_SPEC.md     # Developer specification (this file)
-    ├── TUNING_GUIDE.md     # LLM tuning and optimization guide
-    └── MODEL_SETUP.md      # LLM provider configuration
+│   ├── PRODUCT_SPEC.md       # Detailed requirements & architecture
+│   ├── Data_Flow.md          # End-to-end data flow for debugging
+│   ├── MIGRATION_GUIDE.md    # Guide for moving from v1 to v2
+│   ├── ISSUES_ROADMAP.md     # Known bugs and future plans
+│   └── ...
 ```
 
 ---

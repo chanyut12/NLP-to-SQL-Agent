@@ -7,6 +7,84 @@ from typing import Tuple, Optional, List, Dict, Any
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 
+
+def detect_series_column(df: pd.DataFrame, x_col: Optional[str], y_col: Optional[str]) -> Optional[str]:
+    """
+    Detect if the data should be split into multiple series (e.g., year+month → line per year).
+    
+    Returns the column name to use as series grouper, or None if single-series.
+    
+    Rule-based detection for common patterns:
+    - If x_col is month/quarter/week AND there's a year column → group by year
+    - If x_col is year AND there's a month column → group by month (swap logic)
+    - If x_col is day AND there's a month column → group by month
+    """
+    if df.empty or not x_col:
+        return None
+    
+    columns = [c.lower() for c in df.columns]
+    x_lower = x_col.lower()
+    
+    # Define term lists
+    month_terms = ['month', 'เดือน']
+    year_terms = ['year', 'ปี']
+    quarter_terms = ['quarter', 'ไตรมาส', 'q']
+    week_terms = ['week', 'สัปดาห์']
+    day_terms = ['day', 'วัน']
+    
+    # Pattern 1: x_col is "month" and there's a "year" column → group by year
+    if any(t in x_lower for t in month_terms):
+        for col in df.columns:
+            if any(t in col.lower() for t in year_terms):
+                if df[col].nunique() > 1:
+                    return col
+    
+    # Pattern 1b: x_col is "year" and there's a "month" column → group by year
+    # This handles the case where recommend_chart selected year as x_col
+    # We still want to group by year, but we need to swap x and series in the output
+    if any(t in x_lower for t in year_terms):
+        for col in df.columns:
+            if any(t in col.lower() for t in month_terms):
+                if df[col].nunique() > 1:
+                    # Return the YEAR column (current x_col) as series
+                    # But since x_col IS year, we need to signal a swap
+                    # For now, return x_col itself to indicate the current x should become series
+                    return x_col  # This signals: "year should be series, use month as x"
+    
+    # Pattern 2: x_col is "quarter" and there's a "year" column
+    if any(t in x_lower for t in quarter_terms):
+        for col in df.columns:
+            if any(t in col.lower() for t in year_terms):
+                if df[col].nunique() > 1:
+                    return col
+    
+    # Pattern 3: x_col is "week" and there's a "year" column
+    if any(t in x_lower for t in week_terms):
+        for col in df.columns:
+            if any(t in col.lower() for t in year_terms):
+                if df[col].nunique() > 1:
+                    return col
+    
+    # Pattern 4: x_col is "day" and there's a "month" column
+    if any(t in x_lower for t in day_terms):
+        for col in df.columns:
+            if any(t in col.lower() for t in month_terms):
+                if df[col].nunique() > 1:
+                    return col
+    
+    # Pattern 5: Generic categorical grouper (e.g., product_line with month)
+    time_keywords = ['month', 'quarter', 'week', 'day', 'date', 'เดือน', 'วัน']
+    if any(t in x_lower for t in time_keywords):
+        for col in df.columns:
+            if col.lower() == x_lower or col == y_col:
+                continue
+            if df[col].nunique() >= 2 and df[col].nunique() <= 10:
+                series_hints = ['line', 'category', 'type', 'group', 'status', 'region', 'country']
+                if any(h in col.lower() for h in series_hints):
+                    return col
+    
+    return None
+
 def recommend_chart(df: pd.DataFrame, question: str = "", preferred_chart_type: str = None) -> Tuple[str, Optional[str], Optional[str]]:
     """
     Analyze dataframe and recommend (chart_type, x_col, y_col).
@@ -138,6 +216,41 @@ def get_chart_options(chart_type: str) -> List[str]:
     elif chart_type == "scatter":
         return ["Scatter Plot", "Bar Chart"] + common
     return common
+
+
+def recommend_chart_with_series(
+    df: pd.DataFrame, 
+    question: str = "", 
+    preferred_chart_type: str = None
+) -> Tuple[str, Optional[str], Optional[str], Optional[str]]:
+    """
+    Enhanced version of recommend_chart that also detects multi-series patterns.
+    
+    Returns: (chart_type, x_col, y_col, series_col)
+    - series_col: Column to use for splitting data into multiple series (e.g., 'year')
+                  None if single-series chart.
+    """
+    # Get base recommendation
+    chart_type, x_col, y_col = recommend_chart(df, question, preferred_chart_type)
+    
+    # Detect series column (only for line and bar charts)
+    series_col = None
+    if chart_type in ['line', 'bar'] and x_col and y_col:
+        series_col = detect_series_column(df, x_col, y_col)
+        
+        # Handle swap case: if series_col == x_col, we need to find the actual x_col
+        # This happens when detect_series_column returns x_col itself as a signal to swap
+        if series_col and series_col == x_col:
+            # Find the month column to use as new x_col
+            month_terms = ['month', 'เดือน']
+            for col in df.columns:
+                if col != x_col and col != y_col:
+                    if any(t in col.lower() for t in month_terms):
+                        # Swap: month becomes x, year (original x) becomes series
+                        x_col = col
+                        break
+    
+    return chart_type, x_col, y_col, series_col
 
 
 def recommend_chart_intelligent(df: pd.DataFrame, question: str, llm) -> Dict[str, Any]:
