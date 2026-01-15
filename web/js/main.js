@@ -434,7 +434,7 @@ async function sendMessage() {
             let chartId = null;
             if (data.visualization && data.visualization.chart_type !== 'none' && data.visualization.chart_type !== 'table') {
                 chartId = 'chart-' + Math.random().toString(36).substr(2, 9);
-                html += `<div class="chart-container" style="position: relative; height:300px; width:100%"><canvas id="${chartId}"></canvas></div>`;
+                html += `<div class="chart-container"><canvas id="${chartId}"></canvas></div>`;
 
                 // Update Globals for switching
                 currentVizConfig = data.visualization;
@@ -579,10 +579,10 @@ function renderChart(canvasId, config, data) {
         },
         options: {
             responsive: true,
-            maintainAspectRatio: false,
+            maintainAspectRatio: isPie,  // Pie needs aspect ratio to fit properly
             plugins: {
                 legend: {
-                    position: 'top',
+                    position: isPie ? 'right' : 'top',  // Pie legend on right to save vertical space
                     labels: { color: '#94a3b8' }
                 },
                 tooltip: {
@@ -617,10 +617,7 @@ function renderChart(canvasId, config, data) {
                     ticks: { color: '#94a3b8' },
                     grid: { color: 'rgba(255, 255, 255, 0.05)' }
                 }
-            } : {
-                x: { display: false },
-                y: { display: false }
-            }
+            } : {}
         }
     });
 }
