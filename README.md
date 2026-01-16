@@ -11,11 +11,13 @@
 - 🇹🇭 **Thai Language Understanding** - ใช้ RAG พร้อม 50+ examples และ Dialect Filter
 - 🧠 **Smart Schema Retrieval** - ค้นหา Table ที่เกี่ยวข้องอัตโนมัติ ลดขนาด Prompt
 - 🔐 **SQL Safety** - Read-Only Enforcement, ป้องกันคำสั่งทำลายข้อมูล
-- 📊 **Smart Visualization** - แนะนำกราฟอัตโนมัติ พร้อม Logic แยกแยะ Metric vs Dimension
+- 📊 **Smart Visualization** - แนะนำกราฟอัตโนมัติ (Rule-based หรือ AI-powered)
 - 🔄 **Self-Correction** - แก้ไข SQL อัตโนมัติถ้าเจอ Error พร้อม context ช่วยเหลือ
 - 🗄️ **Multi-Database** - รองรับ SQLite, MySQL, PostgreSQL พร้อม Dialect-aware Examples
 - 📝 **Query History** - บันทึกประวัติพร้อมระบบ Feedback (👍/👎 + ข้อความ)
 - ⭐ **Favorites** - บันทึก Query ที่ชอบไว้ใช้ซ้ำ
+- ⚡ **Performance Optimized** - Schema Caching, Lazy Loading, Shared Embedder
+- 🤖 **Multi-LLM Support** - รองรับ Ollama (Local), OpenAI, Google Gemini
 
 ---
 
@@ -155,15 +157,19 @@ nlp_sql_project/
 │   ├── schemas.py           # Request/Response models
 │   └── dependencies.py      # Dependency injection
 │
-├── core/                     # Core logic
-│   ├── engine.py            # NLP orchestration
-│   ├── database.py          # DB connection
-│   ├── rag_store.py         # Example RAG with ChromaDB
-│   ├── schema_rag.py        # Schema RAG for smart filtering
-│   ├── schema_utils.py      # Schema extraction & filtering
-│   ├── sql_safety.py        # SQL validation
-│   ├── viz_recommender.py   # Chart recommendation
-│   ├── query_history.py     # History management
+├── core/                     # Core Business Logic
+│   ├── services/            # Apps Use Cases
+│   │   ├── engine.py
+│   │   └── query_history.py
+│   ├── domain/              # Business Rules
+│   │   ├── schema_utils.py
+│   │   └── sql_safety.py
+│   ├── data/                # Data Infrastructure
+│   │   ├── database.py
+│   │   ├── rag_store.py
+│   │   └── schema_rag.py
+│   ├── viz/                 # Visualization
+│   │   └── viz_recommender.py
 │   └── config.py            # Settings
 │
 ├── web/                      # Frontend
@@ -177,7 +183,10 @@ nlp_sql_project/
 │
 ├── thai_sql_examples.json    # RAG training data
 ├── requirements.txt          # Python dependencies
-└── PRODUCT_SPEC.md          # Developer guide
+└── docs/                     # Documentation
+    ├── PRODUCT_SPEC.md      # Developer guide
+    ├── MODEL_SETUP.md       # LLM configuration
+    └── TUNING_GUIDE.md      # Performance optimization
 ```
 
 ---
@@ -189,16 +198,23 @@ nlp_sql_project/
 สร้างไฟล์ `.env` (optional):
 
 ```bash
-# LLM Provider (ollama or openai)
-MODEL_PROVIDER=ollama
+# LLM Provider (ollama, openai, or google)
+MODEL_PROVIDER=google
 
-# Ollama Settings
+# Google Gemini Settings (recommended for speed + accuracy)
+GOOGLE_API_KEY=your-api-key-here
+GOOGLE_MODEL=gemini-2.0-flash-exp
+
+# Ollama Settings (for local/offline use)
 OLLAMA_MODEL=qwen2.5-coder:7b
 OLLAMA_BASE_URL=http://localhost:11434
 
-# OpenAI Settings (if using OpenAI)
+# OpenAI Settings
 OPENAI_API_KEY=sk-...
 OPENAI_MODEL=gpt-4o-mini
+
+# Performance Settings
+ENABLE_INTELLIGENT_VIZ=false  # Set to true for AI-powered chart recommendations
 ```
 
 ---
@@ -317,22 +333,22 @@ CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
 4. Push to the branch
 5. Open a Pull Request
 
-ดูรายละเอียดเพิ่มเติมที่ `PRODUCT_SPEC.md`
+ดูรายละเอียดเพิ่มเติมที่ `docs/PRODUCT_SPEC.md`
 
 ---
 
 ## 📚 Documentation
 
-- [Product Specification](PRODUCT_SPEC.md) - Developer guide
-- [Model Setup](MODEL_SETUP.md) - LLM configuration
-- [Tuning Guide](TUNING_GUIDE.md) - Performance optimization
-- [Issues & Roadmap](ISSUES_ROADMAP.md) - Known issues and development plan
+- [Product Specification](docs/PRODUCT_SPEC.md) - Developer guide
+- [Model Setup](docs/MODEL_SETUP.md) - LLM configuration
+- [Tuning Guide](docs/TUNING_GUIDE.md) - Performance optimization
+- [Issues & Roadmap](docs/ISSUES_ROADMAP.md) - Known issues and development plan
 
 ---
 
 ## 🐛 Known Issues
 
-1. **Complex JOINs** - LLM อาจเลือก table ผิดเมื่อต้อง JOIN หลายตาราง (ดู [Issues Roadmap](ISSUES_ROADMAP.md))
+1. **Complex JOINs** - LLM อาจเลือก table ผิดเมื่อต้อง JOIN หลายตาราง (ดู [Issues Roadmap](docs/ISSUES_ROADMAP.md))
 2. **Large Result Sets** - ไม่มี pagination สำหรับตารางขนาดใหญ่
 3. **Query Cancellation** - ไม่สามารถยกเลิก Query ที่ใช้เวลานานได้
 

@@ -26,6 +26,7 @@ class VizConfig(BaseModel):
     chart_type: str
     x_col: Optional[str]
     y_col: Optional[str]
+    series_col: Optional[str] = None  # NEW: Column for multi-series grouping
     options: List[str]
 
 class QueryResponse(BaseModel):

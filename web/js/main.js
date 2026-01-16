@@ -434,7 +434,7 @@ async function sendMessage() {
             let chartId = null;
             if (data.visualization && data.visualization.chart_type !== 'none' && data.visualization.chart_type !== 'table') {
                 chartId = 'chart-' + Math.random().toString(36).substr(2, 9);
-                html += `<div class="chart-container" style="position: relative; height:300px; width:100%"><canvas id="${chartId}"></canvas></div>`;
+                html += `<div class="chart-container"><canvas id="${chartId}"></canvas></div>`;
 
                 // Update Globals for switching
                 currentVizConfig = data.visualization;
@@ -500,17 +500,73 @@ function renderChart(canvasId, config, data) {
     // Actually, distinct IDs mean we don't need to destroy, but memory leak caution.
     // For now, simple render.
 
-    // Prepare Data
-    const labels = data.map(row => row[config.x_col]);
-    const values = data.map(row => row[config.y_col]);
+    // Colors for multi-series
+    const seriesColors = [
+        { bg: 'rgba(96, 165, 250, 0.7)', border: '#60a5fa' },   // Blue
+        { bg: 'rgba(239, 68, 68, 0.7)', border: '#ef4444' },    // Red
+        { bg: 'rgba(34, 197, 94, 0.7)', border: '#22c55e' },    // Green
+        { bg: 'rgba(168, 85, 247, 0.7)', border: '#a855f7' },   // Purple
+        { bg: 'rgba(251, 191, 36, 0.7)', border: '#fbbf24' },   // Yellow
+        { bg: 'rgba(236, 72, 153, 0.7)', border: '#ec4899' },   // Pink
+        { bg: 'rgba(20, 184, 166, 0.7)', border: '#14b8a6' },   // Teal
+        { bg: 'rgba(249, 115, 22, 0.7)', border: '#f97316' },   // Orange
+    ];
 
-    // Colors
+    let datasets = [];
+    let labels = [];
+
     const isPie = config.chart_type === 'pie';
-    const bgColors = isPie ? [
-        '#60a5fa', '#34d399', '#f472b6', '#a78bfa', '#fbbf24', '#f87171', '#818cf8', '#fb7185'
-    ] : 'rgba(96, 165, 250, 0.5)';
 
-    const borderColors = isPie ? bgColors : '#60a5fa';
+    // Check if multi-series mode
+    if (config.series_col && config.chart_type !== 'pie' && config.chart_type !== 'scatter') {
+        // Multi-series mode: Group data by series_col
+        const seriesValues = [...new Set(data.map(row => row[config.series_col]))].sort();
+        const xValues = [...new Set(data.map(row => row[config.x_col]))].sort((a, b) => a - b);
+        labels = xValues;
+
+        seriesValues.forEach((seriesVal, idx) => {
+            const seriesData = data.filter(row => row[config.series_col] === seriesVal);
+            const colorIdx = idx % seriesColors.length;
+
+            // Create a map for quick lookup
+            const dataMap = {};
+            seriesData.forEach(row => {
+                dataMap[row[config.x_col]] = row[config.y_col];
+            });
+
+            // Build values array aligned with labels
+            const values = xValues.map(x => dataMap[x] !== undefined ? dataMap[x] : null);
+
+            datasets.push({
+                label: `${config.series_col}: ${seriesVal}`,
+                data: values,
+                backgroundColor: seriesColors[colorIdx].bg,
+                borderColor: seriesColors[colorIdx].border,
+                borderWidth: 2,
+                tension: 0.3,  // Smooth lines
+                fill: false
+            });
+        });
+
+    } else {
+        // Single-series mode (original behavior)
+        labels = data.map(row => row[config.x_col]);
+        const values = data.map(row => row[config.y_col]);
+
+        const bgColors = isPie ? [
+            '#60a5fa', '#34d399', '#f472b6', '#a78bfa', '#fbbf24', '#f87171', '#818cf8', '#fb7185'
+        ] : 'rgba(96, 165, 250, 0.5)';
+
+        const borderColors = isPie ? bgColors : '#60a5fa';
+
+        datasets.push({
+            label: config.y_col,
+            data: values,
+            backgroundColor: bgColors,
+            borderColor: borderColors,
+            borderWidth: 1
+        });
+    }
 
     new Chart(ctx, {
         type: config.chart_type === 'bar' || config.chart_type === 'column' ? 'bar' :
@@ -519,20 +575,14 @@ function renderChart(canvasId, config, data) {
                     config.chart_type === 'pie' ? 'pie' : 'bar',
         data: {
             labels: labels,
-            datasets: [{
-                label: config.y_col,
-                data: values,
-                backgroundColor: bgColors,
-                borderColor: borderColors,
-                borderWidth: 1
-            }]
+            datasets: datasets
         },
         options: {
             responsive: true,
-            maintainAspectRatio: false,
+            maintainAspectRatio: isPie,  // Pie needs aspect ratio to fit properly
             plugins: {
                 legend: {
-                    position: 'top',
+                    position: isPie ? 'right' : 'top',  // Pie legend on right to save vertical space
                     labels: { color: '#94a3b8' }
                 },
                 tooltip: {
@@ -567,10 +617,7 @@ function renderChart(canvasId, config, data) {
                     ticks: { color: '#94a3b8' },
                     grid: { color: 'rgba(255, 255, 255, 0.05)' }
                 }
-            } : {
-                x: { display: false },
-                y: { display: false }
-            }
+            } : {}
         }
     });
 }

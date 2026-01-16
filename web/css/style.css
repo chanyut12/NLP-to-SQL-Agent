@@ -264,17 +264,21 @@ summary:hover {
     padding: 16px;
     margin-top: 16px;
     position: relative;
+    width: 100%;
     max-width: 100%;
-    /* Prevent overflow */
+    min-height: 300px;
+    max-height: 400px;
+    overflow: hidden;
+    box-sizing: border-box;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
     border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
-canvas {
+/* Ensure canvas stays within container */
+.chart-container canvas {
+    display: block;
     max-width: 100% !important;
-    height: auto !important;
-    max-height: 400px;
-    /* Cap height */
+    max-height: 350px !important;
 }
 
 .message pre {

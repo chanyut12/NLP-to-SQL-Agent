@@ -6,9 +6,9 @@ from sqlalchemy.engine import Engine
 import logging
 
 # Core Imports
-from core.rag_store import create_example_store
-from core.sql_safety import validate_and_sanitize_sql
-from core.schema_utils import (
+from core.data.rag_store import create_example_store
+from core.domain.sql_safety import validate_and_sanitize_sql
+from core.domain.schema_utils import (
     get_database_schema, 
     filter_schema, 
     smart_filter_schema,
@@ -16,9 +16,9 @@ from core.schema_utils import (
     validate_sql_tables,
     get_join_hints
 )
-from core.schema_rag import create_schema_rag, SchemaRAG
+from core.data.schema_rag import create_schema_rag, SchemaRAG
 from core.config import settings
-from core.viz_recommender import recommend_chart, get_chart_options
+from core.viz.viz_recommender import recommend_chart_with_series, get_chart_options
 
 # Setup Logger
 logging.basicConfig(level=logging.INFO)
@@ -31,6 +31,7 @@ class NLPEngine:
         self._example_store = None
         self._schema_rag: SchemaRAG = None
         self._current_engine: Engine = None  # Track for schema indexing
+        self._schema_cache: dict = None  # Cache for database schema
         self._initialize_resources()
 
     def _initialize_resources(self):
@@ -50,6 +51,17 @@ class NLPEngine:
                 model=settings.OPENAI_MODEL,
                 temperature=0,
                 api_key=settings.OPENAI_API_KEY
+            )
+        elif settings.MODEL_PROVIDER == "google":
+            from langchain_google_genai import ChatGoogleGenerativeAI
+            if not settings.GOOGLE_API_KEY:
+                raise ValueError("GOOGLE_API_KEY not found in environment variables")
+            
+            self._llm = ChatGoogleGenerativeAI(
+                model=settings.GOOGLE_MODEL,
+                temperature=0,
+                google_api_key=settings.GOOGLE_API_KEY,
+                convert_system_message_to_human=True
             )
         else:
             from langchain_ollama import ChatOllama
@@ -181,8 +193,17 @@ SQL:"""
             threshold=settings.RAG_DISTANCE_THRESHOLD
         )
         
-        # 2. Schema Extraction with Smart Filtering
-        raw_schema = get_database_schema(engine)
+        # 2. Schema Extraction with Caching
+        # Check if we have cached schema for this engine
+        engine_changed = (self._current_engine != engine)
+        
+        if not engine_changed and self._schema_cache is not None:
+            raw_schema = self._schema_cache
+        else:
+            # Cache miss or engine changed - fetch and cache
+            raw_schema = get_database_schema(engine)
+            self._schema_cache = raw_schema
+            self._current_engine = engine
         
         
         # Use smart filtering ONLY for local LLM (limited context window)
@@ -190,17 +211,19 @@ SQL:"""
         if settings.MODEL_PROVIDER == "ollama":
             # Initialize & index SchemaRAG if needed (lazy, once per DB)
             if self._schema_rag is None:
-                self._schema_rag = create_schema_rag()
+                # Share embedder from ExampleStore to save RAM
+                shared_embedder = self._example_store.embedder
+                self._schema_rag = create_schema_rag(embedder=shared_embedder)
             
-            if self._current_engine != engine:
+            if engine_changed:
                 self._schema_rag.index_schema_from_db(engine)
-                self._current_engine = engine
             
             # Use smart filtering (semantic + Thai mapping)
             filtered_schema = smart_filter_schema(
                 raw_schema, 
                 question, 
                 schema_rag=self._schema_rag,
+                llm=self._llm,  # Send LLM for Tier 3 Guessing
                 top_k=5
             )
             
@@ -261,14 +284,36 @@ SQL:"""
                 # Using 'records' orientation: [{'col1': val, 'col2': val}, ...]
                 result_data = df.to_dict(orient='records')
 
-                # Visualization Recommendation (use user preference if provided)
-                chart_type, x_col, y_col = recommend_chart(df, question, preferred_chart_type)
-                viz_config = {
-                    "chart_type": chart_type,
-                    "x_col": x_col,
-                    "y_col": y_col,
-                    "options": get_chart_options(chart_type)
-                }
+                # Visualization Recommendation
+                # Priority 1: Use Intelligent Viz (if available)
+                # Priority 2: Use Rule-based (fallback)
+                viz_config = {}
+                
+                try:
+                    if self._llm and settings.ENABLE_INTELLIGENT_VIZ:
+                        from core.viz.viz_recommender import recommend_chart_intelligent
+                        viz_config = recommend_chart_intelligent(df, question, self._llm)
+                        
+                        # Add options (helper)
+                        viz_config["options"] = get_chart_options(viz_config.get("chart_type", "table"))
+                    else:
+                        # Fallback to Rule-based if LLM not available OR disabled by config
+                        raise ValueError("Intelligent Viz disabled or no LLM")
+                        
+                except Exception as e:
+                    # Fallback to Rule-based
+                    chart_type, x_col, y_col, series_col = recommend_chart_with_series(df, question, preferred_chart_type)
+                    viz_config = {
+                        "chart_type": chart_type,
+                        "x_col": x_col,
+                        "y_col": y_col,
+                        "series_col": series_col,  # NEW: Multi-series support
+                        "options": get_chart_options(chart_type),
+                        "title": "Visualization",
+                        "reason": "Rule-based recommendation"
+                    }
+                    # DEBUG: Log the viz config
+                    logger.info(f"VIZ_DEBUG: chart={chart_type}, x={x_col}, y={y_col}, series={series_col}")
                 
                 return sql, result_data, None, attempt, viz_config
                 

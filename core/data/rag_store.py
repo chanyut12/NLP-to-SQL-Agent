@@ -32,19 +32,11 @@ class ExampleStore:
     ):
         """
         Initialize the example store.
-        
-        Args:
-            examples_path: Path to JSON file containing examples
-            model_name: Sentence transformer model for embeddings
-            persist_directory: Directory to persist ChromaDB (default: 'rag_db')
         """
         self.examples_path = examples_path
         self.model_name = model_name
         self.persist_directory = persist_directory
-        
-        # Initialize embedding model (lazy load if possible, but usually needed immediately)
-        print(f"Loading embedding model: {model_name}")
-        self.embedder = SentenceTransformer(model_name)
+        self._embedder = None  # Lazy load
         
         # Initialize ChromaDB
         if self.persist_directory:
@@ -56,12 +48,16 @@ class ExampleStore:
         # Load or create collection
         self._init_collection()
     
+    @property
+    def embedder(self):
+        """Lazy load embedding model."""
+        if self._embedder is None:
+            print(f"Loading embedding model: {self.model_name}")
+            self._embedder = SentenceTransformer(self.model_name)
+        return self._embedder
+
     def _init_collection(self):
         """Initialize or load the vector collection."""
-        # Note: In production, we don't delete every time.
-        # But for dev consistency when dataset changes, we might want to sync.
-        # Here we implement a sync strategy: Upsert based on ID.
-        
         self.collection = self.client.get_or_create_collection(
             name=self.COLLECTION_NAME,
             metadata={"description": "Thai to SQL examples for few-shot learning"}
@@ -76,7 +72,7 @@ class ExampleStore:
         return hashlib.md5(content.encode()).hexdigest()
 
     def _sync_examples(self):
-        """Load examples from JSON file and upsert them."""
+        """Load examples from JSON file and upsert them only if new."""
         if not os.path.exists(self.examples_path):
             print(f"Warning: Examples file not found: {self.examples_path}")
             return
@@ -88,46 +84,54 @@ class ExampleStore:
         if not examples:
             return
             
-        print(f"Syncing {len(examples)} examples to RAG store...")
+        # Check existing IDs to avoid re-embedding
+        existing_ids = set()
+        if self.collection.count() > 0:
+            existing = self.collection.get(include=[]) # Get only IDs
+            existing_ids = set(existing['ids'])
+
+        new_ids = []
+        new_embeddings = []
+        new_documents = []
+        new_metadatas = []
         
-        ids = []
-        embeddings = []
-        documents = []
-        metadatas = []
-        
+        # Only process examples that are not in DB
         for ex in examples:
             question = ex.get("question", "")
             sql = ex.get("sql", "")
             category = ex.get("category", "general")
-            dialect = ex.get("dialect", "sqlite") # New field
-            difficulty = ex.get("difficulty", "medium") # New field
+            dialect = ex.get("dialect", "sqlite")
+            difficulty = ex.get("difficulty", "medium")
             
-            # ID stability
             ex_id = self._generate_id(question, sql)
             
-            # Embed question ONLY (notes ไม่รวมเพราะทำให้ similarity ลดลง)
-            # notes เก็บไว้ใน metadata สำหรับ reference เท่านั้น
+            if ex_id in existing_ids:
+                continue
+            
+            # Embed only if new
             embedding = self.embedder.encode(question).tolist()
             
-            ids.append(ex_id)
-            embeddings.append(embedding)
-            documents.append(sql)
-            metadatas.append({
+            new_ids.append(ex_id)
+            new_embeddings.append(embedding)
+            new_documents.append(sql)
+            new_metadatas.append({
                 "question": question,
                 "category": category,
                 "dialect": dialect,
                 "difficulty": difficulty
             })
         
-        # Batch upsert
-        if ids:
+        # Batch upsert only new items
+        if new_ids:
+            print(f"Syncing {len(new_ids)} new examples to RAG store...")
             self.collection.upsert(
-                ids=ids,
-                embeddings=embeddings,
-                documents=documents,
-                metadatas=metadatas
+                ids=new_ids,
+                embeddings=new_embeddings,
+                documents=new_documents,
+                metadatas=new_metadatas
             )
-        print("RAG store sync complete.")
+        else:
+            print("RAG store is up to date. No new examples to sync.")
 
     def get_similar_examples(
         self,

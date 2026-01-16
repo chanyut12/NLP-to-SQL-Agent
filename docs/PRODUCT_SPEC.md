@@ -1,7 +1,7 @@
 # 📋 Product Specification: Thai NLP-to-SQL Agent
 
-**Version:** 2.2  
-**Last Updated:** 2026-01-11  
+**Version:** 2.3  
+**Last Updated:** 2026-01-12  
 **Architecture:** Client-Server (REST API)
 
 ---
@@ -13,12 +13,14 @@ A Thai-language Natural Language Processing system that converts Thai questions 
 ### Key Features
 - 🇹🇭 Thai language understanding (with RAG-based few-shot learning + Dialect Filter)
 - 🔐 SQL safety validation (read-only enforcement)
-- 📊 Smart visualization (auto chart type with metric vs dimension detection)
+- 📊 Smart visualization (Rule-based or AI-powered, configurable)
 - 🔄 Self-correction mechanism (retry on error with expanded schema context)
 - 📝 Query history with feedback system (👍/👎 + text comments)
 - ⭐ Favorite queries management
 - 🎯 Dialect-aware prompting and examples (MySQL/SQLite)
 - 🧠 Smart Schema Retrieval (reduces prompt tokens by ~50%)
+- ⚡ Performance Optimizations (Schema Caching, Lazy Loading, Shared Embedder)
+- 🤖 Multi-LLM Support (Ollama, OpenAI, Google Gemini)
 
 ---
 
@@ -38,43 +40,41 @@ A Thai-language Natural Language Processing system that converts Thai questions 
 │         api/main.py ─► api/routes.py ─► api/schemas.py          │
 └──────────────────────────────┬──────────────────────────────────┘
                                │
-         ┌─────────────────────┼─────────────────────┐
-         ▼                     ▼                     ▼
-┌─────────────────┐   ┌─────────────────┐   ┌─────────────────┐
-│   Query History │   │    NLPEngine    │   │   SQL Safety    │
-│query_history.py │   │   engine.py     │   │  sql_safety.py  │
-│  (Logging/      │   │  (Orchestrator) │   │  (Validation)   │
-│   Feedback)     │   └────────┬────────┘   └─────────────────┘
-└─────────────────┘            │
-              ┌────────────────┼────────────────┐
-              ▼                ▼                ▼
-    ┌─────────────────┐ ┌─────────────┐ ┌──────────────────┐
-    │    RAG Store    │ │Schema Utils │ │ Viz Recommender  │
-    │  rag_store.py   │ │schema_utils │ │viz_recommender.py│
-    │  + ChromaDB     │ │    .py      │ │ (Chart Suggest)  │
-    └────────┬────────┘ └──────┬──────┘ └──────────────────┘
-             │                 │
-             │                 ▼
-             │         ┌──────────────────┐
-             │         │     Database     │
-             │         │   database.py    │
-             │         │   (SQLAlchemy)   │
-             │         └──────────────────┘
-             │                  ▲
-             │                  │
-             │          ┌───────┴───────┐
-             │          │  Schema RAG   │
-             │          │ schema_rag.py │
-             │          │ schema_rag_db │
-             │          └───────┬───────┘
-             │                  │
-             ▼                  ▼
+                               ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                     CORE: SERVICES LAYER                        │
+│   ┌─────────────────┐               ┌───────────────────────┐   │
+│   │    NLPEngine    │◄─────────────►│ QueryHistoryManager   │   │
+│   │ services/engine │               │ services/query_history│   │
+│   └────────┬────────┘               └───────────────────────┘   │
+└────────────┼────────────────────────────────────────────────────┘
+             │
+             ▼
+┌─────────────────────────────┐   ┌───────────────────────────────┐
+│     CORE: DOMAIN LAYER      │   │       CORE: DATA LAYER        │
+│ ┌──────────────┐ ┌────────┐ │   │ ┌────────┐ ┌──────┐ ┌───────┐ │
+│ │ SchemaUtils  │ │ Safety │ │   │ │Connect │ │ RAG  │ │Schema │ │
+│ │domain/schema_│ │ domain/│ │──►│ │Manager │ │ Store│ │ RAG   │ │
+│ │   utils.py   │ │ safety │ │   │ │data/db │ │ data/│ │ data/ │ │
+│ └──────────────┘ └────────┘ │   │ └────────┘ └──────┘ └───────┘ │
+└────────────┬────────────────┘   └───────────────┬───────────────┘
+             │                                    │
+             ▼                                    ▼
+    ┌──────────────────┐               ┌─────────────────────┐
+    │ CORE: VIZ LAYER  │               │    External Systems │
+    │ ┌──────────────┐ │               │ ┌────────┐ ┌──────┐ │
+    │ │ VizRecommen- │ │               │ │   DB   │ │ LLM  │ │
+    │ │ der (viz/)   │ │               │ │(MySQL/ │ │(GPT/ │ │
+    │ └──────────────┘ │               │ │SQLite) │ │Gemi) │ │
+    └──────────────────┘               │ └────────┘ └──────┘ │
+                                       └─────────────────────┘
+                                       
     ┌─────────────────────────────────────┐
     │      LLM Provider (config.py)       │
-    │  ┌─────────────┐  ┌──────────────┐  │
-    │  │   Ollama    │  │   OpenAI     │  │
-    │  │  (Local)    │  │  (Cloud)     │  │
-    │  └─────────────┘  └──────────────┘  │
+    │  ┌─────────┐ ┌────────┐ ┌────────┐  │
+    │  │ Ollama  │ │ OpenAI │ │ Gemini │  │
+    │  │ (Local) │ │ (Cloud)│ │(Google)│  │
+    │  └─────────┘ └────────┘ └────────┘  │
     │      + Self-Correction Loop         │
     └─────────────────────────────────────┘
 ```
@@ -85,15 +85,15 @@ A Thai-language Natural Language Processing system that converts Thai questions 
 |-----------|---------|----------------|
 | **Web Frontend** | `web/` | UI, Chart.js rendering, API calls |
 | **FastAPI Server** | `api/` | REST endpoints, request validation |
-| **NLPEngine** | `engine.py` | Main orchestrator - coordinates all steps |
-| **RAG Store** | `rag_store.py` | Semantic search for similar examples (`rag_db`) |
-| **Schema RAG** | `schema_rag.py` | [NEW] Semantic search for relevant tables (`schema_rag_db`) |
-| **Schema Utils** | `schema_utils.py` | Extract & filter database schema (Hybrid Search) |
-| **SQL Safety** | `sql_safety.py` | Block destructive SQL, enforce LIMIT |
-| **Viz Recommender** | `viz_recommender.py` | Suggest chart type based on data shape |
-| **Query History** | `query_history.py` | Log queries, manage feedback |
-| **Database** | `database.py` | SQLAlchemy connection management |
-| **Config** | `config.py` | LLM provider settings (Ollama/OpenAI) |
+| **NLPEngine** | `core/services/engine.py` | Main orchestrator - coordinates all steps |
+| **RAG Store** | `core/data/rag_store.py` | Semantic search for similar examples (`rag_db`) |
+| **Schema RAG** | `core/data/schema_rag.py` | [NEW] Semantic search for relevant tables (`schema_rag_db`) |
+| **Schema Utils** | `core/domain/schema_utils.py` | Extract & filter database schema (Hybrid Search) |
+| **SQL Safety** | `core/domain/sql_safety.py` | Block destructive SQL, enforce LIMIT |
+| **Viz Recommender** | `core/viz/viz_recommender.py` | Suggest chart type based on data shape |
+| **Query History** | `core/services/query_history.py` | Log queries, manage feedback |
+| **Database** | `core/data/database.py` | SQLAlchemy connection management |
+| **Config** | `core/config.py` | LLM provider settings (Ollama/OpenAI/Gemini), Performance flags |
 
 ### Data Flow
 
@@ -148,15 +148,19 @@ nlp_sql_project/
 │   └── dependencies.py    # Dependency injection (DB state, LLM engine)
 │
 ├── core/                   # Core Business Logic
-│   ├── engine.py          # NLPEngine - main query orchestration
-│   ├── database.py        # Database connection management
-│   ├── rag_store.py       # RAG vector store for examples
-│   ├── schema_rag.py      # [NEW] RAG vector store for schema metadata
-│   ├── schema_utils.py    # Schema extraction and smart filtering
-│   ├── sql_safety.py      # SQL validation and sanitization
-│   ├── viz_recommender.py # Chart type recommendation
-│   ├── query_history.py   # History and feedback management
-│   └── config.py          # Configuration settings
+│   ├── services/          # Apps Use Cases
+│   │   ├── engine.py
+│   │   └── query_history.py
+│   ├── domain/            # Business Rules
+│   │   ├── schema_utils.py
+│   │   └── sql_safety.py
+│   ├── data/              # Data Infrastructure
+│   │   ├── database.py
+│   │   ├── rag_store.py
+│   │   └── schema_rag.py
+│   ├── viz/               # Visualization
+│   │   └── viz_recommender.py
+│   └── config.py          # Configuration
 │
 ├── web/                    # Frontend
 │   ├── index.html         # Main UI
@@ -166,12 +170,19 @@ nlp_sql_project/
 │       └── main.js        # Frontend logic (API calls, rendering)
 │
 ├── scripts/                # Utility Scripts
+│   ├── setup_db.py        # Create sample database for testing
 │   └── convert_mysql_to_sqlite.py  # MySQL dump → SQLite converter
 │
-├── thai_sql_examples.json  # RAG Training Examples
-├── query_logs.jsonl        # Query execution logs
+├── thai_sql_examples.json  # RAG Training Examples (50+ examples)
 ├── requirements.txt        # Python dependencies
-└── classicmodels.db        # Sample database (generated)
+│
+├── README.md               # Quick start guide
+└── docs/                   # Documentation
+│   ├── PRODUCT_SPEC.md       # Detailed requirements & architecture
+│   ├── Data_Flow.md          # End-to-end data flow for debugging
+│   ├── MIGRATION_GUIDE.md    # Guide for moving from v1 to v2
+│   ├── ISSUES_ROADMAP.md     # Known bugs and future plans
+│   └── ...
 ```
 
 ---
@@ -207,7 +218,7 @@ Defines Pydantic models for type validation.
 
 ### 2. Core Engine (`core/`)
 
-#### `engine.py` - NLPEngine
+#### `core/services/engine.py` - NLPEngine
 The brain of the system. Orchestrates:
 1. RAG example retrieval
 2. Schema extraction
@@ -225,7 +236,7 @@ The brain of the system. Orchestrates:
 - Modify SQL formatting rules
 - Update dialect cheat sheet
 
-#### `rag_store.py` - RAG System
+#### `core/data/rag_store.py` - RAG System
 Uses FAISS + Sentence Transformers for semantic search.
 
 **Modify here to:**
@@ -234,7 +245,7 @@ Uses FAISS + Sentence Transformers for semantic search.
 - Add new example sources
 - Implement hybrid search (BM25 + semantic)
 
-#### `sql_safety.py` - Security Layer
+#### `core/domain/sql_safety.py` - Security Layer
 Validates SQL to prevent:
 - Destructive operations (DROP, DELETE, etc.)
 - Unauthorized table access
@@ -245,7 +256,7 @@ Validates SQL to prevent:
 - Change LIMIT enforcement rules
 - Add custom security rules
 
-#### `viz_recommender.py` - Smart Visualization
+#### `core/viz/viz_recommender.py` - Smart Visualization
 Analyzes DataFrame and recommends chart type with intelligent column selection.
 
 **Key Logic:**
@@ -293,14 +304,14 @@ Uses modern CSS with:
 ### 1. Add Support for a New Database Type
 
 **Files to modify:**
-1. `core/database.py` - Add connection string logic
-2. `core/sql_safety.py` - Add dialect-specific validation
+1. `core/data/database.py` - Add connection string logic
+2. `core/domain/sql_safety.py` - Add dialect-specific validation
 3. `web/index.html` - Add option to DB type selector
 4. `api/schemas.py` - Update DatabaseConfig model
 
 **Example:**
 ```python
-# core/database.py
+# core/data/database.py
 elif db_type == "Oracle":
     db_path = f"oracle+cx_oracle://{user}:{password}@{host}:{port}/{database}"
 ```
@@ -311,8 +322,8 @@ elif db_type == "Oracle":
 
 **Files to modify:**
 1. `thai_sql_examples.json` - Add more training examples
-2. `core/engine.py` - Update Thai-to-English mapping (line 72-80)
-3. `core/rag_store.py` - Adjust similarity threshold
+2. `core/services/engine.py` - Update Thai-to-English mapping (line 72-80)
+3. `core/data/rag_store.py` - Adjust similarity threshold
 
 **Best Practice:**
 - Add examples for new databases/schemas
@@ -324,7 +335,7 @@ elif db_type == "Oracle":
 ### 3. Add a New Chart Type
 
 **Files to modify:**
-1. `core/viz_recommender.py`:
+1. `core/viz/viz_recommender.py`:
    ```python
    # Add new chart condition
    if has_geolocation_data:
@@ -333,7 +344,7 @@ elif db_type == "Oracle":
 
 2. `web/js/main.js`:
    ```javascript
-   // Add rendering logic
+   # Add rendering logic
    type: config.chart_type === 'map' ? 'chartjs-chart-geo' : ...
    ```
 
@@ -348,7 +359,7 @@ elif db_type == "Oracle":
 
 **New files needed:**
 1. `api/auth.py` - JWT token management
-2. `core/users.py` - User database models
+2. `core/domain/users.py` - User database models
 
 **Files to modify:**
 1. `api/routes.py` - Add `Depends(get_current_user)`
@@ -360,7 +371,7 @@ elif db_type == "Oracle":
 ### 5. Add Model Fine-tuning Support
 
 **Files to modify:**
-1. `core/engine.py` - Add fine-tuned model loading
+1. `core/services/engine.py` - Add fine-tuned model loading
 2. `core/config.py` - Add fine-tuning config options
 3. Create new `training/` directory for fine-tuning scripts
 
@@ -370,7 +381,7 @@ elif db_type == "Oracle":
 
 **Files to modify:**
 1. `api/routes.py` - Add custom exception handlers
-2. `core/engine.py` - Add more specific error types
+2. `core/services/engine.py` - Add more specific error types
 3. `web/js/main.js` - Display user-friendly error messages
 
 **Example:**
@@ -425,22 +436,34 @@ Use queries in `validation_report.md` → Test Recommendations section.
 ### Environment Variables
 ```bash
 # Required
-MODEL_PROVIDER=ollama|openai
-OPENAI_API_KEY=sk-...      # If using OpenAI
+MODEL_PROVIDER=ollama|openai|google
+GOOGLE_API_KEY=...       # If using Google Gemini
+OPENAI_API_KEY=sk-...    # If using OpenAI
 
 # Optional
 OLLAMA_MODEL=qwen2.5-coder:7b
 OLLAMA_BASE_URL=http://localhost:11434
+GOOGLE_MODEL=gemini-2.0-flash-exp
+OPENAI_MODEL=gpt-4o-mini
+
+# Performance Flags
+ENABLE_INTELLIGENT_VIZ=false  # Set true for AI-powered chart recommendations
 ```
 
 ---
 
 ## 📊 Performance Optimization
 
-### Backend
+### Implemented Optimizations
+1. **Schema Caching** - Database schema is cached in `NLPEngine` to avoid repeated metadata queries
+2. **Lazy Loading** - Embedding models load only when first needed, not at startup
+3. **Shared Embedder** - `ExampleStore` and `SchemaRAG` share the same `SentenceTransformer` instance (~50% RAM reduction)
+4. **Skip Redundant Encoding** - RAG store checks existing IDs before re-encoding examples
+5. **Configurable Viz** - `ENABLE_INTELLIGENT_VIZ=false` skips AI visualization call (~30-50% faster)
+
+### Backend (Future)
 1. **RAG Store** - Cache embeddings in Redis
-2. **Database** - Use connection pooling (SQLAlchemy already does this)
-3. **LLM** - Implement request batching for multiple queries
+2. **LLM** - Implement request batching for multiple queries
 
 ### Frontend
 1. **Chart Rendering** - Destroy old charts before creating new ones
