@@ -15,6 +15,14 @@ let currentVizConfig = null;
 let currentVizData = null;
 let currentChartId = null;
 
+// Security: Sanitize HTML to prevent XSS attacks
+function sanitize(text) {
+    if (text === null || text === undefined) return '';
+    const div = document.createElement('div');
+    div.textContent = String(text);
+    return div.innerHTML;
+}
+
 // --- Tab Switching Logic ---
 function switchTab(tabId) {
     currentTab = tabId;
@@ -49,12 +57,12 @@ async function fetchSchema() {
 
         container.innerHTML = data.tables.map(table => `
             <details>
-                <summary>📝 ${table.name}</summary>
+                <summary>📝 ${sanitize(table.name)}</summary>
                 <div class="column-list">
                     ${table.columns.map(col => `
                         <div>
-                            <span>${col.name}</span>
-                            <span class="col-type">${col.type}</span>
+                            <span>${sanitize(col.name)}</span>
+                            <span class="col-type">${sanitize(col.type)}</span>
                         </div>
                     `).join('')}
                 </div>
@@ -91,9 +99,9 @@ async function fetchHistory() {
                     <span>${new Date(item.timestamp).toLocaleString()}</span>
                     <span style="color: ${item.status.includes('Success') ? '#22c55e' : '#ef4444'}">${item.status}</span>
                 </div>
-                <div class="item-question">${item.question}</div>
-                <div class="item-sql">${item.sql}</div>
-                ${hasFeedbackText ? `<div class="feedback-comment" title="User Feedback">💬 ${item.feedback_text}</div>` : ''}
+                <div class="item-question">${sanitize(item.question)}</div>
+                <div class="item-sql">${sanitize(item.sql)}</div>
+                ${hasFeedbackText ? `<div class="feedback-comment" title="User Feedback">💬 ${sanitize(item.feedback_text)}</div>` : ''}
                 <div class="actions">
                     <button class="icon-btn" onclick="sendFeedback(event, '${item.log_id}', 'positive')" 
                         style="${isPos ? 'color: #22c55e; font-weight: bold;' : ''}" title="Good Response">
@@ -137,8 +145,8 @@ async function fetchFavorites() {
                 <div class="item-header">
                     <span>Used ${item.use_count} times</span>
                 </div>
-                <div class="item-question">${item.name || item.question}</div>
-                <div class="item-sql">${item.sql}</div>
+                <div class="item-question">${sanitize(item.name || item.question)}</div>
+                <div class="item-sql">${sanitize(item.sql)}</div>
                 <div class="actions">
                     <button class="icon-btn" onclick="rerunQuery(event, '${item.question}', '${item.dialect}')" title="Run">
                         ▶️
@@ -300,7 +308,11 @@ function handleKeyPress(e) {
 function appendMessage(content, isUser) {
     const div = document.createElement('div');
     div.className = `message ${isUser ? 'user-message' : 'bot-message'}`;
-    div.innerHTML = content;
+    if (isUser) {
+        div.textContent = content;
+    } else {
+        div.innerHTML = content;
+    }
     chatHistory.appendChild(div);
     chatHistory.scrollTop = chatHistory.scrollHeight;
 
@@ -416,7 +428,7 @@ async function sendMessage() {
         removeLoading();
 
         if (data.error) {
-            appendMessage(`❌ Error: ${data.error}<br><pre><code class="language-sql">${data.sql}</code></pre>`, false);
+            appendMessage(`❌ Error: ${sanitize(data.error)}<br><pre><code class="language-sql">${sanitize(data.sql)}</code></pre>`, false);
         } else {
             let html = `<strong>Generated SQL:</strong><pre><code class="language-sql">${data.sql}</code></pre>`;
 
@@ -480,12 +492,12 @@ function renderTable(data) {
     const headers = Object.keys(data[0]);
     let html = "<table><thead><tr>";
 
-    headers.forEach(h => html += `<th>${h}</th>`);
+    headers.forEach(h => html += `<th>${sanitize(h)}</th>`);
     html += "</tr></thead><tbody>";
 
     data.forEach(row => {
         html += "<tr>";
-        headers.forEach(h => html += `<td>${row[h]}</td>`);
+        headers.forEach(h => html += `<td>${sanitize(row[h])}</td>`);
         html += "</tr>";
     });
 
