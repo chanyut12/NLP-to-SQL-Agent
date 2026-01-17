@@ -363,6 +363,9 @@ summary:hover {
     padding: 20px;
     border-radius: 15px 15px 15px 0;
     border: 1px solid rgba(255, 255, 255, 0.05);
+    max-width: 80%;
+    box-sizing: border-box;
+    min-width: 0;
 }
 
 /* Code Blocks & Tables */
@@ -380,10 +383,14 @@ code {
     color: #a5b4fc;
 }
 
+.table-wrapper {
+    overflow-x: auto;
+    margin-top: 15px;
+}
+
 table {
     width: 100%;
     border-collapse: collapse;
-    margin-top: 15px;
     font-size: 0.9rem;
 }
 
@@ -392,6 +399,7 @@ td {
     padding: 12px;
     text-align: left;
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    white-space: nowrap;
 }
 
 th {

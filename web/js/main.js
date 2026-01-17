@@ -490,7 +490,7 @@ function renderTable(data) {
     if (!data || data.length === 0) return "";
 
     const headers = Object.keys(data[0]);
-    let html = "<table><thead><tr>";
+    let html = '<div class="table-wrapper"><table><thead><tr>';
 
     headers.forEach(h => html += `<th>${sanitize(h)}</th>`);
     html += "</tr></thead><tbody>";
@@ -501,7 +501,7 @@ function renderTable(data) {
         html += "</tr>";
     });
 
-    html += "</tbody></table>";
+    html += "</tbody></table></div>";
     return html;
 }
 
