@@ -1,257 +1,141 @@
-const API_URL = "http://localhost:8000/api";
+/**
+ * Main entry point for Thai NLP-to-SQL Agent
+ *
+ * This file imports all modules and sets up the application.
+ * Functions are exposed to window object for HTML onclick handlers.
+ */
+
+// Module imports
+import { API_URL } from './modules/config.js';
+import {
+    isConnected, setConnected, getCurrentTab,
+    getVizConfig, getVizData, getChartId,
+    setVizState, clearVizState
+} from './modules/state.js';
+import { sanitize } from './modules/utils.js';
+import { connectDatabase, sendQuery, saveFavorite, deleteFavoriteById } from './modules/api.js';
+import {
+    initUI, switchTab, appendMessage, appendLoading, removeLoading,
+    renderTable, fetchSchema, fetchHistory, fetchFavorites
+} from './modules/ui.js';
+import {
+    showFeedbackModal, closeFeedbackModal, submitFeedbackWithText, sendFeedback
+} from './modules/feedback.js';
+import { renderChart } from './modules/chart.js';
 
 // DOM Elements
-const chatHistory = document.getElementById('chat-history');
-const userInput = document.getElementById('user-input');
-const dbTypeSelect = document.getElementById('db-type');
-const statusBadge = document.getElementById('connection-status');
-const connectBtn = document.getElementById('connect-btn');
+let userInput = null;
+let dbTypeSelect = null;
+let statusBadge = null;
+let connectBtn = null;
+let chartSelector = null;
 
-// State
-let isConnected = false;
-let currentTab = 'connection';
-// Visualization State
-let currentVizConfig = null;
-let currentVizData = null;
-let currentChartId = null;
+/**
+ * Initialize application when DOM is ready
+ */
+function init() {
+    // Cache DOM elements
+    userInput = document.getElementById('user-input');
+    dbTypeSelect = document.getElementById('db-type');
+    statusBadge = document.getElementById('connection-status');
+    connectBtn = document.getElementById('connect-btn');
+    chartSelector = document.getElementById('chart-type-selector');
 
-// Security: Sanitize HTML to prevent XSS attacks
-function sanitize(text) {
-    if (text === null || text === undefined) return '';
-    const div = document.createElement('div');
-    div.textContent = String(text);
-    return div.innerHTML;
+    // Initialize UI module
+    initUI();
+
+    // Set up event listeners
+    setupEventListeners();
+
+    // Expose functions to window for HTML onclick handlers
+    exposeToWindow();
 }
 
-// --- Tab Switching Logic ---
-function switchTab(tabId) {
-    currentTab = tabId;
+/**
+ * Set up all event listeners
+ */
+function setupEventListeners() {
+    // Database type selector
+    dbTypeSelect.addEventListener('change', (e) => {
+        const type = e.target.value;
+        const sqliteConfig = document.getElementById('sqlite-config');
+        const sqlConfig = document.getElementById('sql-config');
 
-    // Update Tab UI
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    document.querySelector(`.tab[onclick="switchTab('${tabId}')"]`).classList.add('active');
-
-    // Update Content UI
-    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-    document.getElementById(`tab-${tabId}`).classList.add('active');
-
-    // Refresh Data
-    if (isConnected) {
-        if (tabId === 'history') fetchHistory();
-        if (tabId === 'favorites') fetchFavorites();
-        if (tabId === 'schema') fetchSchema();
-    }
-}
-
-// --- Data Fetching ---
-async function fetchSchema() {
-    try {
-        const res = await fetch(`${API_URL}/schema`);
-        const data = await res.json();
-        const container = document.getElementById('schema-container');
-
-        if (!data.tables || data.tables.length === 0) {
-            container.innerHTML = '<p style="text-align: center; color: #64748b;">No tables found</p>';
-            return;
+        if (type === 'SQLite') {
+            sqliteConfig.style.display = 'flex';
+            sqlConfig.style.display = 'none';
+        } else {
+            sqliteConfig.style.display = 'none';
+            sqlConfig.style.display = 'flex';
         }
+    });
 
-        container.innerHTML = data.tables.map(table => `
-            <details>
-                <summary>📝 ${sanitize(table.name)}</summary>
-                <div class="column-list">
-                    ${table.columns.map(col => `
-                        <div>
-                            <span>${sanitize(col.name)}</span>
-                            <span class="col-type">${sanitize(col.type)}</span>
-                        </div>
-                    `).join('')}
-                </div>
-            </details>
-        `).join('');
-    } catch (e) {
-        console.error("Schema error:", e);
-    }
-}
+    // Chart type selector
+    chartSelector.addEventListener('change', (e) => {
+        const vizConfig = getVizConfig();
+        const vizData = getVizData();
+        const chartId = getChartId();
 
-async function fetchHistory() {
-    try {
-        const res = await fetch(`${API_URL}/history?limit=20`);
-        const data = await res.json();
-        const container = document.getElementById('history-container');
+        if (vizConfig && vizData && chartId) {
+            let type = e.target.value;
+            let pConfig = { ...vizConfig };
 
-        if (!data.history || data.history.length === 0) {
-            container.innerHTML = '<p style="text-align: center; color: #64748b; margin-top: 20px;">No history yet</p>';
-            return;
+            if (type === 'auto') {
+                type = pConfig.chart_type;
+            } else {
+                pConfig.chart_type = type;
+            }
+
+            renderChart(chartId, pConfig, vizData);
         }
+    });
 
-        container.innerHTML = data.history.map(item => {
-            const isPos = item.feedback === 'positive';
-            const isNeg = item.feedback === 'negative';
-            const hasFeedbackText = item.feedback_text && item.feedback_text.trim().length > 0;
+    // Connect button
+    connectBtn.onclick = connectDB;
+}
 
-            // Escape quotes for onclick handlers
-            const escapedQuestion = item.question.replace(/'/g, "\\'").replace(/"/g, "&quot;");
-            const escapedSql = item.sql.replace(/'/g, "\\'").replace(/"/g, "&quot;");
+/**
+ * Expose functions to window object for HTML onclick handlers
+ */
+function exposeToWindow() {
+    window.switchTab = switchTab;
+    window.sendMessage = sendMessage;
+    window.handleKeyPress = handleKeyPress;
+    window.loadSQL = loadSQL;
+    window.rerunQuery = rerunQuery;
+    window.sendFeedback = sendFeedback;
+    window.showFeedbackModal = showFeedbackModal;
+    window.closeFeedbackModal = closeFeedbackModal;
+    window.submitFeedbackWithText = submitFeedbackWithText;
+    window.saveFavoriteFromHistory = saveFavoriteFromHistory;
+    window.deleteFavorite = deleteFavorite;
+}
 
-            return `
-            <div class="history-item" onclick="loadSQL('${escapedQuestion}', '${escapedSql}')">
-                <div class="item-header">
-                    <span>${new Date(item.timestamp).toLocaleString()}</span>
-                    <span style="color: ${item.status.includes('Success') ? '#22c55e' : '#ef4444'}">${item.status}</span>
-                </div>
-                <div class="item-question">${sanitize(item.question)}</div>
-                <div class="item-sql">${sanitize(item.sql)}</div>
-                ${hasFeedbackText ? `<div class="feedback-comment" title="User Feedback">💬 ${sanitize(item.feedback_text)}</div>` : ''}
-                <div class="actions">
-                    <button class="icon-btn" onclick="sendFeedback(event, '${item.log_id}', 'positive')" 
-                        style="${isPos ? 'color: #22c55e; font-weight: bold;' : ''}" title="Good Response">
-                        👍
-                    </button>
-                    <button class="icon-btn" onclick="sendFeedback(event, '${item.log_id}', 'negative')" 
-                        style="${isNeg ? 'color: #ef4444; font-weight: bold;' : ''}" title="Bad Response">
-                        👎
-                    </button>
-                    <button class="icon-btn" onclick="showFeedbackModal(event, '${item.log_id}')" title="Add Comment">
-                        💬
-                    </button>
-                    <button class="icon-btn" onclick="saveFavoriteFromHistory(event, '${item.log_id}', '${escapedQuestion}', '${escapedSql}', '${item.dialect}')" title="Save as Favorite">
-                        ⭐
-                    </button>
-                    <button class="icon-btn" onclick="rerunQuery(event, '${escapedQuestion}', '${item.dialect}')" title="Re-run">
-                        🔄
-                    </button>
-                </div>
-            </div>
-            `;
-        }).join('');
-    } catch (e) {
-        console.error("History error:", e);
+/**
+ * Handle Enter key press in input field
+ * @param {KeyboardEvent} e - Keyboard event
+ */
+function handleKeyPress(e) {
+    if (e.key === 'Enter') {
+        sendMessage();
     }
 }
 
-async function fetchFavorites() {
-    try {
-        const res = await fetch(`${API_URL}/favorites`);
-        const data = await res.json();
-        const container = document.getElementById('favorites-container');
-
-        if (!data.favorites || data.favorites.length === 0) {
-            container.innerHTML = '<p style="text-align: center; color: #64748b; margin-top: 20px;">No favorites yet</p>';
-            return;
-        }
-
-        container.innerHTML = data.favorites.map(item => `
-            <div class="fav-item">
-                <div class="item-header">
-                    <span>Used ${item.use_count} times</span>
-                </div>
-                <div class="item-question">${sanitize(item.name || item.question)}</div>
-                <div class="item-sql">${sanitize(item.sql)}</div>
-                <div class="actions">
-                    <button class="icon-btn" onclick="rerunQuery(event, '${item.question}', '${item.dialect}')" title="Run">
-                        ▶️
-                    </button>
-                    <button class="icon-btn delete" onclick="deleteFavorite(event, '${item.favorite_id}')" title="Delete">
-                        🗑️
-                    </button>
-                </div>
-            </div>
-        `).join('');
-    } catch (e) {
-        console.error("Favorites error:", e);
-    }
-}
-
-// --- Interaction Logic ---
-let currentFeedbackLogId = null;
-
-// Show feedback modal for text input
-function showFeedbackModal(e, logId) {
-    e.stopPropagation();
-    currentFeedbackLogId = logId;
-    const modal = document.getElementById('feedback-modal');
-    const textarea = document.getElementById('feedback-text-input');
-    textarea.value = '';
-    modal.style.display = 'flex';
-    textarea.focus();
-}
-
-// Close feedback modal
-function closeFeedbackModal() {
-    const modal = document.getElementById('feedback-modal');
-    modal.style.display = 'none';
-    currentFeedbackLogId = null;
-}
-
-// Submit feedback with text from modal
-async function submitFeedbackWithText() {
-    const textarea = document.getElementById('feedback-text-input');
-    const feedbackText = textarea.value.trim();
-
-    if (!currentFeedbackLogId) return;
-
-    try {
-        // Default to neutral feedback type when just adding comment
-        await fetch(`${API_URL}/history/${currentFeedbackLogId}/feedback`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                feedback: 'comment',  // New type for text-only feedback
-                feedback_text: feedbackText
-            })
-        });
-        closeFeedbackModal();
-        fetchHistory(); // Refresh to show new comment
-    } catch (e) {
-        console.error("Feedback error", e);
-        alert("Failed to save feedback");
-    }
-}
-
-async function sendFeedback(e, logId, feedback, feedbackText = null) {
-    e.stopPropagation();
-    try {
-        await fetch(`${API_URL}/history/${logId}/feedback`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ feedback, feedback_text: feedbackText })
-        });
-        fetchHistory(); // Refresh to show result
-    } catch (e) {
-        console.error("Feedback error", e);
-    }
-}
-
-async function saveFavoriteFromHistory(e, logId, question, sql, dialect) {
-    e.stopPropagation(); // Prevent item click
-    try {
-        await fetch(`${API_URL}/favorites`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ question, sql, dialect, log_id: logId })
-        });
-        switchTab('favorites'); // Switch to fav tab to show it
-    } catch (e) {
-        alert("Failed to save favorite: " + e.message);
-    }
-}
-
-async function deleteFavorite(e, favId) {
-    e.stopPropagation();
-    if (!confirm("Remove this favorite?")) return;
-
-    try {
-        await fetch(`${API_URL}/favorites/${favId}`, { method: 'DELETE' });
-        fetchFavorites(); // Refresh
-    } catch (e) {
-        alert("Failed to delete: " + e.message);
-    }
-}
-
+/**
+ * Load SQL into input field from history
+ * @param {string} question - Question to load
+ * @param {string} sql - SQL (not used, but kept for API compatibility)
+ */
 function loadSQL(question, sql) {
-    userInput.value = question; // Pre-fill question
+    userInput.value = question;
 }
 
+/**
+ * Re-run a query from history or favorites
+ * @param {Event} e - Click event
+ * @param {string} question - Question to re-run
+ * @param {string} dialect - Database dialect
+ */
 function rerunQuery(e, question, dialect) {
     e.stopPropagation();
     userInput.value = question;
@@ -259,84 +143,44 @@ function rerunQuery(e, question, dialect) {
     sendMessage();
 }
 
-
-// --- Existing Logic (Updated) ---
-dbTypeSelect.addEventListener('change', (e) => {
-    const type = e.target.value;
-    const sqliteConfig = document.getElementById('sqlite-config');
-    const sqlConfig = document.getElementById('sql-config');
-
-    if (type === 'SQLite') {
-        sqliteConfig.style.display = 'flex';
-        sqlConfig.style.display = 'none';
-    } else {
-        sqliteConfig.style.display = 'none';
-        sqlConfig.style.display = 'flex';
-    }
-});
-
-// Chart Type Selector
-document.getElementById('chart-type-selector').addEventListener('change', (e) => {
-    if (currentVizConfig && currentVizData && currentChartId) {
-        let type = e.target.value;
-        let p_config = { ...currentVizConfig };
-
-        if (type === 'auto') {
-            // If auto, we rely on the ORIGINAL (which might have been user overridden in prompt, but here means "system default")
-            // Wait, currentVizConfig IS the system calculation (unless we muted it).
-            // Actually, 'currentVizConfig' holds the LAST rendered state.
-            // We need `data.visualization` from the response. But we didn't store the *original* response globally, only `currentVizConfig`.
-            // Minor limitation: "Auto" here just means "What was sent by backend".
-            // If backend sent "pie" because of prompt, Auto = Pie.
-            // If backend sent "bar" because of heuristic, Auto = Bar.
-            // This is correct behavior.
-            type = p_config.chart_type;
-        } else {
-            p_config.chart_type = type;
-        }
-
-        renderChart(currentChartId, p_config, currentVizData);
-    }
-});
-
-function handleKeyPress(e) {
-    if (e.key === 'Enter') {
-        sendMessage();
+/**
+ * Save a query as favorite from history
+ * @param {Event} e - Click event
+ * @param {string} logId - Query log ID
+ * @param {string} question - Question text
+ * @param {string} sql - SQL query
+ * @param {string} dialect - Database dialect
+ */
+async function saveFavoriteFromHistory(e, logId, question, sql, dialect) {
+    e.stopPropagation();
+    try {
+        await saveFavorite(question, sql, dialect, logId);
+        switchTab('favorites');
+    } catch (err) {
+        alert("Failed to save favorite: " + err.message);
     }
 }
 
-function appendMessage(content, isUser) {
-    const div = document.createElement('div');
-    div.className = `message ${isUser ? 'user-message' : 'bot-message'}`;
-    if (isUser) {
-        div.textContent = content;
-    } else {
-        div.innerHTML = content;
+/**
+ * Delete a favorite query
+ * @param {Event} e - Click event
+ * @param {string} favId - Favorite ID
+ */
+async function deleteFavorite(e, favId) {
+    e.stopPropagation();
+    if (!confirm("Remove this favorite?")) return;
+
+    try {
+        await deleteFavoriteById(favId);
+        fetchFavorites();
+    } catch (err) {
+        alert("Failed to delete: " + err.message);
     }
-    chatHistory.appendChild(div);
-    chatHistory.scrollTop = chatHistory.scrollHeight;
-
-    // Trigger syntax highlighting for new content
-    div.querySelectorAll('pre code').forEach((block) => {
-        hljs.highlightElement(block);
-    });
 }
 
-function appendLoading() {
-    const div = document.createElement('div');
-    div.id = 'loading-indicator';
-    div.className = 'message bot-message';
-    div.innerHTML = '<span class="pulse">🤖 Thinking...</span>';
-    chatHistory.appendChild(div);
-    chatHistory.scrollTop = chatHistory.scrollHeight;
-    return div;
-}
-
-function removeLoading() {
-    const loading = document.getElementById('loading-indicator');
-    if (loading) loading.remove();
-}
-
+/**
+ * Connect to database
+ */
 async function connectDB() {
     const type = dbTypeSelect.value;
     const config = {
@@ -362,26 +206,14 @@ async function connectDB() {
     connectBtn.disabled = true;
 
     try {
-        const res = await fetch(`${API_URL}/connect`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ config })
-        });
+        await connectDatabase(config);
+        setConnected(true);
+        statusBadge.className = "status-badge connected";
+        statusBadge.textContent = "Connected";
+        appendMessage(`✅ Connected to ${type} successfully!`, false);
 
-        const data = await res.json();
-        if (res.ok) {
-            isConnected = true;
-            statusBadge.className = "status-badge connected";
-            statusBadge.textContent = "Connected";
-            appendMessage(`✅ Connected to ${type} successfully!`, false);
-
-            // Auto fetch schema
-            fetchSchema();
-            // Switch to history or schema to show usefulness
-            // switchTab('schema'); 
-        } else {
-            throw new Error(data.detail);
-        }
+        // Auto fetch schema
+        fetchSchema();
     } catch (e) {
         appendMessage(`❌ Connection failed: ${e.message}`, false);
         statusBadge.className = "status-badge disconnected";
@@ -392,11 +224,14 @@ async function connectDB() {
     }
 }
 
+/**
+ * Send message/query to backend
+ */
 async function sendMessage() {
     const text = userInput.value.trim();
     if (!text) return;
 
-    if (!isConnected) {
+    if (!isConnected()) {
         appendMessage("⚠️ Please connect to a database first.", false);
         return;
     }
@@ -407,24 +242,18 @@ async function sendMessage() {
     appendLoading();
 
     // Hide chart selector while loading
-    document.getElementById('chart-type-selector').style.display = 'none';
+    chartSelector.style.display = 'none';
 
     try {
         // Get selected chart type from dropdown
-        const chartSelector = document.getElementById('chart-type-selector');
         const preferredChartType = chartSelector.value !== 'auto' ? chartSelector.value : null;
 
-        const res = await fetch(`${API_URL}/query`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                question: text,
-                dialect: dbTypeSelect.value.toLowerCase(),
-                preferred_chart_type: preferredChartType
-            })
-        });
+        const data = await sendQuery(
+            text,
+            dbTypeSelect.value.toLowerCase(),
+            preferredChartType
+        );
 
-        const data = await res.json();
         removeLoading();
 
         if (data.error) {
@@ -448,26 +277,15 @@ async function sendMessage() {
                 chartId = 'chart-' + Math.random().toString(36).substr(2, 9);
                 html += `<div class="chart-container"><canvas id="${chartId}"></canvas></div>`;
 
-                // Update Globals for switching
-                currentVizConfig = data.visualization;
-                currentVizData = data.data;
-                currentChartId = chartId;
+                // Update visualization state
+                setVizState(data.visualization, data.data, chartId);
 
-                // Show Selector
-                const selector = document.getElementById('chart-type-selector');
-                selector.style.display = 'inline-block';
-                // Reset to Auto by default or currently recommended?
-                // User wants "Auto" to be default conceptual, but dropdown should reflect reality?
-                // Actually user said: "set default to system thought"
-                // So we set value to 'auto'? No, 'auto' implies "whatever system thinks".
-                // Let's set it to 'auto' visually, but render the 'system recommended'.
-                selector.value = 'auto';
-
+                // Show selector
+                chartSelector.style.display = 'inline-block';
+                chartSelector.value = 'auto';
             } else {
-                document.getElementById('chart-type-selector').style.display = 'none';
-                currentVizConfig = null;
-                currentVizData = null;
-                currentChartId = null;
+                chartSelector.style.display = 'none';
+                clearVizState();
             }
 
             appendMessage(html, false);
@@ -477,7 +295,7 @@ async function sendMessage() {
             }
 
             // Refresh history if open
-            if (currentTab === 'history') fetchHistory();
+            if (getCurrentTab() === 'history') fetchHistory();
         }
 
     } catch (e) {
@@ -486,152 +304,9 @@ async function sendMessage() {
     }
 }
 
-function renderTable(data) {
-    if (!data || data.length === 0) return "";
-
-    const headers = Object.keys(data[0]);
-    let html = '<div class="table-wrapper"><table><thead><tr>';
-
-    headers.forEach(h => html += `<th>${sanitize(h)}</th>`);
-    html += "</tr></thead><tbody>";
-
-    data.forEach(row => {
-        html += "<tr>";
-        headers.forEach(h => html += `<td>${sanitize(row[h])}</td>`);
-        html += "</tr>";
-    });
-
-    html += "</tbody></table></div>";
-    return html;
+// Initialize when DOM is ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+} else {
+    init();
 }
-
-function renderChart(canvasId, config, data) {
-    const ctx = document.getElementById(canvasId).getContext('2d');
-
-    // Destroy existing chart if any (needs tracking, but for now we generate unique IDs so it's fine)
-    // Actually, distinct IDs mean we don't need to destroy, but memory leak caution.
-    // For now, simple render.
-
-    // Colors for multi-series
-    const seriesColors = [
-        { bg: 'rgba(96, 165, 250, 0.7)', border: '#60a5fa' },   // Blue
-        { bg: 'rgba(239, 68, 68, 0.7)', border: '#ef4444' },    // Red
-        { bg: 'rgba(34, 197, 94, 0.7)', border: '#22c55e' },    // Green
-        { bg: 'rgba(168, 85, 247, 0.7)', border: '#a855f7' },   // Purple
-        { bg: 'rgba(251, 191, 36, 0.7)', border: '#fbbf24' },   // Yellow
-        { bg: 'rgba(236, 72, 153, 0.7)', border: '#ec4899' },   // Pink
-        { bg: 'rgba(20, 184, 166, 0.7)', border: '#14b8a6' },   // Teal
-        { bg: 'rgba(249, 115, 22, 0.7)', border: '#f97316' },   // Orange
-    ];
-
-    let datasets = [];
-    let labels = [];
-
-    const isPie = config.chart_type === 'pie';
-
-    // Check if multi-series mode
-    if (config.series_col && config.chart_type !== 'pie' && config.chart_type !== 'scatter') {
-        // Multi-series mode: Group data by series_col
-        const seriesValues = [...new Set(data.map(row => row[config.series_col]))].sort();
-        const xValues = [...new Set(data.map(row => row[config.x_col]))].sort((a, b) => a - b);
-        labels = xValues;
-
-        seriesValues.forEach((seriesVal, idx) => {
-            const seriesData = data.filter(row => row[config.series_col] === seriesVal);
-            const colorIdx = idx % seriesColors.length;
-
-            // Create a map for quick lookup
-            const dataMap = {};
-            seriesData.forEach(row => {
-                dataMap[row[config.x_col]] = row[config.y_col];
-            });
-
-            // Build values array aligned with labels
-            const values = xValues.map(x => dataMap[x] !== undefined ? dataMap[x] : null);
-
-            datasets.push({
-                label: `${config.series_col}: ${seriesVal}`,
-                data: values,
-                backgroundColor: seriesColors[colorIdx].bg,
-                borderColor: seriesColors[colorIdx].border,
-                borderWidth: 2,
-                tension: 0.3,  // Smooth lines
-                fill: false
-            });
-        });
-
-    } else {
-        // Single-series mode (original behavior)
-        labels = data.map(row => row[config.x_col]);
-        const values = data.map(row => row[config.y_col]);
-
-        const bgColors = isPie ? [
-            '#60a5fa', '#34d399', '#f472b6', '#a78bfa', '#fbbf24', '#f87171', '#818cf8', '#fb7185'
-        ] : 'rgba(96, 165, 250, 0.5)';
-
-        const borderColors = isPie ? bgColors : '#60a5fa';
-
-        datasets.push({
-            label: config.y_col,
-            data: values,
-            backgroundColor: bgColors,
-            borderColor: borderColors,
-            borderWidth: 1
-        });
-    }
-
-    new Chart(ctx, {
-        type: config.chart_type === 'bar' || config.chart_type === 'column' ? 'bar' :
-            config.chart_type === 'line' ? 'line' :
-                config.chart_type === 'scatter' ? 'scatter' :
-                    config.chart_type === 'pie' ? 'pie' : 'bar',
-        data: {
-            labels: labels,
-            datasets: datasets
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: isPie,  // Pie needs aspect ratio to fit properly
-            plugins: {
-                legend: {
-                    position: isPie ? 'right' : 'top',  // Pie legend on right to save vertical space
-                    labels: { color: '#94a3b8' }
-                },
-                tooltip: {
-                    callbacks: {
-                        label: function (context) {
-                            let label = context.dataset.label || '';
-                            if (label) {
-                                label += ': ';
-                            }
-                            if (context.parsed.y !== null) {
-                                label += context.parsed.y;
-                            }
-
-                            // Calculate % for Pie
-                            if (config.chart_type === 'pie') {
-                                const total = context.dataset.data.reduce((a, b) => a + b, 0);
-                                const value = context.parsed;
-                                const percent = ((value / total) * 100).toFixed(1) + "%";
-                                label += ` (${percent})`;
-                            }
-                            return label;
-                        }
-                    }
-                }
-            },
-            scales: config.chart_type !== 'pie' ? {
-                x: {
-                    ticks: { color: '#94a3b8' },
-                    grid: { color: 'rgba(255, 255, 255, 0.05)' }
-                },
-                y: {
-                    ticks: { color: '#94a3b8' },
-                    grid: { color: 'rgba(255, 255, 255, 0.05)' }
-                }
-            } : {}
-        }
-    });
-}
-
-connectBtn.onclick = connectDB;

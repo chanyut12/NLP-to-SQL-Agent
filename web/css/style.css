@@ -267,8 +267,7 @@ summary:hover {
     width: 100%;
     max-width: 100%;
     min-height: 300px;
-    max-height: 400px;
-    overflow: hidden;
+    max-height: 450px;
     box-sizing: border-box;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
     border: 1px solid rgba(255, 255, 255, 0.05);
@@ -363,9 +362,9 @@ summary:hover {
     padding: 20px;
     border-radius: 15px 15px 15px 0;
     border: 1px solid rgba(255, 255, 255, 0.05);
-    max-width: 80%;
+    max-width: 85%;
+    width: fit-content;
     box-sizing: border-box;
-    min-width: 0;
 }
 
 /* Code Blocks & Tables */

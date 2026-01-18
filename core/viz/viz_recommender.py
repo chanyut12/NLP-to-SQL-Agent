@@ -253,6 +253,87 @@ def recommend_chart_with_series(
     return chart_type, x_col, y_col, series_col
 
 
+class VizService:
+    """
+    Unified visualization recommendation service.
+
+    Encapsulates both rule-based and AI-powered visualization logic,
+    providing a single entry point for engine.py to use.
+    """
+
+    def __init__(self, llm=None, enable_intelligent: bool = False):
+        """
+        Initialize VizService.
+
+        Args:
+            llm: Optional LangChain LLM for intelligent recommendations.
+            enable_intelligent: Whether to use AI-powered recommendations.
+        """
+        self._llm = llm
+        self._enable_intelligent = enable_intelligent
+
+    def recommend(
+        self,
+        df: pd.DataFrame,
+        question: str = "",
+        preferred_chart_type: str = None
+    ) -> Dict[str, Any]:
+        """
+        Get visualization recommendation for the given data.
+
+        Uses intelligent (AI) recommendation if enabled and available,
+        otherwise falls back to rule-based recommendation.
+
+        Args:
+            df: DataFrame containing query results.
+            question: User's original question.
+            preferred_chart_type: Optional user-selected chart type.
+
+        Returns:
+            Dict with chart_type, x_col, y_col, series_col, options, title, reason.
+        """
+        if df is None or df.empty:
+            return {
+                "chart_type": "none",
+                "x_col": None,
+                "y_col": None,
+                "series_col": None,
+                "options": ["Table"],
+                "title": "No Data",
+                "reason": "Empty result set"
+            }
+
+        # Try intelligent recommendation first
+        if self._llm and self._enable_intelligent:
+            try:
+                viz_config = recommend_chart_intelligent(df, question, self._llm)
+                viz_config["options"] = get_chart_options(viz_config.get("chart_type", "table"))
+                viz_config["series_col"] = None  # AI doesn't detect series yet
+                return viz_config
+            except Exception:
+                pass  # Fall through to rule-based
+
+        # Fallback to rule-based
+        chart_type, x_col, y_col, series_col = recommend_chart_with_series(
+            df, question, preferred_chart_type
+        )
+
+        return {
+            "chart_type": chart_type,
+            "x_col": x_col,
+            "y_col": y_col,
+            "series_col": series_col,
+            "options": get_chart_options(chart_type),
+            "title": "Visualization",
+            "reason": "Rule-based recommendation"
+        }
+
+
+def create_viz_service(llm=None, enable_intelligent: bool = False) -> VizService:
+    """Factory function to create VizService instance."""
+    return VizService(llm=llm, enable_intelligent=enable_intelligent)
+
+
 def recommend_chart_intelligent(df: pd.DataFrame, question: str, llm) -> Dict[str, Any]:
     """
     Use AI to analyze dataframe and question to suggest best visualization in JSON.
