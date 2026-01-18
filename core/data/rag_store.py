@@ -7,11 +7,12 @@ with persistence, dialect filtering, and metadata support.
 
 import json
 import os
-import hashlib
 from typing import List, Dict, Optional, Any
 import chromadb
 from chromadb.config import Settings
 from sentence_transformers import SentenceTransformer
+
+from core.utils.common import generate_stable_id
 
 
 class ExampleStore:
@@ -65,11 +66,6 @@ class ExampleStore:
         
         # Sync examples from file
         self._sync_examples()
-    
-    def _generate_id(self, question: str, sql: str) -> str:
-        """Generate a stable ID based on content."""
-        content = f"{question.strip()}|{sql.strip()}"
-        return hashlib.md5(content.encode()).hexdigest()
 
     def _sync_examples(self):
         """Load examples from JSON file and upsert them only if new."""
@@ -103,7 +99,7 @@ class ExampleStore:
             dialect = ex.get("dialect", "sqlite")
             difficulty = ex.get("difficulty", "medium")
             
-            ex_id = self._generate_id(question, sql)
+            ex_id = generate_stable_id(question, sql)
             
             if ex_id in existing_ids:
                 continue

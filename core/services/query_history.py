@@ -14,6 +14,8 @@ from datetime import datetime
 from typing import List, Dict, Optional, Any
 from dataclasses import dataclass, asdict
 
+from core.utils.common import truncate_text, format_timestamp
+
 
 # File paths
 HISTORY_FILE = "query_logs.jsonl"
@@ -397,17 +399,5 @@ class QueryHistoryManager:
 
 # --- Helper Functions ---
 
-def truncate_text(text: str, max_length: int = 50) -> str:
-    """Truncate text with ellipsis if too long."""
-    if len(text) <= max_length:
-        return text
-    return text[:max_length - 3] + "..."
 
 
-def format_timestamp(iso_timestamp: str) -> str:
-    """Format ISO timestamp to readable format."""
-    try:
-        dt = datetime.fromisoformat(iso_timestamp)
-        return dt.strftime("%Y-%m-%d %H:%M")
-    except Exception:
-        return iso_timestamp[:16] if len(iso_timestamp) >= 16 else iso_timestamp
