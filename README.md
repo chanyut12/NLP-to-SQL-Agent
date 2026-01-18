@@ -158,8 +158,8 @@ nlp_sql_project/
 │   └── dependencies.py      # Dependency injection
 │
 ├── core/                     # Core Business Logic
-│   ├── services/            # Apps Use Cases
-│   │   ├── engine.py
+│   ├── services/            # Application Use Cases
+│   │   ├── engine.py        # NLPEngine (main orchestrator)
 │   │   └── query_history.py
 │   ├── domain/              # Business Rules
 │   │   ├── schema_utils.py
@@ -169,13 +169,24 @@ nlp_sql_project/
 │   │   ├── rag_store.py
 │   │   └── schema_rag.py
 │   ├── viz/                 # Visualization
-│   │   └── viz_recommender.py
+│   │   └── viz_recommender.py  # VizService
+│   ├── utils/               # Shared Utilities
+│   │   └── common.py        # ID generation, SQL cleaning
 │   └── config.py            # Settings
 │
 ├── web/                      # Frontend
 │   ├── index.html           # Main UI
 │   ├── css/style.css        # Styling
-│   └── js/main.js           # Client logic
+│   └── js/                  # Client logic (ES Modules)
+│       ├── main.js          # Entry point
+│       └── modules/         # Feature modules
+│           ├── api.js       # API calls
+│           ├── chart.js     # Chart.js rendering
+│           ├── config.js    # Configuration
+│           ├── feedback.js  # Feedback modal
+│           ├── state.js     # State management
+│           ├── ui.js        # DOM manipulation
+│           └── utils.js     # Utility functions
 │
 ├── scripts/                  # Utilities
 │   ├── setup_db.py          # สร้าง sample database

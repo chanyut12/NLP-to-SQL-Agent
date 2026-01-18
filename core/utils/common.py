@@ -72,18 +72,18 @@ def format_timestamp(iso_timestamp: str) -> str:
 def normalize_sql_code(raw_sql: str) -> str:
     """
     Clean and normalize SQL code by removing markdown blocks and extracting the query.
-    
+
     Args:
         raw_sql: Raw SQL string potentially containing markdown or HTML tags.
-        
+
     Returns:
         Cleaned SQL string.
     """
     import re
-    
+
     if not raw_sql:
         return ""
-    
+
     sql = raw_sql.strip()
 
     # 1. Extract SQL from <sql>...</sql> tags
@@ -98,5 +98,46 @@ def normalize_sql_code(raw_sql: str) -> str:
 
     # 3. Simple Markdown cleanup if regex didn't match (e.g. valid SQL wrapped in backticks)
     sql = sql.replace("```sql", "").replace("```", "").strip()
-    
+
     return sql
+
+
+def clean_sql_response(response: str, dialect: str = None) -> str:
+    """
+    Clean and format SQL from LLM response.
+
+    Handles various output formats including markdown blocks, XML tags,
+    and explanatory text. Extracts and pretty-prints the SQL.
+
+    Args:
+        response: Raw LLM response containing SQL.
+        dialect: Optional SQL dialect for formatting (e.g., 'sqlite', 'mysql').
+
+    Returns:
+        Cleaned and formatted SQL string.
+    """
+    import re
+
+    # 1. Use common normalization (Extracts from <sql> or ```sql)
+    sql = normalize_sql_code(response)
+
+    # 2. If still contains explanatory text, find the last SELECT statement
+    if not sql.upper().startswith('SELECT') and not sql.upper().startswith('WITH'):
+        select_matches = list(re.finditer(r'(SELECT\s+.+?;)', sql, re.IGNORECASE | re.DOTALL))
+        if select_matches:
+            sql = select_matches[-1].group(1).strip()
+        else:
+            select_match = re.search(r'(SELECT\s+[^;]+)', sql, re.IGNORECASE | re.DOTALL)
+            if select_match:
+                sql = select_match.group(1).strip()
+
+    # 3. Remove trailing explanation text after semicolon
+    if ';' in sql:
+        sql = sql.split(';')[0] + ';'
+
+    # 4. Try to pretty print with sqlglot
+    try:
+        import sqlglot
+        return sqlglot.transpile(sql, read=dialect, write=dialect, pretty=True)[0]
+    except Exception:
+        return sql

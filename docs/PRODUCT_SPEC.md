@@ -1,7 +1,7 @@
 # 📋 Product Specification: Thai NLP-to-SQL Agent
 
-**Version:** 2.3  
-**Last Updated:** 2026-01-12  
+**Version:** 2.4
+**Last Updated:** 2026-01-18  
 **Architecture:** Client-Server (REST API)
 
 ---
@@ -87,10 +87,11 @@ A Thai-language Natural Language Processing system that converts Thai questions 
 | **FastAPI Server** | `api/` | REST endpoints, request validation |
 | **NLPEngine** | `core/services/engine.py` | Main orchestrator - coordinates all steps |
 | **RAG Store** | `core/data/rag_store.py` | Semantic search for similar examples (`rag_db`) |
-| **Schema RAG** | `core/data/schema_rag.py` | [NEW] Semantic search for relevant tables (`schema_rag_db`) |
+| **Schema RAG** | `core/data/schema_rag.py` | Semantic search for relevant tables (`schema_rag_db`) |
 | **Schema Utils** | `core/domain/schema_utils.py` | Extract & filter database schema (Hybrid Search) |
 | **SQL Safety** | `core/domain/sql_safety.py` | Block destructive SQL, enforce LIMIT |
-| **Viz Recommender** | `core/viz/viz_recommender.py` | Suggest chart type based on data shape |
+| **VizService** | `core/viz/viz_recommender.py` | Unified visualization service (Rule-based + AI-powered) |
+| **Common Utils** | `core/utils/common.py` | Shared utilities (ID generation, SQL cleaning, formatting) |
 | **Query History** | `core/services/query_history.py` | Log queries, manage feedback |
 | **Database** | `core/data/database.py` | SQLAlchemy connection management |
 | **Config** | `core/config.py` | LLM provider settings (Ollama/OpenAI/Gemini), Performance flags |
@@ -148,7 +149,7 @@ nlp_sql_project/
 │   └── dependencies.py    # Dependency injection (DB state, LLM engine)
 │
 ├── core/                   # Core Business Logic
-│   ├── services/          # Apps Use Cases
+│   ├── services/          # Application Use Cases
 │   │   ├── engine.py
 │   │   └── query_history.py
 │   ├── domain/            # Business Rules
@@ -159,15 +160,25 @@ nlp_sql_project/
 │   │   ├── rag_store.py
 │   │   └── schema_rag.py
 │   ├── viz/               # Visualization
-│   │   └── viz_recommender.py
+│   │   └── viz_recommender.py  # VizService class
+│   ├── utils/             # Shared Utilities
+│   │   └── common.py      # ID generation, SQL cleaning, formatting
 │   └── config.py          # Configuration
 │
 ├── web/                    # Frontend
 │   ├── index.html         # Main UI
 │   ├── css/
 │   │   └── style.css      # Styling (dark mode, glassmorphism)
-│   └── js/
-│       └── main.js        # Frontend logic (API calls, rendering)
+│   └── js/                # ES Modules
+│       ├── main.js        # Entry point (event handlers, init)
+│       └── modules/       # Feature modules
+│           ├── api.js     # API calls
+│           ├── chart.js   # Chart.js rendering
+│           ├── config.js  # Configuration constants
+│           ├── feedback.js# Feedback modal logic
+│           ├── state.js   # Application state management
+│           ├── ui.js      # DOM manipulation, rendering
+│           └── utils.js   # Sanitization, helpers
 │
 ├── scripts/                # Utility Scripts
 │   ├── setup_db.py        # Create sample database for testing
@@ -221,19 +232,23 @@ Defines Pydantic models for type validation.
 #### `core/services/engine.py` - NLPEngine
 The brain of the system. Orchestrates:
 1. RAG example retrieval
-2. Schema extraction
+2. Schema extraction (with caching)
 3. LLM prompt construction
 4. SQL generation
 5. Validation
 6. Execution
-7. Visualization recommendation
-8. Retry logic
+7. Visualization recommendation (delegated to `VizService`)
+8. Retry logic with error context
+
+**Key Dependencies:**
+- `VizService` - For chart recommendations (injected at init)
+- `clean_sql_response()` - For SQL cleaning (from common.py)
+- `SchemaRAG` - For smart schema filtering (local LLM only)
 
 **Modify here to:**
-- Change LLM prompt template (line 55-100)
+- Change LLM prompt template (line 77-127)
 - Adjust retry strategy
 - Add new LLM providers (Claude, etc.)
-- Modify SQL formatting rules
 - Update dialect cheat sheet
 
 #### `core/data/rag_store.py` - RAG System
@@ -256,35 +271,62 @@ Validates SQL to prevent:
 - Change LIMIT enforcement rules
 - Add custom security rules
 
-#### `core/viz/viz_recommender.py` - Smart Visualization
-Analyzes DataFrame and recommends chart type with intelligent column selection.
+#### `core/viz/viz_recommender.py` - VizService
+Unified visualization recommendation service that encapsulates both rule-based and AI-powered logic.
+
+**Key Components:**
+- `VizService` class - Main service class with `recommend()` method
+- `recommend_chart_with_series()` - Rule-based recommendation with multi-series detection
+- `recommend_chart_intelligent()` - AI-powered recommendation using LLM
 
 **Key Logic:**
 - Detects metric columns (count, sum, total) for Y-axis
 - Identifies dimension columns (year, month, id) for X-axis
 - Supports user keyword preferences ("สัดส่วน", "แนวโน้ม")
+- Multi-series detection for time-based data (e.g., year + month)
 
 **Modify here to:**
 - Add new chart types
 - Improve recommendation logic
 - Add user preference keywords (e.g., "กราฟ 3D")
 
+#### `core/utils/common.py` - Shared Utilities
+Common utility functions used across the codebase to reduce duplication.
+
+**Key Functions:**
+- `generate_stable_id(*args)` - Generate MD5 hash ID for RAG entries
+- `clean_sql_response(response, dialect)` - Clean and format SQL from LLM output
+- `normalize_sql_code(raw_sql)` - Remove markdown/XML tags from SQL
+- `format_timestamp(iso_timestamp)` - Format ISO timestamp to readable format
+- `truncate_text(text, max_length)` - Truncate text with ellipsis
+
+**Modify here to:**
+- Add new shared utilities
+- Consolidate duplicate code from other modules
+
 ---
 
 ### 3. Frontend (`web/`)
 
-#### `main.js` - Client Logic
-Key functions:
-- `connectDB()` - Database connection
-- `sendMessage()` - Query submission
-- `renderChart()` - Chart.js rendering
-- `renderTable()` - Data table display
+The frontend uses ES Modules for better code organization.
+
+#### Module Structure
+| Module | Responsibility |
+|--------|----------------|
+| `main.js` | Entry point, event handlers, init, connectDB, sendMessage |
+| `modules/api.js` | All API calls (fetchSchema, sendQuery, etc.) |
+| `modules/chart.js` | Chart.js rendering with multi-series support |
+| `modules/config.js` | API_URL, color palettes |
+| `modules/feedback.js` | Feedback modal logic |
+| `modules/state.js` | Centralized application state |
+| `modules/ui.js` | DOM manipulation, appendMessage, renderTable |
+| `modules/utils.js` | sanitize(), escapeForOnclick(), formatTimestamp() |
 
 **Modify here to:**
-- Add new UI features
-- Change chart styling
-- Implement real-time query updates
-- Add export functionality (CSV, PDF)
+- Add new UI features → `ui.js` or `main.js`
+- Change chart styling → `chart.js` and `config.js`
+- Add new API endpoints → `api.js`
+- Add export functionality → Create new module
 
 #### `style.css` - Styling
 Uses modern CSS with:
@@ -460,6 +502,8 @@ ENABLE_INTELLIGENT_VIZ=false  # Set true for AI-powered chart recommendations
 3. **Shared Embedder** - `ExampleStore` and `SchemaRAG` share the same `SentenceTransformer` instance (~50% RAM reduction)
 4. **Skip Redundant Encoding** - RAG store checks existing IDs before re-encoding examples
 5. **Configurable Viz** - `ENABLE_INTELLIGENT_VIZ=false` skips AI visualization call (~30-50% faster)
+6. **Reduced Coupling** - `VizService` encapsulates visualization logic, reducing engine.py dependencies
+7. **Common Utilities** - Shared functions in `common.py` eliminate code duplication
 
 ### Backend (Future)
 1. **RAG Store** - Cache embeddings in Redis

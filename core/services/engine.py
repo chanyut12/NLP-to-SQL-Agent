@@ -9,16 +9,15 @@ import logging
 from core.data.rag_store import create_example_store
 from core.domain.sql_safety import validate_and_sanitize_sql
 from core.domain.schema_utils import (
-    get_database_schema, 
-    filter_schema, 
+    get_database_schema,
     smart_filter_schema,
     format_schema_for_prompt,
-    validate_sql_tables,
     get_join_hints
 )
 from core.data.schema_rag import create_schema_rag, SchemaRAG
 from core.config import settings
-from core.viz.viz_recommender import recommend_chart_with_series, get_chart_options
+from core.viz.viz_recommender import create_viz_service, VizService
+from core.utils.common import clean_sql_response
 
 # Setup Logger
 logging.basicConfig(level=logging.INFO)
@@ -30,6 +29,7 @@ class NLPEngine:
         self._prompt = None
         self._example_store = None
         self._schema_rag: SchemaRAG = None
+        self._viz_service: VizService = None
         self._current_engine: Engine = None  # Track for schema indexing
         self._schema_cache: dict = None  # Cache for database schema
         self._initialize_resources()
@@ -73,6 +73,12 @@ class NLPEngine:
 
         # 3. Setup Prompt Template
         self._prompt = self._create_prompt_template()
+
+        # 4. Setup Visualization Service
+        self._viz_service = create_viz_service(
+            llm=self._llm,
+            enable_intelligent=settings.ENABLE_INTELLIGENT_VIZ
+        )
 
     def _create_prompt_template(self) -> PromptTemplate:
         template = """You are an expert SQL analyst specialized in Thai language understanding.
@@ -126,37 +132,9 @@ Think step by step:
 SQL:"""
         return PromptTemplate.from_template(template)
 
-    def clean_sql(self, response: str) -> str:
+    def clean_sql(self, response: str, dialect: str = None) -> str:
         """Cleans and formats SQL from various LLM output formats."""
-        import sqlglot
-        import re
-        from core.utils.common import normalize_sql_code
-
-        # 1. Use common normalization (Extracts from <sql> or ```sql)
-        sql = normalize_sql_code(response)
-
-        # 2. If still contains explanatory text (no clean block found), find the last SELECT statement
-        # Note: normalize_sql_code returns stripped text if no tags found.
-        if not sql.upper().startswith('SELECT') and not sql.upper().startswith('WITH'):
-            # Find all SELECT statements
-            select_matches = list(re.finditer(r'(SELECT\s+.+?;)', sql, re.IGNORECASE | re.DOTALL))
-            if select_matches:
-                sql = select_matches[-1].group(1).strip()
-            else:
-                # Try without semicolon
-                select_match = re.search(r'(SELECT\s+[^;]+)', sql, re.IGNORECASE | re.DOTALL)
-                if select_match:
-                    sql = select_match.group(1).strip()
-
-        # 3. Remove trailing explanation text after semicolon
-        if ';' in sql:
-            sql = sql.split(';')[0] + ';'
-
-        try:
-            # Pretty print SQL
-            return sqlglot.transpile(sql, read=None, write=None, pretty=True)[0]
-        except Exception:
-            return sql
+        return clean_sql_response(response, dialect)
 
     def query_database(
         self,
@@ -238,7 +216,7 @@ SQL:"""
         # 4. First Attempt
         try:
             response = chain.invoke({"question": question})
-            sql = self.clean_sql(response)
+            sql = self.clean_sql(response, dialect)
         except Exception as e:
             return None, None, f"LLM Generation Failed: {str(e)}", 0, None
 
@@ -270,36 +248,9 @@ SQL:"""
                 # Using 'records' orientation: [{'col1': val, 'col2': val}, ...]
                 result_data = df.to_dict(orient='records')
 
-                # Visualization Recommendation
-                # Priority 1: Use Intelligent Viz (if available)
-                # Priority 2: Use Rule-based (fallback)
-                viz_config = {}
-                
-                try:
-                    if self._llm and settings.ENABLE_INTELLIGENT_VIZ:
-                        from core.viz.viz_recommender import recommend_chart_intelligent
-                        viz_config = recommend_chart_intelligent(df, question, self._llm)
-                        
-                        # Add options (helper)
-                        viz_config["options"] = get_chart_options(viz_config.get("chart_type", "table"))
-                    else:
-                        # Fallback to Rule-based if LLM not available OR disabled by config
-                        raise ValueError("Intelligent Viz disabled or no LLM")
-                        
-                except Exception as e:
-                    # Fallback to Rule-based
-                    chart_type, x_col, y_col, series_col = recommend_chart_with_series(df, question, preferred_chart_type)
-                    viz_config = {
-                        "chart_type": chart_type,
-                        "x_col": x_col,
-                        "y_col": y_col,
-                        "series_col": series_col,  # NEW: Multi-series support
-                        "options": get_chart_options(chart_type),
-                        "title": "Visualization",
-                        "reason": "Rule-based recommendation"
-                    }
-                    # DEBUG: Log the viz config
-                    logger.info(f"VIZ_DEBUG: chart={chart_type}, x={x_col}, y={y_col}, series={series_col}")
+                # Visualization Recommendation (delegated to VizService)
+                viz_config = self._viz_service.recommend(df, question, preferred_chart_type)
+                logger.info(f"VIZ_DEBUG: chart={viz_config.get('chart_type')}, x={viz_config.get('x_col')}, y={viz_config.get('y_col')}, series={viz_config.get('series_col')}")
                 
                 return sql, result_data, None, attempt, viz_config
                 
@@ -346,7 +297,7 @@ Return ONLY the corrected SQL query without any explanation or markdown.
 Corrected SQL:"""
                     
                     corrected = self._llm.invoke(correction_prompt)
-                    sql = self.clean_sql(corrected.content if hasattr(corrected, 'content') else str(corrected))
+                    sql = self.clean_sql(corrected.content if hasattr(corrected, 'content') else str(corrected), dialect)
                 else:
                     return sql, None, error_msg, attempt, None
 
