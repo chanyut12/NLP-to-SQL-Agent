@@ -269,7 +269,7 @@ async function sendMessage() {
         if (data.error) {
             appendMessage(`❌ Error: ${sanitize(data.error)}<br><pre><code class="language-sql">${sanitize(data.sql)}</code></pre>`, false);
         } else {
-            let html = `<strong>Generated SQL:</strong><pre><code class="language-sql">${data.sql}</code></pre>`;
+            let html = `<strong>Generated SQL:</strong><pre><code class="language-sql">${sanitize(data.sql)}</code></pre>`;
 
             if (data.data && data.data.length > 0) {
                 html += renderTable(data.data);
