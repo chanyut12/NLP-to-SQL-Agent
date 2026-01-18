@@ -17,6 +17,9 @@ import sqlglot
 from sqlglot import exp
 
 
+from core.utils.common import normalize_sql_code
+
+
 @dataclass(frozen=True)
 class SafeSQL:
     sql: str
@@ -39,14 +42,6 @@ _DISALLOWED_NODE_TYPES: tuple[type[exp.Expression], ...] = (
     exp.Command,  # e.g. PRAGMA / SHOW / other commands
     exp.Transaction,
 )
-
-
-def _normalize_sql(raw_sql: str) -> str:
-    if raw_sql is None:
-        return ""
-    sql = raw_sql.strip()
-    sql = sql.replace("```sql", "").replace("```", "").strip()
-    return sql
 
 
 def _parse_single_statement(sql: str, dialect: str) -> exp.Expression:
@@ -124,7 +119,7 @@ def validate_and_sanitize_sql(
         max_limit: maximum allowed LIMIT (injected if missing)
         allowed_tables: optional list of tables that query may reference
     """
-    sql = _normalize_sql(raw_sql)
+    sql = normalize_sql_code(raw_sql)
     if not sql:
         raise SQLSafetyError("Empty SQL.")
 

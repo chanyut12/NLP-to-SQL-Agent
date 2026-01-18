@@ -130,21 +130,14 @@ SQL:"""
         """Cleans and formats SQL from various LLM output formats."""
         import sqlglot
         import re
+        from core.utils.common import normalize_sql_code
 
-        sql = response.strip()
+        # 1. Use common normalization (Extracts from <sql> or ```sql)
+        sql = normalize_sql_code(response)
 
-        # 1. Extract SQL from <sql>...</sql> tags (Arctic-Text2SQL format)
-        sql_tag_match = re.search(r'<sql>\s*(SELECT[^<]+)', sql, re.IGNORECASE | re.DOTALL)
-        if sql_tag_match:
-            sql = sql_tag_match.group(1).strip()
-
-        # 2. Extract SQL from ```sql...``` markdown blocks
-        sql_block_match = re.search(r'```sql\s*(SELECT[^`]+)', sql, re.IGNORECASE | re.DOTALL)
-        if sql_block_match:
-            sql = sql_block_match.group(1).strip()
-
-        # 3. If still contains explanatory text, find the last SELECT statement
-        if not sql.upper().startswith('SELECT'):
+        # 2. If still contains explanatory text (no clean block found), find the last SELECT statement
+        # Note: normalize_sql_code returns stripped text if no tags found.
+        if not sql.upper().startswith('SELECT') and not sql.upper().startswith('WITH'):
             # Find all SELECT statements
             select_matches = list(re.finditer(r'(SELECT\s+.+?;)', sql, re.IGNORECASE | re.DOTALL))
             if select_matches:
@@ -155,14 +148,7 @@ SQL:"""
                 if select_match:
                     sql = select_match.group(1).strip()
 
-        # 4. Clean up common artifacts
-        sql = (
-            sql.replace("```sql", "")
-            .replace("```", "")
-            .strip()
-        )
-
-        # 5. Remove trailing explanation text after semicolon
+        # 3. Remove trailing explanation text after semicolon
         if ';' in sql:
             sql = sql.split(';')[0] + ';'
 

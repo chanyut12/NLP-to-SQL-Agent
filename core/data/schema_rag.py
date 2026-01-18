@@ -5,11 +5,12 @@ This module provides semantic search for database schema,
 with Thai-English mapping support for improved Local LLM accuracy.
 """
 
-import hashlib
 from typing import List, Dict, Optional, Any, Set
 from sentence_transformers import SentenceTransformer
 import chromadb
 from sqlalchemy import Engine, inspect
+
+from core.utils.common import generate_stable_id
 
 
 # =============================================================================
@@ -125,11 +126,6 @@ class SchemaRAG:
             )
         return self._collection
     
-    def _generate_id(self, table_name: str, column_name: str = "") -> str:
-        """Generate stable ID for schema entry."""
-        content = f"{table_name}|{column_name}"
-        return hashlib.md5(content.encode()).hexdigest()
-    
     def _create_thai_description(self, table_name: str, columns: List[str]) -> str:
         """
         Create Thai-enhanced description for a table.
@@ -199,7 +195,7 @@ class SchemaRAG:
                 description = self._create_thai_description(table, col_names)
                 embedding = embedder.encode(description).tolist()
                 
-                ids.append(self._generate_id(table))
+                ids.append(generate_stable_id(table))
                 embeddings.append(embedding)
                 documents.append(description)
                 metadatas.append({
