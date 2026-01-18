@@ -112,7 +112,9 @@ function exposeToWindow() {
 }
 
 /**
- * Handle Enter key press in input field
+ * Handle Enter key press in input field.
+ * Exposed to window for HTML onkeypress handler.
+ * @public
  * @param {KeyboardEvent} e - Keyboard event
  */
 function handleKeyPress(e) {
@@ -122,16 +124,20 @@ function handleKeyPress(e) {
 }
 
 /**
- * Load SQL into input field from history
+ * Load SQL into input field from history.
+ * Exposed to window for HTML onclick handler.
+ * @public
  * @param {string} question - Question to load
- * @param {string} sql - SQL (not used, but kept for API compatibility)
+ * @param {string} _sql - SQL (unused, kept for API compatibility)
  */
-function loadSQL(question, sql) {
+function loadSQL(question, _sql) {
     userInput.value = question;
 }
 
 /**
- * Re-run a query from history or favorites
+ * Re-run a query from history or favorites.
+ * Exposed to window for HTML onclick handler.
+ * @public
  * @param {Event} e - Click event
  * @param {string} question - Question to re-run
  * @param {string} dialect - Database dialect
@@ -144,7 +150,9 @@ function rerunQuery(e, question, dialect) {
 }
 
 /**
- * Save a query as favorite from history
+ * Save a query as favorite from history.
+ * Exposed to window for HTML onclick handler.
+ * @public
  * @param {Event} e - Click event
  * @param {string} logId - Query log ID
  * @param {string} question - Question text
@@ -162,7 +170,9 @@ async function saveFavoriteFromHistory(e, logId, question, sql, dialect) {
 }
 
 /**
- * Delete a favorite query
+ * Delete a favorite query.
+ * Exposed to window for HTML onclick handler.
+ * @public
  * @param {Event} e - Click event
  * @param {string} favId - Favorite ID
  */

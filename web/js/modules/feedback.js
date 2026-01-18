@@ -8,7 +8,9 @@ import { updateFeedback } from './api.js';
 import { fetchHistory } from './ui.js';
 
 /**
- * Show feedback modal for text input
+ * Show feedback modal for text input.
+ * Exposed to window via main.js for HTML onclick handler.
+ * @public
  * @param {Event} e - Click event
  * @param {string} logId - Query log ID
  */
