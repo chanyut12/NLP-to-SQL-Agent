@@ -29,6 +29,8 @@ let dbTypeSelect = null;
 let statusBadge = null;
 let connectBtn = null;
 let chartSelector = null;
+let sidebar = null;
+let openSidebarBtn = null;
 
 /**
  * Initialize application when DOM is ready
@@ -40,6 +42,8 @@ function init() {
     statusBadge = document.getElementById('connection-status');
     connectBtn = document.getElementById('connect-btn');
     chartSelector = document.getElementById('chart-type-selector');
+    sidebar = document.getElementById('sidebar');
+    openSidebarBtn = document.getElementById('open-sidebar-btn');
 
     // Initialize UI module
     initUI();
@@ -49,6 +53,9 @@ function init() {
 
     // Expose functions to window for HTML onclick handlers
     exposeToWindow();
+
+    // Restore sidebar state from localStorage
+    restoreSidebarState();
 }
 
 /**
@@ -92,6 +99,15 @@ function setupEventListeners() {
 
     // Connect button
     connectBtn.onclick = connectDB;
+
+    // Keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+        // Ctrl+B or Cmd+B to toggle sidebar
+        if ((e.ctrlKey || e.metaKey) && e.key === 'b') {
+            e.preventDefault();
+            toggleSidebar();
+        }
+    });
 }
 
 /**
@@ -109,6 +125,7 @@ function exposeToWindow() {
     window.submitFeedbackWithText = submitFeedbackWithText;
     window.saveFavoriteFromHistory = saveFavoriteFromHistory;
     window.deleteFavorite = deleteFavorite;
+    window.toggleSidebar = toggleSidebar;
 }
 
 /**
@@ -185,6 +202,42 @@ async function deleteFavorite(e, favId) {
         fetchFavorites();
     } catch (err) {
         alert("Failed to delete: " + err.message);
+    }
+}
+
+/**
+ * Toggle sidebar visibility.
+ * Exposed to window for HTML onclick handler and keyboard shortcut.
+ * @public
+ */
+function toggleSidebar() {
+    const isCollapsed = sidebar.classList.contains('collapsed');
+
+    if (isCollapsed) {
+        // Open sidebar
+        sidebar.classList.remove('collapsed');
+        openSidebarBtn.style.display = 'none';
+        localStorage.setItem('sidebarCollapsed', 'false');
+    } else {
+        // Close sidebar
+        sidebar.classList.add('collapsed');
+        openSidebarBtn.style.display = 'flex';
+        localStorage.setItem('sidebarCollapsed', 'true');
+    }
+}
+
+/**
+ * Restore sidebar state from localStorage
+ */
+function restoreSidebarState() {
+    const isCollapsed = localStorage.getItem('sidebarCollapsed') === 'true';
+
+    if (isCollapsed) {
+        sidebar.classList.add('collapsed');
+        openSidebarBtn.style.display = 'flex';
+    } else {
+        sidebar.classList.remove('collapsed');
+        openSidebarBtn.style.display = 'none';
     }
 }
 

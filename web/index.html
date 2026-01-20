@@ -20,8 +20,13 @@
 </head>
 
 <body>
-    <div class="sidebar">
-        <div class="brand">🤖 NLP2SQL Agent</div>
+    <div class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="brand">🤖 NLP2SQL</div>
+            <button class="toggle-sidebar-btn" id="toggle-sidebar-btn" onclick="toggleSidebar()" title="Hide Sidebar (Ctrl+B)">
+                <span class="toggle-icon">✕</span>
+            </button>
+        </div>
 
         <div class="tabs">
             <div class="tab active" onclick="switchTab('connection')">🔌 Connect</div>
@@ -88,6 +93,9 @@
     </div>
 
     <div class="chat-container">
+        <button class="open-sidebar-btn" id="open-sidebar-btn" onclick="toggleSidebar()" title="Show Sidebar (Ctrl+B)" style="display: none;">
+            ☰ Menu
+        </button>
         <div class="chat-history" id="chat-history">
             <!-- Messages will appear here -->
             <div class="message bot-message">
