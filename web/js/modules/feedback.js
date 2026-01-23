@@ -34,7 +34,9 @@ export function closeFeedbackModal() {
 }
 
 /**
- * Submit feedback with text from modal
+ * Submit feedback with text from modal.
+ * Reads text from modal textarea and sends as comment feedback.
+ * @throws {Error} If updateFeedback() fails (caught internally, shows alert)
  */
 export async function submitFeedbackWithText() {
     const textarea = document.getElementById('feedback-text-input');
@@ -54,10 +56,13 @@ export async function submitFeedbackWithText() {
 }
 
 /**
- * Send quick feedback (thumbs up/down)
+ * Send quick feedback (thumbs up/down).
+ * Exposed to window via main.js for HTML onclick handler.
+ * @public
  * @param {Event} e - Click event
  * @param {string} logId - Query log ID
- * @param {string} feedback - Feedback type (positive/negative)
+ * @param {string} feedback - Feedback type ('positive' or 'negative')
+ * @throws {Error} If updateFeedback() fails (caught internally, logged to console)
  */
 export async function sendFeedback(e, logId, feedback) {
     e.stopPropagation();

@@ -3,9 +3,13 @@
  * Contains API URL and application constants
  */
 
+/** @type {string} Backend API base URL */
 export const API_URL = "http://localhost:8000/api";
 
-// Chart color palette for multi-series charts
+/**
+ * Chart color palette for multi-series charts
+ * @type {Array<{bg: string, border: string}>}
+ */
 export const CHART_COLORS = [
     { bg: 'rgba(96, 165, 250, 0.7)', border: '#60a5fa' },   // Blue
     { bg: 'rgba(239, 68, 68, 0.7)', border: '#ef4444' },    // Red
@@ -17,7 +21,10 @@ export const CHART_COLORS = [
     { bg: 'rgba(249, 115, 22, 0.7)', border: '#f97316' },   // Orange
 ];
 
-// Pie chart colors
+/**
+ * Pie chart color palette
+ * @type {Array<string>}
+ */
 export const PIE_COLORS = [
     '#60a5fa', '#34d399', '#f472b6', '#a78bfa',
     '#fbbf24', '#f87171', '#818cf8', '#fb7185'
