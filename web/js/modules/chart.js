@@ -7,9 +7,23 @@ import { CHART_COLORS, PIE_COLORS } from './config.js';
 
 /**
  * Render a chart using Chart.js
- * @param {string} canvasId - Canvas element ID
- * @param {Object} config - Visualization configuration
- * @param {Array<Object>} data - Data to visualize
+ * Supports single-series and multi-series modes with automatic layout.
+ *
+ * @param {string} canvasId - Canvas element ID to render into
+ * @param {Object} config - Visualization configuration from backend
+ * @param {string} config.chart_type - Chart type: 'bar', 'column', 'line', 'scatter', or 'pie'
+ * @param {string} config.x_col - Column name for X-axis labels
+ * @param {string} config.y_col - Column name for Y-axis values
+ * @param {string} [config.series_col] - Column name for multi-series grouping
+ * @param {Array<Object>} data - Array of data row objects from query result
+ * @throws {Error} If Chart.js is not loaded (Chart global undefined)
+ * @example
+ * renderChart('chart-abc123', {
+ *   chart_type: 'bar',
+ *   x_col: 'department',
+ *   y_col: 'total_sales',
+ *   series_col: 'year'
+ * }, queryData);
  */
 export function renderChart(canvasId, config, data) {
     const canvas = document.getElementById(canvasId);

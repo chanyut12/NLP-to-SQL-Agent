@@ -115,7 +115,9 @@ export function renderTable(data) {
 }
 
 /**
- * Fetch and render database schema
+ * Fetch and render database schema into the sidebar panel.
+ * Displays table names with expandable column details.
+ * @throws {Error} If fetchSchemaData() fails (caught internally, logged to console)
  */
 export async function fetchSchema() {
     try {
@@ -145,7 +147,9 @@ export async function fetchSchema() {
 }
 
 /**
- * Fetch and render query history
+ * Fetch and render query history into the sidebar panel.
+ * Displays items with feedback buttons, favorites, and re-run actions.
+ * @throws {Error} If fetchHistoryData() fails (caught internally, logged to console)
  */
 export async function fetchHistory() {
     try {
@@ -201,7 +205,9 @@ export async function fetchHistory() {
 }
 
 /**
- * Fetch and render favorite queries
+ * Fetch and render favorite queries into the sidebar panel.
+ * Displays items with run and delete actions.
+ * @throws {Error} If fetchFavoritesData() fails (caught internally, logged to console)
  */
 export async function fetchFavorites() {
     try {
