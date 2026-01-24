@@ -2,7 +2,7 @@
 
 This guide documents all tuning techniques implemented and available for the Thai NLP-to-SQL Agent project. It covers both **implemented features** and **advanced techniques** you can explore further.
 
-**Last Updated:** 2026-01-09
+**Last Updated:** 2026-01-24
 
 ---
 
@@ -184,7 +184,7 @@ def generate_sql_with_retry(question, prompt, llm, engine, example_store, max_re
 
 **Files:** 
 - `core/rag_store.py` - Vector store implementation
-- `thai_sql_examples.json` - Example dataset (28 examples)
+- `thai_sql_examples.json` - Example dataset (52 examples)
 - `core/engine.py` - Integration
 
 #### What it does:
@@ -198,7 +198,7 @@ def generate_sql_with_retry(question, prompt, llm, engine, example_store, max_re
 **Example Store (`rag_store.py`):**
 ```python
 class ExampleStore:
-    DEFAULT_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    # Embedding model now loaded from settings.EMBEDDING_MODEL (core/config.py)
     
     def get_similar_examples(self, query: str, top_k: int = 3):
         query_embedding = self.embedder.encode(query).tolist()
