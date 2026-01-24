@@ -1,7 +1,7 @@
 # 📋 Product Specification: Thai NLP-to-SQL Agent
 
 **Version:** 2.4
-**Last Updated:** 2026-01-18  
+**Last Updated:** 2026-01-24  
 **Architecture:** Client-Server (REST API)
 
 ---
@@ -94,7 +94,7 @@ A Thai-language Natural Language Processing system that converts Thai questions 
 | **Common Utils** | `core/utils/common.py` | Shared utilities (ID generation, SQL cleaning, formatting) |
 | **Query History** | `core/services/query_history.py` | Log queries, manage feedback |
 | **Database** | `core/data/database.py` | SQLAlchemy connection management |
-| **Config** | `core/config.py` | LLM provider settings (Ollama/OpenAI/Gemini), Performance flags |
+| **Config** | `core/config.py` | Centralized settings: LLM providers, SQL limits, RAG params, Embedding model |
 
 ### Data Flow
 
@@ -320,7 +320,7 @@ The frontend uses ES Modules for better code organization.
 | `modules/feedback.js` | Feedback modal logic |
 | `modules/state.js` | Centralized application state |
 | `modules/ui.js` | DOM manipulation, appendMessage, renderTable |
-| `modules/utils.js` | sanitize(), escapeForOnclick(), formatTimestamp() |
+| `modules/utils.js` | sanitize(), formatTimestamp() |
 
 **Modify here to:**
 - Add new UI features → `ui.js` or `main.js`
@@ -438,12 +438,20 @@ if (error.includes("connection refused")) {
 
 ## 🧪 Testing Strategy
 
-### Unit Tests (To be implemented)
+### Unit Tests (Implemented)
 ```python
-# tests/test_sql_safety.py
-def test_blocks_destructive_sql():
-    result = validate_and_sanitize_sql("DROP TABLE users", "sqlite")
-    assert result.error == "Forbidden operation detected"
+# tests/unit/test_sql_safety.py (15 tests)
+def test_blocks_drop_table():
+    with pytest.raises(SQLSafetyError):
+        validate_and_sanitize_sql("DROP TABLE users", dialect="sqlite")
+
+# tests/unit/test_config.py (13 tests)
+def test_max_sql_limit_is_positive_int():
+    assert isinstance(settings.MAX_SQL_LIMIT, int)
+    assert settings.MAX_SQL_LIMIT > 0
+
+# Run all 31 tests:
+# pytest tests/ -v
 ```
 
 ### Integration Tests

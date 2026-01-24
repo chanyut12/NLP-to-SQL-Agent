@@ -172,7 +172,7 @@ nlp_sql_project/
 │   │   └── viz_recommender.py  # VizService
 │   ├── utils/               # Shared Utilities
 │   │   └── common.py        # ID generation, SQL cleaning
-│   └── config.py            # Settings
+│   └── config.py            # Centralized settings (LLM, SQL limits, RAG params)
 │
 ├── web/                      # Frontend
 │   ├── index.html           # Main UI
@@ -293,6 +293,9 @@ ENABLE_INTELLIGENT_VIZ=false  # Set to true for AI-powered chart recommendations
 ### การตรวจสอบ Code
 
 ```bash
+# Run unit tests (31 tests)
+python -m pytest tests/ -v
+
 # Validate Python syntax
 python -m py_compile core/*.py api/*.py
 
