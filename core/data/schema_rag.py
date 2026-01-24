@@ -193,7 +193,9 @@ class SchemaRAG:
                 
                 # Create rich description for embedding
                 description = self._create_thai_description(table, col_names)
-                embedding = embedder.encode(description).tolist()
+                # E5 models require 'passage: ' prefix for documents being indexed
+                text_to_embed = f"passage: {description}"
+                embedding = embedder.encode(text_to_embed).tolist()
                 
                 ids.append(generate_stable_id(table))
                 embeddings.append(embedding)
@@ -251,7 +253,9 @@ class SchemaRAG:
             return list(self._indexed_tables)
         
         embedder = self._get_embedder()
-        query_embedding = embedder.encode(question).tolist()
+        # E5 models require 'query: ' prefix for search queries
+        text_to_embed = f"query: {question}"
+        query_embedding = embedder.encode(text_to_embed).tolist()
         
         results = collection.query(
             query_embeddings=[query_embedding],

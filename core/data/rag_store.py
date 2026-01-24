@@ -103,8 +103,9 @@ class ExampleStore:
             if ex_id in existing_ids:
                 continue
             
-            # Embed only if new
-            embedding = self.embedder.encode(question).tolist()
+            # E5 models require 'passage: ' prefix for documents being indexed
+            text_to_embed = f"passage: {question}"
+            embedding = self.embedder.encode(text_to_embed).tolist()
             
             new_ids.append(ex_id)
             new_embeddings.append(embedding)
@@ -144,7 +145,9 @@ class ExampleStore:
             dialect: If provided, prefers or filters by this dialect (optional future enhancement)
             threshold: Distance threshold for filtering (default: None)
         """
-        query_embedding = self.embedder.encode(query).tolist()
+        # E5 models require 'query: ' prefix for search queries
+        text_to_embed = f"query: {query}"
+        query_embedding = self.embedder.encode(text_to_embed).tolist()
 
         # Query with optional dialect filter
         # ถ้าระบุ dialect จะ filter เฉพาะ examples ที่ตรงกับ dialect นั้น
