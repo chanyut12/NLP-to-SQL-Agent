@@ -13,6 +13,7 @@ from chromadb.config import Settings
 from sentence_transformers import SentenceTransformer
 
 from core.utils.common import generate_stable_id
+from core.config import settings
 
 
 class ExampleStore:
@@ -21,21 +22,19 @@ class ExampleStore:
     Retrieves semantically similar examples for few-shot prompting.
     """
     
-    # Multilingual model that supports Thai
-    DEFAULT_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     COLLECTION_NAME = "thai_sql_examples_v2"
     
     def __init__(
         self,
         examples_path: str = "thai_sql_examples.json",
-        model_name: str = DEFAULT_MODEL,
+        model_name: str = None,
         persist_directory: Optional[str] = "rag_db"
     ):
         """
         Initialize the example store.
         """
         self.examples_path = examples_path
-        self.model_name = model_name
+        self.model_name = model_name or settings.EMBEDDING_MODEL
         self.persist_directory = persist_directory
         self._embedder = None  # Lazy load
         

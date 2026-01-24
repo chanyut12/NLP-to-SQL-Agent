@@ -141,18 +141,24 @@ SQL:"""
         question: str,
         engine: Engine,
         dialect: str = "sqlite",
-        max_limit: int = 500,
-        max_retries: int = 2,
+        max_limit: int = None,
+        max_retries: int = None,
         preferred_chart_type: str = None
     ):
         """
         Main entry point to generate SQL and execute it against the DB.
         Returns: (sql, dataframe_dict, error_message, retry_count)
         """
+        # Use settings if not explicitly provided
+        if max_limit is None:
+            max_limit = settings.MAX_SQL_LIMIT
+        if max_retries is None:
+            max_retries = settings.MAX_RETRIES
+        
         # 1. RAG Retrieval (ส่ง dialect เพื่อ filter examples ที่ตรงกับ database)
         dynamic_examples = self._example_store.format_examples_for_prompt(
             question, 
-            top_k=3, 
+            top_k=settings.RAG_TOP_K, 
             dialect=dialect,
             threshold=settings.RAG_DISTANCE_THRESHOLD
         )
@@ -188,7 +194,7 @@ SQL:"""
                 question, 
                 schema_rag=self._schema_rag,
                 llm=self._llm,  # Send LLM for Tier 3 Guessing
-                top_k=5
+                top_k=settings.SCHEMA_TOP_K
             )
             
             # Add JOIN hints if multiple tables

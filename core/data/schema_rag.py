@@ -79,12 +79,11 @@ class SchemaRAG:
     Uses ChromaDB for semantic search of relevant tables/columns.
     """
     
-    DEFAULT_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     COLLECTION_NAME = "schema_metadata_v1"
     
     def __init__(
         self,
-        model_name: str = DEFAULT_MODEL,
+        model_name: str = None,
         persist_directory: Optional[str] = "schema_rag_db",
         embedder: Optional[SentenceTransformer] = None
     ):
@@ -96,7 +95,8 @@ class SchemaRAG:
             persist_directory: Directory to persist ChromaDB
             embedder: Optional shared SentenceTransformer instance
         """
-        self.model_name = model_name
+        from core.config import settings
+        self.model_name = model_name or settings.EMBEDDING_MODEL
         self.persist_directory = persist_directory
         self._embedder = embedder
         self._client = None

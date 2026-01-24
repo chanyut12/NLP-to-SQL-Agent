@@ -15,10 +15,32 @@ class Settings:
     # OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "a-kore/Arctic-Text2SQL-R1-7B") # If you have a lot of RAM , processing will be faster
     OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
-    # RAG Configuration
-    RAG_DISTANCE_THRESHOLD = 15.0
-
-    # App Configuration
+    # ===========================================================================
+    # RAG Configuration (การดึงตัวอย่าง SQL ที่ใกล้เคียง)
+    # ===========================================================================
+    RAG_DISTANCE_THRESHOLD = 15.0  # ค่า threshold สำหรับกรอง example ที่ไกลเกินไป (ยิ่งต่ำยิ่งเข้มงวด)
+    RAG_TOP_K = 3                  # จำนวนตัวอย่าง SQL ที่จะดึงมาช่วย LLM (Few-shot examples)
+    
+    # ===========================================================================
+    # Schema RAG Configuration (การดึง Schema ที่เกี่ยวข้อง)
+    # ===========================================================================
+    SCHEMA_TOP_K = 5               # จำนวนตารางที่จะดึงมาให้ LLM พิจารณา (สำหรับ Ollama local model)
+    
+    # ===========================================================================
+    # Embedding Model (โมเดลสำหรับ Semantic Search)
+    # ===========================================================================
+    # โมเดลนี้รองรับภาษาไทย ใช้สำหรับ RAG และ Schema search
+    EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    
+    # ===========================================================================
+    # SQL Execution Configuration (การรัน SQL)
+    # ===========================================================================
+    MAX_SQL_LIMIT = 500            # จำนวนแถวสูงสุดที่อนุญาตให้ query ได้ (ป้องกัน DoS)
+    MAX_RETRIES = 2                # จำนวนครั้งที่จะ retry เมื่อ SQL ผิดพลาด (Self-correction)
+    
+    # ===========================================================================
+    # App Configuration (การตั้งค่าแอปพลิเคชัน)
+    # ===========================================================================
     ENABLE_INTELLIGENT_VIZ = False  # Set to False to speed up response (disable extra LLM call)
     LOG_FILE_JSONL = "query_logs.jsonl"
     LOG_FILE_CSV = "query_logs.csv"
