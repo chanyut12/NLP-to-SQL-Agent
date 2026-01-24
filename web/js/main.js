@@ -2,7 +2,7 @@
  * Main entry point for Thai NLP-to-SQL Agent
  *
  * This file imports all modules and sets up the application.
- * Functions are exposed to window object for HTML onclick handlers.
+ * Uses event delegation via data-action attributes instead of inline handlers.
  */
 
 // Module imports
@@ -51,15 +51,12 @@ function init() {
     // Set up event listeners
     setupEventListeners();
 
-    // Expose functions to window for HTML onclick handlers
-    exposeToWindow();
-
     // Restore sidebar state from localStorage
     restoreSidebarState();
 }
 
 /**
- * Set up all event listeners
+ * Set up all event listeners using event delegation
  */
 function setupEventListeners() {
     // Database type selector
@@ -98,7 +95,12 @@ function setupEventListeners() {
     });
 
     // Connect button
-    connectBtn.onclick = connectDB;
+    connectBtn.addEventListener('click', connectDB);
+
+    // User input - Enter key to send
+    userInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') sendMessage();
+    });
 
     // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
@@ -108,76 +110,87 @@ function setupEventListeners() {
             toggleSidebar();
         }
     });
+
+    // Global click event delegation for all data-action elements
+    document.addEventListener('click', handleAction);
 }
 
 /**
- * Expose functions to window object for HTML onclick handlers
+ * Global event delegation handler.
+ * Routes clicks on elements with data-action attributes to appropriate functions.
+ * @param {MouseEvent} e - Click event
  */
-function exposeToWindow() {
-    window.switchTab = switchTab;
-    window.sendMessage = sendMessage;
-    window.handleKeyPress = handleKeyPress;
-    window.loadSQL = loadSQL;
-    window.rerunQuery = rerunQuery;
-    window.sendFeedback = sendFeedback;
-    window.showFeedbackModal = showFeedbackModal;
-    window.closeFeedbackModal = closeFeedbackModal;
-    window.submitFeedbackWithText = submitFeedbackWithText;
-    window.saveFavoriteFromHistory = saveFavoriteFromHistory;
-    window.deleteFavorite = deleteFavorite;
-    window.toggleSidebar = toggleSidebar;
-}
+function handleAction(e) {
+    const target = e.target.closest('[data-action]');
+    if (!target) return;
 
-/**
- * Handle Enter key press in input field.
- * Exposed to window for HTML onkeypress handler.
- * @public
- * @param {KeyboardEvent} e - Keyboard event
- */
-function handleKeyPress(e) {
-    if (e.key === 'Enter') {
-        sendMessage();
+    const action = target.dataset.action;
+
+    switch (action) {
+        case 'toggleSidebar':
+            toggleSidebar();
+            break;
+        case 'switchTab':
+            switchTab(target.dataset.tab);
+            break;
+        case 'sendMessage':
+            sendMessage();
+            break;
+        case 'closeFeedbackModal':
+            closeFeedbackModal();
+            break;
+        case 'submitFeedbackWithText':
+            submitFeedbackWithText();
+            break;
+        case 'loadSQL':
+            loadSQL(target.dataset.question, target.dataset.sql);
+            break;
+        case 'sendFeedback':
+            sendFeedback(target.dataset.logId, target.dataset.type);
+            break;
+        case 'showFeedbackModal':
+            showFeedbackModal(target.dataset.logId);
+            break;
+        case 'saveFavorite':
+            saveFavoriteFromHistory(target.dataset.logId, target.dataset.question, target.dataset.sql, target.dataset.dialect);
+            break;
+        case 'rerunQuery':
+            rerunQuery(target.dataset.question, target.dataset.dialect);
+            break;
+        case 'deleteFavorite':
+            deleteFavorite(target.dataset.favId);
+            break;
     }
 }
 
 /**
- * Load SQL into input field from history.
- * Exposed to window for HTML onclick handler.
- * @public
+ * Load SQL into input field from history
  * @param {string} question - Question to load
- * @param {string} _sql - SQL (unused, kept for API compatibility)
+ * @param {string} _sql - SQL (unused, kept for compatibility)
  */
 function loadSQL(question, _sql) {
     userInput.value = question;
 }
 
 /**
- * Re-run a query from history or favorites.
- * Exposed to window for HTML onclick handler.
- * @public
- * @param {Event} e - Click event
+ * Re-run a query from history or favorites
  * @param {string} question - Question to re-run
  * @param {string} dialect - Database dialect
  */
-function rerunQuery(e, question, dialect) {
-    e.stopPropagation();
+function rerunQuery(question, dialect) {
     userInput.value = question;
     dbTypeSelect.value = dialect === 'sqlite' ? 'SQLite' : (dialect === 'mysql' ? 'MySQL' : 'PostgreSQL');
     sendMessage();
 }
 
 /**
- * Save a query as favorite from history.
- * Exposed to window for HTML onclick handler.
- * @public
- * @param {Event} e - Click event
+ * Save a query as favorite from history
  * @param {string} logId - Query log ID
  * @param {string} question - Question text
  * @param {string} sql - SQL query
  * @param {string} dialect - Database dialect
  */
-async function saveFavoriteFromHistory(e, logId, question, sql, dialect) {
-    e.stopPropagation();
+async function saveFavoriteFromHistory(logId, question, sql, dialect) {
     try {
         await saveFavorite(question, sql, dialect, logId);
         switchTab('favorites');
@@ -187,14 +200,10 @@ async function saveFavoriteFromHistory(e, logId, question, sql, dialect) {
 }
 
 /**
- * Delete a favorite query.
- * Exposed to window for HTML onclick handler.
- * @public
- * @param {Event} e - Click event
+ * Delete a favorite query
  * @param {string} favId - Favorite ID
  */
-async function deleteFavorite(e, favId) {
-    e.stopPropagation();
+async function deleteFavorite(favId) {
     if (!confirm("Remove this favorite?")) return;
 
     try {
@@ -206,20 +215,16 @@ async function deleteFavorite(e, favId) {
 }
 
 /**
- * Toggle sidebar visibility.
- * Exposed to window for HTML onclick handler and keyboard shortcut.
- * @public
+ * Toggle sidebar visibility
  */
 function toggleSidebar() {
     const isCollapsed = sidebar.classList.contains('collapsed');
 
     if (isCollapsed) {
-        // Open sidebar
         sidebar.classList.remove('collapsed');
         openSidebarBtn.style.display = 'none';
         localStorage.setItem('sidebarCollapsed', 'false');
     } else {
-        // Close sidebar
         sidebar.classList.add('collapsed');
         openSidebarBtn.style.display = 'flex';
         localStorage.setItem('sidebarCollapsed', 'true');

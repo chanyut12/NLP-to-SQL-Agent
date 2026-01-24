@@ -23,16 +23,16 @@
     <div class="sidebar" id="sidebar">
         <div class="sidebar-header">
             <div class="brand">🤖 NLP2SQL</div>
-            <button class="toggle-sidebar-btn" id="toggle-sidebar-btn" onclick="toggleSidebar()" title="Hide Sidebar (Ctrl+B)">
+            <button class="toggle-sidebar-btn" id="toggle-sidebar-btn" data-action="toggleSidebar" title="Hide Sidebar (Ctrl+B)">
                 <span class="toggle-icon">✕</span>
             </button>
         </div>
 
         <div class="tabs">
-            <div class="tab active" onclick="switchTab('connection')">🔌 Connect</div>
-            <div class="tab" onclick="switchTab('schema')">🗄️ Schema</div>
-            <div class="tab" onclick="switchTab('history')">📜 History</div>
-            <div class="tab" onclick="switchTab('favorites')">⭐ Favs</div>
+            <div class="tab active" data-action="switchTab" data-tab="connection">🔌 Connect</div>
+            <div class="tab" data-action="switchTab" data-tab="schema">🗄️ Schema</div>
+            <div class="tab" data-action="switchTab" data-tab="history">📜 History</div>
+            <div class="tab" data-action="switchTab" data-tab="favorites">⭐ Favs</div>
         </div>
 
         <!-- Tab Content: Connection -->
@@ -93,7 +93,7 @@
     </div>
 
     <div class="chat-container">
-        <button class="open-sidebar-btn" id="open-sidebar-btn" onclick="toggleSidebar()" title="Show Sidebar (Ctrl+B)" style="display: none;">
+        <button class="open-sidebar-btn" id="open-sidebar-btn" data-action="toggleSidebar" title="Show Sidebar (Ctrl+B)" style="display: none;">
             ☰ Menu
         </button>
         <div class="chat-history" id="chat-history">
@@ -105,8 +105,7 @@
         </div>
 
         <div class="input-area">
-            <input type="text" id="user-input" placeholder="ถามเกี่ยวกับข้อมูลของคุณ... (เช่น ยอดขายเดือนนี้เท่าไหร่)"
-                onkeypress="handleKeyPress(event)">
+            <input type="text" id="user-input" placeholder="ถามเกี่ยวกับข้อมูลของคุณ... (เช่น ยอดขายเดือนนี้เท่าไหร่)">
 
             <!-- Chart Type Selector (Dynamic) -->
             <select id="chart-type-selector"
@@ -118,7 +117,7 @@
                 <option value="scatter">Scatter Plot</option>
             </select>
 
-            <button class="primary-btn" onclick="sendMessage()">Send 🚀</button>
+            <button class="primary-btn" data-action="sendMessage">Send 🚀</button>
         </div>
     </div>
 
@@ -127,13 +126,13 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h3>💬 Add Feedback</h3>
-                <button class="close-btn" onclick="closeFeedbackModal()">&times;</button>
+                <button class="close-btn" data-action="closeFeedbackModal">&times;</button>
             </div>
             <textarea id="feedback-text-input"
                 placeholder="พิมพ์ feedback ของคุณ... (เช่น SQL ผิด, ต้องการ JOIN อีกตาราง, etc.)" rows="4"></textarea>
             <div class="modal-actions">
-                <button class="secondary-btn" onclick="closeFeedbackModal()">Cancel</button>
-                <button class="primary-btn" onclick="submitFeedbackWithText()">Submit 💬</button>
+                <button class="secondary-btn" data-action="closeFeedbackModal">Cancel</button>
+                <button class="primary-btn" data-action="submitFeedbackWithText">Submit 💬</button>
             </div>
         </div>
     </div>
