@@ -7,6 +7,7 @@ with persistence, dialect filtering, and metadata support.
 
 import json
 import os
+import asyncio
 from typing import List, Dict, Optional, Any
 import chromadb
 from chromadb.config import Settings
@@ -201,6 +202,23 @@ class ExampleStore:
             formatted.append(f"Question: {ex['question']}\nSQL: {ex['sql']}")
         
         return "\n\n".join(formatted)
+
+    async def async_format_examples_for_prompt(
+        self,
+        query: str,
+        top_k: int = 3,
+        dialect: Optional[str] = None,
+        threshold: Optional[float] = None
+    ) -> str:
+        """
+        Async version of format_examples_for_prompt.
+        Wraps blocking embedding/query operations in asyncio.to_thread.
+        """
+        return await asyncio.to_thread(
+            self.format_examples_for_prompt,
+            query, top_k, dialect, threshold
+        )
+
 
 def create_example_store(
     examples_path: str = "thai_sql_examples.json",

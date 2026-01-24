@@ -1,4 +1,5 @@
 import pandas as pd
+import asyncio
 from langchain_community.utilities import SQLDatabase
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
@@ -136,7 +137,7 @@ SQL:"""
         """Cleans and formats SQL from various LLM output formats."""
         return clean_sql_response(response, dialect)
 
-    def query_database(
+    async def query_database(
         self,
         question: str,
         engine: Engine,
@@ -147,7 +148,9 @@ SQL:"""
     ):
         """
         Main entry point to generate SQL and execute it against the DB.
-        Returns: (sql, dataframe_dict, error_message, retry_count)
+        Returns: (sql, dataframe_dict, error_message, retry_count, viz_config)
+        
+        This method is async and uses parallel RAG retrieval for better performance.
         """
         # Use settings if not explicitly provided
         if max_limit is None:
@@ -155,59 +158,73 @@ SQL:"""
         if max_retries is None:
             max_retries = settings.MAX_RETRIES
         
-        # 1. RAG Retrieval (ส่ง dialect เพื่อ filter examples ที่ตรงกับ database)
-        dynamic_examples = self._example_store.format_examples_for_prompt(
-            question, 
-            top_k=settings.RAG_TOP_K, 
-            dialect=dialect,
-            threshold=settings.RAG_DISTANCE_THRESHOLD
-        )
-        
-        # 2. Schema Extraction with Caching
-        # Check if we have cached schema for this engine
+        # Check if engine changed for caching purposes
         engine_changed = (self._current_engine != engine)
         
+        # Get raw schema (with caching)
         if not engine_changed and self._schema_cache is not None:
             raw_schema = self._schema_cache
         else:
             # Cache miss or engine changed - fetch and cache
-            raw_schema = get_database_schema(engine)
+            raw_schema = await asyncio.to_thread(get_database_schema, engine)
             self._schema_cache = raw_schema
             self._current_engine = engine
         
+        # Initialize Schema RAG if needed (for local LLM)
+        if settings.MODEL_PROVIDER == "ollama" and self._schema_rag is None:
+            shared_embedder = self._example_store.embedder
+            self._schema_rag = create_schema_rag(embedder=shared_embedder)
         
-        # Use smart filtering ONLY for local LLM (limited context window)
-        # Cloud LLMs (OpenAI, Claude) can handle full schema, so skip optimization
-        if settings.MODEL_PROVIDER == "ollama":
-            # Initialize & index SchemaRAG if needed (lazy, once per DB)
-            if self._schema_rag is None:
-                # Share embedder from ExampleStore to save RAM
-                shared_embedder = self._example_store.embedder
-                self._schema_rag = create_schema_rag(embedder=shared_embedder)
-            
-            if engine_changed:
-                self._schema_rag.index_schema_from_db(engine)
-            
-            # Use smart filtering (semantic + Thai mapping)
-            filtered_schema = smart_filter_schema(
-                raw_schema, 
+        # Index schema if engine changed
+        if settings.MODEL_PROVIDER == "ollama" and engine_changed:
+            await asyncio.to_thread(self._schema_rag.index_schema_from_db, engine)
+        
+        # =============================================================
+        # PARALLEL RAG RETRIEVAL - Key Performance Optimization
+        # =============================================================
+        # Execute Example RAG and Schema processing concurrently
+        
+        async def get_examples():
+            """Async task: Get similar examples from RAG store."""
+            return await self._example_store.async_format_examples_for_prompt(
                 question, 
-                schema_rag=self._schema_rag,
-                llm=self._llm,  # Send LLM for Tier 3 Guessing
-                top_k=settings.SCHEMA_TOP_K
+                top_k=settings.RAG_TOP_K, 
+                dialect=dialect,
+                threshold=settings.RAG_DISTANCE_THRESHOLD
             )
-            
-            # Add JOIN hints if multiple tables
-            join_hints = get_join_hints(list(filtered_schema.keys()), filtered_schema)
-            schema_text = format_schema_for_prompt(filtered_schema)
-            if join_hints:
-                schema_text += f"\n\n{join_hints}"
-        else:
-            # Cloud LLM: use full schema (no filtering needed)
-            filtered_schema = raw_schema
-            schema_text = format_schema_for_prompt(raw_schema)
         
-        # 3. Chain Execution
+        async def get_schema_text():
+            """Async task: Get filtered schema (for local LLM) or full schema."""
+            if settings.MODEL_PROVIDER == "ollama":
+                # Use smart filtering (semantic + Thai mapping)
+                filtered_schema = await asyncio.to_thread(
+                    smart_filter_schema,
+                    raw_schema, 
+                    question, 
+                    self._schema_rag,
+                    self._llm,
+                    settings.SCHEMA_TOP_K
+                )
+                
+                # Add JOIN hints if multiple tables
+                join_hints = get_join_hints(list(filtered_schema.keys()), filtered_schema)
+                schema_text = format_schema_for_prompt(filtered_schema)
+                if join_hints:
+                    schema_text += f"\n\n{join_hints}"
+                return schema_text
+            else:
+                # Cloud LLM: use full schema (no filtering needed)
+                return format_schema_for_prompt(raw_schema)
+        
+        # Run both tasks in parallel
+        dynamic_examples, schema_text = await asyncio.gather(
+            get_examples(),
+            get_schema_text()
+        )
+        
+        # =============================================================
+        # LLM Chain Execution
+        # =============================================================
         chain = (
             self._prompt.partial(
                 dynamic_examples=dynamic_examples,
@@ -219,14 +236,14 @@ SQL:"""
             | StrOutputParser()
         )
         
-        # 4. First Attempt
+        # First Attempt - Use async invoke if available
         try:
-            response = chain.invoke({"question": question})
+            response = await asyncio.to_thread(chain.invoke, {"question": question})
             sql = self.clean_sql(response, dialect)
         except Exception as e:
             return None, None, f"LLM Generation Failed: {str(e)}", 0, None
 
-        # 5. Retry Loop
+        # Retry Loop
         all_tables = list(raw_schema.keys())
         
         for attempt in range(max_retries + 1):
@@ -247,11 +264,10 @@ SQL:"""
                 except Exception:
                     pass # Keep as is if formatting fails
 
-                # Execution
-                df = pd.read_sql(sql, engine)
+                # Execution - wrap in thread to not block event loop
+                df = await asyncio.to_thread(pd.read_sql, sql, engine)
                 
                 # Convert DF to dict for JSON serialization
-                # Using 'records' orientation: [{'col1': val, 'col2': val}, ...]
                 result_data = df.to_dict(orient='records')
 
                 # Visualization Recommendation (delegated to VizService)
@@ -302,9 +318,10 @@ Please analyze the error and provide a corrected SQL query.
 Return ONLY the corrected SQL query without any explanation or markdown.
 Corrected SQL:"""
                     
-                    corrected = self._llm.invoke(correction_prompt)
+                    corrected = await asyncio.to_thread(self._llm.invoke, correction_prompt)
                     sql = self.clean_sql(corrected.content if hasattr(corrected, 'content') else str(corrected), dialect)
                 else:
                     return sql, None, error_msg, attempt, None
 
         return sql, None, "Max retries exceeded", max_retries, None
+

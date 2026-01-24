@@ -5,6 +5,7 @@ This module provides semantic search for database schema,
 with Thai-English mapping support for improved Local LLM accuracy.
 """
 
+import asyncio
 from typing import List, Dict, Optional, Any, Set
 from sentence_transformers import SentenceTransformer
 import chromadb
@@ -269,6 +270,21 @@ class SchemaRAG:
                     relevant_tables.add(table)
         
         return list(relevant_tables)
+    
+    async def async_get_relevant_tables(
+        self,
+        question: str,
+        top_k: int = 5,
+        include_mapped: bool = True
+    ) -> List[str]:
+        """
+        Async version of get_relevant_tables.
+        Wraps blocking embedding/query operations in asyncio.to_thread.
+        """
+        return await asyncio.to_thread(
+            self.get_relevant_tables,
+            question, top_k, include_mapped
+        )
     
     def _get_mapped_tables(self, question: str) -> Set[str]:
         """

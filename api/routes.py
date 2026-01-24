@@ -94,7 +94,7 @@ async def query_data(
     
     start_time = time.time()
     try:
-        sql, data, error, retry_count, viz_config = engine.query_database(
+        sql, data, error, retry_count, viz_config = await engine.query_database(
             question=request.question,
             engine=state.db_engine,
             dialect=request.dialect if request.dialect else "sqlite",
