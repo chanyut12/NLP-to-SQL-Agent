@@ -16,21 +16,6 @@ export function sanitize(text) {
 }
 
 /**
- * Escape string for use in onclick handlers
- * @param {string} str - String to escape
- * @returns {string} Escaped string safe for onclick
- */
-export function escapeForOnclick(str) {
-    if (!str) return '';
-    return str
-        .replace(/\\/g, '\\\\')
-        .replace(/'/g, "\\'")
-        .replace(/"/g, '&quot;')
-        .replace(/\n/g, '\\n')
-        .replace(/\r/g, '\\r');
-}
-
-/**
  * Format timestamp to locale string
  * @param {string} timestamp - ISO timestamp
  * @returns {string} Formatted date string

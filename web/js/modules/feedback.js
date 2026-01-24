@@ -9,13 +9,10 @@ import { fetchHistory } from './ui.js';
 
 /**
  * Show feedback modal for text input.
- * Exposed to window via main.js for HTML onclick handler.
- * @public
- * @param {Event} e - Click event
+ * Called via event delegation from main.js handleAction().
  * @param {string} logId - Query log ID
  */
-export function showFeedbackModal(e, logId) {
-    e.stopPropagation();
+export function showFeedbackModal(logId) {
     setFeedbackLogId(logId);
     const modal = document.getElementById('feedback-modal');
     const textarea = document.getElementById('feedback-text-input');
@@ -57,15 +54,12 @@ export async function submitFeedbackWithText() {
 
 /**
  * Send quick feedback (thumbs up/down).
- * Exposed to window via main.js for HTML onclick handler.
- * @public
- * @param {Event} e - Click event
+ * Called via event delegation from main.js handleAction().
  * @param {string} logId - Query log ID
  * @param {string} feedback - Feedback type ('positive' or 'negative')
  * @throws {Error} If updateFeedback() fails (caught internally, logged to console)
  */
-export async function sendFeedback(e, logId, feedback) {
-    e.stopPropagation();
+export async function sendFeedback(logId, feedback) {
     try {
         await updateFeedback(logId, feedback, null);
         fetchHistory(); // Refresh to show result

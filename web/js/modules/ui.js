@@ -3,7 +3,7 @@
  * Handles DOM manipulation, messages, and rendering
  */
 
-import { sanitize, escapeForOnclick, formatTimestamp } from './utils.js';
+import { sanitize, formatTimestamp } from './utils.js';
 import { isConnected, setCurrentTab, getCurrentTab } from './state.js';
 import { fetchSchemaData, fetchHistoryData, fetchFavoritesData } from './api.js';
 
@@ -32,7 +32,7 @@ export function switchTab(tabId) {
 
     // Update Tab UI
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    document.querySelector(`.tab[onclick="switchTab('${tabId}')"]`).classList.add('active');
+    document.querySelector(`.tab[data-tab="${tabId}"]`).classList.add('active');
 
     // Update Content UI
     document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
@@ -165,11 +165,8 @@ export async function fetchHistory() {
             const isNeg = item.feedback === 'negative';
             const hasFeedbackText = item.feedback_text && item.feedback_text.trim().length > 0;
 
-            const escapedQuestion = escapeForOnclick(item.question);
-            const escapedSql = escapeForOnclick(item.sql);
-
             return `
-            <div class="history-item" onclick="loadSQL('${escapedQuestion}', '${escapedSql}')">
+            <div class="history-item" data-action="loadSQL" data-question="${sanitize(item.question)}" data-sql="${sanitize(item.sql)}">
                 <div class="item-header">
                     <span>${formatTimestamp(item.timestamp)}</span>
                     <span style="color: ${item.status.includes('Success') ? '#22c55e' : '#ef4444'}">${item.status}</span>
@@ -178,21 +175,21 @@ export async function fetchHistory() {
                 <div class="item-sql">${sanitize(item.sql)}</div>
                 ${hasFeedbackText ? `<div class="feedback-comment" title="User Feedback">💬 ${sanitize(item.feedback_text)}</div>` : ''}
                 <div class="actions">
-                    <button class="icon-btn" onclick="sendFeedback(event, '${item.log_id}', 'positive')"
+                    <button class="icon-btn" data-action="sendFeedback" data-log-id="${item.log_id}" data-type="positive"
                         style="${isPos ? 'color: #22c55e; font-weight: bold;' : ''}" title="Good Response">
                         👍
                     </button>
-                    <button class="icon-btn" onclick="sendFeedback(event, '${item.log_id}', 'negative')"
+                    <button class="icon-btn" data-action="sendFeedback" data-log-id="${item.log_id}" data-type="negative"
                         style="${isNeg ? 'color: #ef4444; font-weight: bold;' : ''}" title="Bad Response">
                         👎
                     </button>
-                    <button class="icon-btn" onclick="showFeedbackModal(event, '${item.log_id}')" title="Add Comment">
+                    <button class="icon-btn" data-action="showFeedbackModal" data-log-id="${item.log_id}" title="Add Comment">
                         💬
                     </button>
-                    <button class="icon-btn" onclick="saveFavoriteFromHistory(event, '${item.log_id}', '${escapedQuestion}', '${escapedSql}', '${item.dialect}')" title="Save as Favorite">
+                    <button class="icon-btn" data-action="saveFavorite" data-log-id="${item.log_id}" data-question="${sanitize(item.question)}" data-sql="${sanitize(item.sql)}" data-dialect="${item.dialect}" title="Save as Favorite">
                         ⭐
                     </button>
-                    <button class="icon-btn" onclick="rerunQuery(event, '${escapedQuestion}', '${item.dialect}')" title="Re-run">
+                    <button class="icon-btn" data-action="rerunQuery" data-question="${sanitize(item.question)}" data-dialect="${item.dialect}" title="Re-run">
                         🔄
                     </button>
                 </div>
@@ -226,10 +223,10 @@ export async function fetchFavorites() {
                 <div class="item-question">${sanitize(item.name || item.question)}</div>
                 <div class="item-sql">${sanitize(item.sql)}</div>
                 <div class="actions">
-                    <button class="icon-btn" onclick="rerunQuery(event, '${escapeForOnclick(item.question)}', '${item.dialect}')" title="Run">
+                    <button class="icon-btn" data-action="rerunQuery" data-question="${sanitize(item.question)}" data-dialect="${item.dialect}" title="Run">
                         ▶️
                     </button>
-                    <button class="icon-btn delete" onclick="deleteFavorite(event, '${item.favorite_id}')" title="Delete">
+                    <button class="icon-btn delete" data-action="deleteFavorite" data-fav-id="${item.favorite_id}" title="Delete">
                         🗑️
                     </button>
                 </div>
