@@ -82,7 +82,8 @@ ollama pull qwen2.5-coder:7b
 python scripts/setup_db.py
 
 # 6. Start backend API
-uvicorn api.main:app --reload
+./start_server.sh          # Mac/Linux
+# หรือ: start_server.bat   # Windows
 
 # 7. Open frontend
 # เปิดไฟล์ web/index.html ในเบราว์เซอร์
