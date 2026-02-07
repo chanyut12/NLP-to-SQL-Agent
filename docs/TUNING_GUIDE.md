@@ -198,10 +198,13 @@ def generate_sql_with_retry(question, prompt, llm, engine, example_store, max_re
 **Example Store (`rag_store.py`):**
 ```python
 class ExampleStore:
-    # Embedding model now loaded from settings.EMBEDDING_MODEL (core/config.py)
+    # Embedding model loaded from settings.EMBEDDING_MODEL (core/config.py)
+    # Now uses intfloat/multilingual-e5-small with query/passage prefixes
     
     def get_similar_examples(self, query: str, top_k: int = 3):
-        query_embedding = self.embedder.encode(query).tolist()
+        # E5 requires 'query: ' prefix for search
+        text_to_embed = f"query: {query}"
+        query_embedding = self.embedder.encode(text_to_embed).tolist()
         results = self.collection.query(
             query_embeddings=[query_embedding],
             n_results=top_k

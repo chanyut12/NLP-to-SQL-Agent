@@ -7,6 +7,7 @@ with persistence, dialect filtering, and metadata support.
 
 import json
 import os
+import asyncio
 from typing import List, Dict, Optional, Any
 import chromadb
 from chromadb.config import Settings
@@ -103,8 +104,9 @@ class ExampleStore:
             if ex_id in existing_ids:
                 continue
             
-            # Embed only if new
-            embedding = self.embedder.encode(question).tolist()
+            # E5 models require 'passage: ' prefix for documents being indexed
+            text_to_embed = f"passage: {question}"
+            embedding = self.embedder.encode(text_to_embed).tolist()
             
             new_ids.append(ex_id)
             new_embeddings.append(embedding)
@@ -144,7 +146,9 @@ class ExampleStore:
             dialect: If provided, prefers or filters by this dialect (optional future enhancement)
             threshold: Distance threshold for filtering (default: None)
         """
-        query_embedding = self.embedder.encode(query).tolist()
+        # E5 models require 'query: ' prefix for search queries
+        text_to_embed = f"query: {query}"
+        query_embedding = self.embedder.encode(text_to_embed).tolist()
 
         # Query with optional dialect filter
         # ถ้าระบุ dialect จะ filter เฉพาะ examples ที่ตรงกับ dialect นั้น
@@ -198,6 +202,23 @@ class ExampleStore:
             formatted.append(f"Question: {ex['question']}\nSQL: {ex['sql']}")
         
         return "\n\n".join(formatted)
+
+    async def async_format_examples_for_prompt(
+        self,
+        query: str,
+        top_k: int = 3,
+        dialect: Optional[str] = None,
+        threshold: Optional[float] = None
+    ) -> str:
+        """
+        Async version of format_examples_for_prompt.
+        Wraps blocking embedding/query operations in asyncio.to_thread.
+        """
+        return await asyncio.to_thread(
+            self.format_examples_for_prompt,
+            query, top_k, dialect, threshold
+        )
+
 
 def create_example_store(
     examples_path: str = "thai_sql_examples.json",

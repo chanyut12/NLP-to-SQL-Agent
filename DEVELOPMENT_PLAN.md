@@ -92,7 +92,7 @@
   - **Schema RAG:** Smart filtering of tables using `SchemaRAG` to save context window.
   - **Thai Localization:** Excellent dictionary mapping (`THAI_SCHEMA_MAPPINGS`).
 - **Weaknesses:**
-  - **Embedding Model:** `paraphrase-multilingual-MiniLM-L12-v2` is good but general-purpose.
+  - **Embedding Model:** Upgraded to `intfloat/multilingual-e5-small` (SOTA for Thai retrieval).
 
 ### ✅ Action Items
 - [ ] **Enhance Prompt Engineering:** Implement "Chain of Thought" (CoT) explicitly in the prompt template in `engine.py` to force the model to explain its logic *before* writing SQL.
