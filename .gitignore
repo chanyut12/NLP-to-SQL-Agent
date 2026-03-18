@@ -70,3 +70,15 @@ eval/*.csv
 # paper PDFs
 *.pdf
 *.xlsx
+
+.claude/
+node_modules/
+codeflow-report*.md
+codeflow-report.json
+codeflow/
+
+*.docx
+*.xlsx
+package.json
+package-lock.json
+create_report.js

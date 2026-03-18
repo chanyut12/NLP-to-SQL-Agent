@@ -1,4 +1,4 @@
-streamlit
+# streamlit
 pandas
 sqlalchemy
 langchain
@@ -6,8 +6,8 @@ langchain-community
 langchain-ollama      # For local development (Ollama)
 langchain-openai      # For cloud deployment (OpenAI API)
 langchain-google-genai # For Google Gemini (Free Tier)
-matplotlib
-plotly
+# matplotlib
+# plotly
 
 # Database Drivers (for multi-database support)
 pymysql              # MySQL

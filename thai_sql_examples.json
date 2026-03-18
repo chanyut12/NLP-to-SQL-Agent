@@ -292,6 +292,27 @@
       "category": "join_complex",
       "dialect": "mysql",
       "notes": "User feedback: Price vs Quantity"
+    },
+    {
+      "question": "ยอดขายต่อพนักงานในแต่ละสำนักงาน",
+      "sql": "SELECT o.city AS office_city, COUNT(DISTINCT e.employeeNumber) AS employee_count, SUM(od.quantityOrdered * od.priceEach) AS total_sales, ROUND(SUM(od.quantityOrdered * od.priceEach) / COUNT(DISTINCT e.employeeNumber), 2) AS sales_per_employee FROM offices o JOIN employees e ON o.officeCode = e.officeCode LEFT JOIN customers c ON e.employeeNumber = c.salesRepEmployeeNumber LEFT JOIN orders ord ON c.customerNumber = ord.customerNumber LEFT JOIN orderdetails od ON ord.orderNumber = od.orderNumber GROUP BY o.officeCode, o.city ORDER BY sales_per_employee DESC;",
+      "category": "multi_hop_join",
+      "dialect": "mysql",
+      "notes": "Multi-hop: offices -> employees -> customers -> orders -> orderdetails"
+    },
+    {
+      "question": "พนักงานขายคนไหนทำยอดขายได้มากที่สุด",
+      "sql": "SELECT e.firstName, e.lastName, SUM(od.quantityOrdered * od.priceEach) AS total_sales FROM employees e JOIN customers c ON e.employeeNumber = c.salesRepEmployeeNumber JOIN orders o ON c.customerNumber = o.customerNumber JOIN orderdetails od ON o.orderNumber = od.orderNumber GROUP BY e.employeeNumber, e.firstName, e.lastName ORDER BY total_sales DESC LIMIT 1;",
+      "category": "multi_hop_join",
+      "dialect": "mysql",
+      "notes": "Multi-hop: employees -> customers -> orders -> orderdetails"
+    },
+    {
+      "question": "แสดงลูกค้าพร้อมชื่อพนักงานขายที่ดูแล",
+      "sql": "SELECT c.customerName, e.firstName, e.lastName, e.jobTitle FROM customers c LEFT JOIN employees e ON c.salesRepEmployeeNumber = e.employeeNumber ORDER BY c.customerName;",
+      "category": "cross_name_fk",
+      "dialect": "mysql",
+      "notes": "Cross-name FK: customers.salesRepEmployeeNumber -> employees.employeeNumber"
     }
   ]
 }

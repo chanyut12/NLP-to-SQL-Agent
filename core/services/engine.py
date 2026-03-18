@@ -88,32 +88,48 @@ Given an input question (possibly in Thai), create a syntactically correct, read
 ### Target Dialect:
 {dialect}
 
-### Instructions:
-4. Return ONLY a single statement (WITH ... SELECT is OK). Never generate multiple statements.
-5. READ-ONLY ONLY: Never use INSERT/UPDATE/DELETE/DROP/ALTER/CREATE/TRUNCATE/PRAGMA/ATTACH.
-6. Always include LIMIT {max_limit} unless the user explicitly requests fewer.
-7. Return ONLY the SQL query without markdown or explanations.
-8. DO NOT format percentages with '%' symbol in SQL (e.g., CONCAT(..., '%')). Return raw numbers. Frontend will handle formatting.
-9. **IMPORTANT**: The "Similar Examples" below are automatically retrieved. If they rely on different tables or seem irrelevant to the current question, **IGNORE THEM** and rely on your own reasoning.
+### Rules:
+1. Return ONLY a single SELECT statement (WITH ... SELECT is OK). Never generate multiple statements.
+2. READ-ONLY ONLY: Never use INSERT/UPDATE/DELETE/DROP/ALTER/CREATE/TRUNCATE/PRAGMA/ATTACH.
+3. Always include LIMIT {max_limit} unless the user explicitly requests fewer.
+4. Return ONLY the SQL query without markdown or explanations.
+5. DO NOT format percentages with '%' symbol in SQL. Return raw numbers.
+6. The "Similar Examples" below are automatically retrieved. If they use different tables, ignore them.
 
-### Dialect-Specific Functions (Cheat Sheet):
-- **Date extraction**: 
-  - MySQL: YEAR(date_col), MONTH(date_col)
-  - SQLite: strftime('%Y', date_col), strftime('%m', date_col)
-- **String concat**: 
-  - MySQL: CONCAT(a, b)
-  - SQLite: a || b
+### Dialect-Specific Functions:
+- Date: MySQL: YEAR(col), MONTH(col) | SQLite: strftime('%Y', col)
+- String: MySQL: CONCAT(a, b) | SQLite: a || b
 
-### Thai-to-English Schema Mapping:
-- "ยอดขาย" / "ยอดรวม" -> total_price (use SUM for aggregation)
-- "จำนวนใบเสร็จ" / "กี่ใบ" -> COUNT(receipt_id)
-- "ลูกค้า" / "คนซื้อ" -> customer_name
-- "หมวดหมู่" / "ประเภทสินค้า" -> product_category
-- "เดือน" -> month (values: 'January', 'February', ..., 'December')
-- "การชำระเงิน" / "จ่ายเงิน" -> payment_method
+### Thai Keyword Hints:
+**Aggregation:**
+- "ยอดขาย" / "ยอดรวม" -> SUM(sales_column)
 - "ค่าเฉลี่ย" / "เฉลี่ย" -> AVG(...)
 - "มากที่สุด" / "สูงสุด" -> ORDER BY ... DESC LIMIT
 - "น้อยที่สุด" / "ต่ำสุด" -> ORDER BY ... ASC LIMIT
+- "จำนวน" / "กี่รายการ" / "นับ" -> COUNT(...)
+
+**Ratio & Rate:**
+- "อัตราส่วน" / "สัดส่วน" / "เปอร์เซ็นต์" -> SUM(A) / SUM(B) * 100 (aggregate BOTH numerator AND denominator)
+- "อัตราการแปลง" / "conversion" -> COUNT(condition) / COUNT(*) * 100
+- "เทียบกับ" / "เปรียบเทียบ" -> use ratio or difference between two aggregated values
+- "ต่อ" (per, e.g. "ยอดขายต่อคน") -> SUM(value) / COUNT(DISTINCT entity)
+- "เติบโต" / "growth" -> (current - previous) / previous * 100
+
+**Time Grouping:**
+- "รายเดือน" / "แต่ละเดือน" -> GROUP BY YEAR, MONTH
+- "รายปี" / "แต่ละปี" -> GROUP BY YEAR
+- "รายไตรมาส" / "quarter" -> GROUP BY YEAR, QUARTER
+- "ล่าสุด" / "ใหม่สุด" -> ORDER BY date DESC LIMIT
+- "ระหว่าง" / "ช่วง" -> WHERE date BETWEEN ... AND ...
+- "กี่วัน" / "ระยะเวลา" -> DATEDIFF or julianday difference
+
+**Negation & NULL:**
+- "ไม่เคย" / "ยังไม่" -> LEFT JOIN ... WHERE right.id IS NULL or NOT EXISTS
+- "ไม่มี" / "ว่างเปล่า" -> IS NULL or = ''
+
+**Advanced:**
+- "แต่ละ" / "ของแต่ละ" / "ตาม" -> GROUP BY the entity mentioned
+- "ที่มี...มากกว่า" / "เฉพาะที่" -> HAVING aggregate > value (filter AFTER GROUP BY)
 
 ### Similar Examples (Retrieved dynamically):
 {dynamic_examples}
@@ -121,14 +137,14 @@ Given an input question (possibly in Thai), create a syntactically correct, read
 ### Current Database Schema:
 {schema}
 
-### Your Task (IMPORTANT: Use ONLY the tables and columns from the schema above):
+### Your Task:
 Question: {question}
 
 Think step by step:
 1. Identify which tables match the entities in the question.
-2. Check if tables need to be joined (look for common columns).
+2. **Check the Foreign Key Relationships / [FK -> ...] annotations in the schema above to determine correct JOIN conditions.** Do NOT guess JOIN columns — use the FK info provided.
 3. Use the correct dialect functions for dates/strings.
-4. Write the SQL query.
+4. Write the SQL query using ONLY tables and columns from the schema above.
 
 SQL:"""
         return PromptTemplate.from_template(template)
@@ -194,27 +210,37 @@ SQL:"""
             )
         
         async def get_schema_text():
-            """Async task: Get filtered schema (for local LLM) or full schema."""
+            """Async task: Get filtered schema (for local LLM) or full schema with FK hints."""
             if settings.MODEL_PROVIDER == "ollama":
                 # Use smart filtering (semantic + Thai mapping)
                 filtered_schema = await asyncio.to_thread(
                     smart_filter_schema,
-                    raw_schema, 
-                    question, 
+                    raw_schema,
+                    question,
                     self._schema_rag,
                     self._llm,
                     settings.SCHEMA_TOP_K
                 )
-                
-                # Add JOIN hints if multiple tables
-                join_hints = get_join_hints(list(filtered_schema.keys()), filtered_schema)
+
+                # format_schema_for_prompt now includes FK annotations inline
                 schema_text = format_schema_for_prompt(filtered_schema)
+
+                # Add JOIN hints (now FK-based when available)
+                tables_dict = filtered_schema.get("tables", filtered_schema) if isinstance(filtered_schema, dict) and "tables" in filtered_schema else filtered_schema
+                join_hints = get_join_hints(list(tables_dict.keys()), filtered_schema)
                 if join_hints:
                     schema_text += f"\n\n{join_hints}"
                 return schema_text
             else:
-                # Cloud LLM: use full schema (no filtering needed)
-                return format_schema_for_prompt(raw_schema)
+                # Cloud LLM: full schema WITH FK annotations + join hints
+                schema_text = format_schema_for_prompt(raw_schema)
+
+                # เพิ่ม join hints สำหรับ Cloud LLM ด้วย (เดิมไม่มี)
+                tables_dict = raw_schema.get("tables", raw_schema) if isinstance(raw_schema, dict) and "tables" in raw_schema else raw_schema
+                join_hints = get_join_hints(list(tables_dict.keys()), raw_schema)
+                if join_hints:
+                    schema_text += f"\n\n{join_hints}"
+                return schema_text
         
         # Run both tasks in parallel
         dynamic_examples, schema_text = await asyncio.gather(
@@ -243,9 +269,13 @@ SQL:"""
         except Exception as e:
             return None, None, f"LLM Generation Failed: {str(e)}", 0, None
 
-        # Retry Loop
-        all_tables = list(raw_schema.keys())
-        
+        # Retry Loop — extract table names from new schema format
+        tables_dict = raw_schema.get("tables", raw_schema) if isinstance(raw_schema, dict) and "tables" in raw_schema else raw_schema
+        all_tables = list(tables_dict.keys())
+
+        # Pre-format full schema with FK info for retry prompts
+        full_schema_text = format_schema_for_prompt(raw_schema)
+
         for attempt in range(max_retries + 1):
             try:
                 # Validation
@@ -256,7 +286,7 @@ SQL:"""
                     allowed_tables=all_tables
                 )
                 sql = safe_sql_obj.sql
-                
+
                 # Re-format for readability after validation (which may minify it)
                 try:
                     import sqlglot
@@ -266,44 +296,52 @@ SQL:"""
 
                 # Execution - wrap in thread to not block event loop
                 df = await asyncio.to_thread(pd.read_sql, sql, engine)
-                
+
                 # Convert DF to dict for JSON serialization
                 result_data = df.to_dict(orient='records')
 
                 # Visualization Recommendation (delegated to VizService)
                 viz_config = self._viz_service.recommend(df, question, preferred_chart_type)
                 logger.info(f"VIZ_DEBUG: chart={viz_config.get('chart_type')}, x={viz_config.get('x_col')}, y={viz_config.get('y_col')}, series={viz_config.get('series_col')}")
-                
+
                 return sql, result_data, None, attempt, viz_config
-                
+
             except Exception as e:
                 error_msg = str(e)
                 logger.warning(f"Attempt {attempt} failed: {error_msg}")
-                
+
                 if attempt < max_retries:
                     # Check if it's a "table not found" error
                     is_table_error = any(phrase in error_msg.lower() for phrase in [
                         "no such table", "table not found", "doesn't exist",
                         "unknown table", "relation.*does not exist"
                     ])
-                    
-                    # Enhanced correction with schema context
-                    if is_table_error:
-                        # Expand schema to include more tables
-                        logger.info("Table error detected. Expanding schema context...")
-                        expanded_schema = raw_schema  # Use full schema
-                        expanded_text = format_schema_for_prompt(expanded_schema)
-                        
-                        correction_prompt = f"""The SQL query failed because it used a table that doesn't exist.
+
+                    # Check if it's a "column not found" error
+                    is_column_error = any(phrase in error_msg.lower() for phrase in [
+                        "unknown column", "no such column", "column not found",
+                        "ambiguous column"
+                    ])
+
+                    # ทั้ง table error และ column error ให้ส่ง full schema + FK info
+                    if is_table_error or is_column_error:
+                        error_type = "table" if is_table_error else "column"
+                        logger.info(f"{error_type.title()} error detected. Sending full schema with FK info...")
+
+                        correction_prompt = f"""The SQL query failed because it referenced a wrong {error_type}.
 
 Target dialect: {dialect}
 Error: {error_msg}
 Failed SQL: {sql}
 
-### Available Tables (FULL LIST - Use ONLY these):
-{expanded_text}
+### Database Schema (with Foreign Key relationships):
+{full_schema_text}
 
-Rewrite the query using ONLY the tables listed above.
+IMPORTANT: Check the [FK -> ...] annotations and "Foreign Key Relationships" section above.
+Use those FK paths to determine the correct JOIN conditions — do NOT guess column names.
+If two tables are not directly related, find the intermediate table that connects them via FK.
+
+Rewrite the query using ONLY the tables and columns listed above.
 Return ONLY the corrected SQL query without any explanation or markdown.
 Corrected SQL:"""
                     else:
@@ -313,6 +351,9 @@ Corrected SQL:"""
 Target dialect: {dialect}
 Error: {error_msg}
 Failed SQL: {sql}
+
+### Database Schema (for reference):
+{full_schema_text}
 
 Please analyze the error and provide a corrected SQL query.
 Return ONLY the corrected SQL query without any explanation or markdown.
