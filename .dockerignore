@@ -1,0 +1,86 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# Virtual Environment
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+.cursor/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Documentation
+*.md
+!README.md
+docs/
+paper/
+
+# Test files
+tests/
+testsprite_tests/
+eval/
+
+# Large data files (will be regenerated or loaded from persistent volumes)
+*.db
+*.sqlite
+*.sqlite3
+classicmodels.sql
+
+# Logs (will be stored in volumes)
+*.log
+*.csv
+*.jsonl
+query_logs.*
+
+# Development files
+.env
+.env.example
+setup.sh
+setup.bat
+fix_git.sh
+git_visualizer.py
+analyze_feedback.py
+
+# Office files
+*.docx
+*.xlsx
+*.pdf
+
+# Node (if any)
+node_modules/
+package-lock.json
+
+# Claude
+.claude/
+
+# Favorites (will be in volume)
+favorites.json
+
+# Scripts (keep only essential ones)
+scripts/convert_mysql_to_sqlite.py
+scripts/benchmark_auto_transpilation.py
+scripts/migrate_rag_examples.py
+scripts/test_*.py
+
+# Examples folder
+examples/
