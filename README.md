@@ -59,39 +59,88 @@
 ### Prerequisites
 
 - **Python 3.10+**
-- **[Ollama](https://ollama.com/)** (สำหรับรัน LLM ในเครื่อง)
+- **LLM Provider** — เลือกอย่างใดอย่างหนึ่ง:
+  - **Local (ฟรี):** [Ollama](https://ollama.com/) + RAM 8GB+
+  - **Cloud (ง่ายกว่า):** Google Gemini API key ([ฟรี 1,500 req/day](https://makersuite.google.com/app/apikey)) หรือ OpenAI
 
-### Quick Start
+---
+
+### 🚀 Quick Start
+
+#### 🪟 Windows
+
+```bat
+:: 1. Clone repository
+git clone <your-repo-url>
+cd nlp_sql_project
+
+:: 2. Run setup script (สร้าง venv + ติดตั้ง dependencies + สร้าง .env)
+setup.bat
+
+:: 3. แก้ไข .env — ตั้งค่า LLM provider
+::    ใช้ Notepad หรือ VSCode เปิดไฟล์ .env
+
+:: 4. Start server
+venv\Scripts\activate
+uvicorn api.main:app --reload
+```
+
+#### 🍎 macOS
 
 ```bash
 # 1. Clone repository
 git clone <your-repo-url>
 cd nlp_sql_project
 
-# 2. Create virtual environment
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+# 2. Run setup script
+chmod +x setup.sh && ./setup.sh
 
-# 3. Install dependencies
-pip install -r requirements.txt
+# 3. แก้ไข .env — ตั้งค่า LLM provider
+nano .env  # หรือ open -e .env
 
-# 4. Download LLM model
-ollama pull qwen2.5-coder:7b
-
-# 5. Create sample database (for testing)
-python scripts/setup_db.py
-
-# 6. Start backend API
-./start_server.sh          # Mac/Linux
-# หรือ: start_server.bat   # Windows
-
-# 7. Open frontend
-# เปิดไฟล์ web/index.html ในเบราว์เซอร์
-# หรือใช้ live server (e.g., VSCode Live Server extension)
+# 4. Start server
+source venv/bin/activate
+uvicorn api.main:app --reload
 ```
 
-Server จะรันที่ `http://localhost:8000`  
-Frontend เปิดได้ที่ `file:///.../web/index.html` หรือใช้ live server
+#### 🐧 Linux
+
+```bash
+# 1. Clone repository
+git clone <your-repo-url>
+cd nlp_sql_project
+
+# 2. Run setup script
+chmod +x setup.sh && ./setup.sh
+
+# 3. แก้ไข .env — ตั้งค่า LLM provider
+nano .env
+
+# 4. Start server
+source venv/bin/activate
+uvicorn api.main:app --reload
+```
+
+---
+
+### ⚙️ ตั้งค่า .env
+
+หลัง setup เสร็จ แก้ไขไฟล์ `.env` ตามที่ต้องการ:
+
+```bash
+# ใช้ Google Gemini (แนะนำ — ฟรี ไม่ต้อง GPU)
+MODEL_PROVIDER=google
+GOOGLE_API_KEY=your-api-key-here
+GOOGLE_MODEL=gemini-2.0-flash-exp
+
+# หรือใช้ Ollama (Local — ต้องการ 8GB+ RAM)
+MODEL_PROVIDER=ollama
+OLLAMA_MODEL=qwen2.5-coder:7b
+```
+
+หลัง start server เปิดเบราว์เซอร์ที่ `http://localhost:8000`
+
+> **หมายเหตุ:** ครั้งแรกที่รัน ระบบจะ download embedding model (~500MB) อัตโนมัติ ต้องใช้ internet
 
 ---
 
