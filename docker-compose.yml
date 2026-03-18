@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  # ==============================================================================
+  # Backend API Service
+  # ==============================================================================
+  api:
+    build: .
+    container_name: thai-nlp-sql-api
+    ports:
+      - "8000:8000"
+    environment:
+      # Use cloud provider (Ollama requires GPU not available in Docker by default)
+      - MODEL_PROVIDER=${MODEL_PROVIDER:-google}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GOOGLE_MODEL=${GOOGLE_MODEL:-gemini-2.0-flash-exp}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
+    volumes:
+      # Persist RAG databases
+      - ./rag_db:/app/rag_db
+      - ./schema_rag_db:/app/schema_rag_db
+      # Persist query logs
+      - ./query_logs.jsonl:/app/query_logs.jsonl
+      - ./query_logs.csv:/app/query_logs.csv
+      # Persist favorites
+      - ./favorites.json:/app/favorites.json
+      # Mount sample database
+      - ./local_database.db:/app/local_database.db
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # ==============================================================================
+  # Nginx Reverse Proxy (Optional - for production)
+  # ==============================================================================
+  # nginx:
+  #   image: nginx:alpine
+  #   container_name: thai-nlp-sql-nginx
+  #   ports:
+  #     - "80:80"
+  #   volumes:
+  #     - ./nginx.conf:/etc/nginx/nginx.conf:ro
+  #     - ./web:/usr/share/nginx/html:ro
+  #   depends_on:
+  #     - api
+  #   restart: unless-stopped
+
+# ==============================================================================
+# Volumes (Optional - for database persistence)
+# ==============================================================================
+# volumes:
+#   postgres_data:
+#     driver: local
