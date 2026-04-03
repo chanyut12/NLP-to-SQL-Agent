@@ -37,8 +37,11 @@ class ExampleStore:
         self.examples_path = examples_path
         self.model_name = model_name or settings.EMBEDDING_MODEL
         self.persist_directory = persist_directory
-        self._embedder = None  # Lazy load
-        
+
+        # Eagerly load embedding model at startup (not on first query)
+        print(f"Loading embedding model: {self.model_name}")
+        self._embedder = SentenceTransformer(self.model_name)
+
         # Initialize ChromaDB
         if self.persist_directory:
             os.makedirs(self.persist_directory, exist_ok=True)
@@ -51,10 +54,6 @@ class ExampleStore:
     
     @property
     def embedder(self):
-        """Lazy load embedding model."""
-        if self._embedder is None:
-            print(f"Loading embedding model: {self.model_name}")
-            self._embedder = SentenceTransformer(self.model_name)
         return self._embedder
 
     def _init_collection(self):
@@ -151,6 +150,9 @@ class ExampleStore:
         Returns:
             List of examples with SQL converted to target dialect
         """
+        if top_k <= 0:
+            return []
+
         # E5 models require 'query: ' prefix for search queries
         text_to_embed = f"query: {query}"
         query_embedding = self.embedder.encode(text_to_embed).tolist()
@@ -289,6 +291,27 @@ class ExampleStore:
             self.format_examples_for_prompt,
             query, top_k, dialect, threshold, auto_transpile
         )
+
+    async def async_format_examples_for_prompt_with_count(
+        self,
+        query: str,
+        top_k: int = 3,
+        dialect: Optional[str] = None,
+        threshold: Optional[float] = None,
+        auto_transpile: bool = True
+    ) -> tuple:
+        """Same as async_format_examples_for_prompt but also returns retrieved count."""
+        examples = await asyncio.to_thread(
+            self.get_similar_examples, query, top_k, dialect, threshold, auto_transpile
+        )
+        count = len(examples)
+        if not examples:
+            return "", 0
+        formatted = "\n\n".join(
+            f"Question: {ex['question']}\nSQL: {ex['sql']}"
+            for ex in examples
+        )
+        return formatted, count
 
 
 def create_example_store(
