@@ -1,0 +1,260 @@
+{
+  "version": "1.0",
+  "description": "Mini benchmark สำหรับวัด Execution Accuracy ของ Thai NLP-to-SQL Agent บน classicmodels database (SQLite)",
+  "database": "classicmodels.db",
+  "dialect": "sqlite",
+  "total": 25,
+  "categories": ["simple", "aggregation", "join", "complex"],
+  "examples": [
+    {
+      "id": "simple_001",
+      "question": "แสดงชื่อสินค้าทั้งหมด",
+      "gold_sql": "SELECT productName FROM products LIMIT 500",
+      "category": "simple",
+      "tables": ["products"],
+      "has_aggregation": false,
+      "has_join": false,
+      "has_subquery": false
+    },
+    {
+      "id": "simple_002",
+      "question": "แสดงรายชื่อพนักงานทั้งหมด",
+      "gold_sql": "SELECT firstName, lastName FROM employees LIMIT 500",
+      "category": "simple",
+      "tables": ["employees"],
+      "has_aggregation": false,
+      "has_join": false,
+      "has_subquery": false
+    },
+    {
+      "id": "simple_003",
+      "question": "แสดงรายชื่อลูกค้าในประเทศ USA",
+      "gold_sql": "SELECT customerName FROM customers WHERE country = 'USA' LIMIT 500",
+      "category": "simple",
+      "tables": ["customers"],
+      "has_aggregation": false,
+      "has_join": false,
+      "has_subquery": false
+    },
+    {
+      "id": "simple_004",
+      "question": "สินค้า 5 อันดับที่มีราคาสูงสุด",
+      "gold_sql": "SELECT productName, MSRP FROM products ORDER BY MSRP DESC LIMIT 5",
+      "category": "simple",
+      "tables": ["products"],
+      "has_aggregation": false,
+      "has_join": false,
+      "has_subquery": false
+    },
+    {
+      "id": "simple_005",
+      "question": "แสดงรายชื่อสำนักงานทั้งหมดพร้อมประเทศ",
+      "gold_sql": "SELECT city, country FROM offices LIMIT 500",
+      "category": "simple",
+      "tables": ["offices"],
+      "has_aggregation": false,
+      "has_join": false,
+      "has_subquery": false
+    },
+    {
+      "id": "aggregation_001",
+      "question": "มีลูกค้าทั้งหมดกี่คน",
+      "gold_sql": "SELECT COUNT(*) AS customer_count FROM customers",
+      "category": "aggregation",
+      "tables": ["customers"],
+      "has_aggregation": true,
+      "has_join": false,
+      "has_subquery": false
+    },
+    {
+      "id": "aggregation_002",
+      "question": "ยอดขายรวมทั้งหมดของทุกออเดอร์",
+      "gold_sql": "SELECT SUM(quantityOrdered * priceEach) AS total_sales FROM orderdetails",
+      "category": "aggregation",
+      "tables": ["orderdetails"],
+      "has_aggregation": true,
+      "has_join": false,
+      "has_subquery": false
+    },
+    {
+      "id": "aggregation_003",
+      "question": "จำนวนสินค้าในแต่ละ Product Line",
+      "gold_sql": "SELECT productLine, COUNT(*) AS product_count FROM products GROUP BY productLine LIMIT 500",
+      "category": "aggregation",
+      "tables": ["products"],
+      "has_aggregation": true,
+      "has_join": false,
+      "has_subquery": false
+    },
+    {
+      "id": "aggregation_004",
+      "question": "จำนวนออเดอร์แยกตามสถานะ",
+      "gold_sql": "SELECT status, COUNT(*) AS order_count FROM orders GROUP BY status LIMIT 500",
+      "category": "aggregation",
+      "tables": ["orders"],
+      "has_aggregation": true,
+      "has_join": false,
+      "has_subquery": false
+    },
+    {
+      "id": "aggregation_005",
+      "question": "ลูกค้าที่สั่งซื้อมากกว่า 5 ครั้ง",
+      "gold_sql": "SELECT customerNumber, COUNT(*) AS order_count FROM orders GROUP BY customerNumber HAVING COUNT(*) > 5 LIMIT 500",
+      "category": "aggregation",
+      "tables": ["orders"],
+      "has_aggregation": true,
+      "has_join": false,
+      "has_subquery": false
+    },
+    {
+      "id": "aggregation_006",
+      "question": "ยอดชำระเงินเฉลี่ยต่อใบชำระ",
+      "gold_sql": "SELECT AVG(amount) AS avg_payment FROM payments",
+      "category": "aggregation",
+      "tables": ["payments"],
+      "has_aggregation": true,
+      "has_join": false,
+      "has_subquery": false
+    },
+    {
+      "id": "aggregation_007",
+      "question": "ราคาสูงสุดและต่ำสุดของสินค้า",
+      "gold_sql": "SELECT MAX(MSRP) AS max_price, MIN(MSRP) AS min_price FROM products",
+      "category": "aggregation",
+      "tables": ["products"],
+      "has_aggregation": true,
+      "has_join": false,
+      "has_subquery": false
+    },
+    {
+      "id": "join_001",
+      "question": "แสดงชื่อลูกค้าพร้อมชื่อพนักงานที่ดูแล",
+      "gold_sql": "SELECT c.customerName, e.firstName || ' ' || e.lastName AS salesRep FROM customers c LEFT JOIN employees e ON c.salesRepEmployeeNumber = e.employeeNumber LIMIT 500",
+      "category": "join",
+      "tables": ["customers", "employees"],
+      "has_aggregation": false,
+      "has_join": true,
+      "has_subquery": false
+    },
+    {
+      "id": "join_002",
+      "question": "ยอดขายรวมของแต่ละลูกค้า",
+      "gold_sql": "SELECT c.customerName, SUM(od.quantityOrdered * od.priceEach) AS total_sales FROM customers c JOIN orders o ON c.customerNumber = o.customerNumber JOIN orderdetails od ON o.orderNumber = od.orderNumber GROUP BY c.customerName ORDER BY total_sales DESC LIMIT 500",
+      "category": "join",
+      "tables": ["customers", "orders", "orderdetails"],
+      "has_aggregation": true,
+      "has_join": true,
+      "has_subquery": false
+    },
+    {
+      "id": "join_003",
+      "question": "แสดงออเดอร์พร้อมชื่อลูกค้าและสถานะ",
+      "gold_sql": "SELECT o.orderNumber, c.customerName, o.orderDate, o.status FROM orders o JOIN customers c ON o.customerNumber = c.customerNumber LIMIT 500",
+      "category": "join",
+      "tables": ["orders", "customers"],
+      "has_aggregation": false,
+      "has_join": true,
+      "has_subquery": false
+    },
+    {
+      "id": "join_004",
+      "question": "สินค้า 10 อันดับที่ขายดีที่สุดตามจำนวนที่สั่ง",
+      "gold_sql": "SELECT p.productName, SUM(od.quantityOrdered) AS total_qty FROM products p JOIN orderdetails od ON p.productCode = od.productCode GROUP BY p.productName ORDER BY total_qty DESC LIMIT 10",
+      "category": "join",
+      "tables": ["products", "orderdetails"],
+      "has_aggregation": true,
+      "has_join": true,
+      "has_subquery": false
+    },
+    {
+      "id": "join_005",
+      "question": "พนักงานแต่ละคนดูแลลูกค้ากี่คน",
+      "gold_sql": "SELECT e.firstName || ' ' || e.lastName AS employee, COUNT(c.customerNumber) AS customer_count FROM employees e LEFT JOIN customers c ON e.employeeNumber = c.salesRepEmployeeNumber GROUP BY e.employeeNumber LIMIT 500",
+      "category": "join",
+      "tables": ["employees", "customers"],
+      "has_aggregation": true,
+      "has_join": true,
+      "has_subquery": false
+    },
+    {
+      "id": "join_006",
+      "question": "ยอดชำระเงินรวมของลูกค้าในแต่ละประเทศ",
+      "gold_sql": "SELECT c.country, SUM(p.amount) AS total_payments FROM customers c JOIN payments p ON c.customerNumber = p.customerNumber GROUP BY c.country ORDER BY total_payments DESC LIMIT 500",
+      "category": "join",
+      "tables": ["customers", "payments"],
+      "has_aggregation": true,
+      "has_join": true,
+      "has_subquery": false
+    },
+    {
+      "id": "join_007",
+      "question": "สำนักงานแต่ละแห่งมีพนักงานกี่คน",
+      "gold_sql": "SELECT o.city, COUNT(e.employeeNumber) AS employee_count FROM offices o JOIN employees e ON o.officeCode = e.officeCode GROUP BY o.city ORDER BY employee_count DESC LIMIT 500",
+      "category": "join",
+      "tables": ["offices", "employees"],
+      "has_aggregation": true,
+      "has_join": true,
+      "has_subquery": false
+    },
+    {
+      "id": "complex_001",
+      "question": "ลูกค้าที่ไม่เคยสั่งซื้อสินค้าเลย",
+      "gold_sql": "SELECT customerName FROM customers WHERE customerNumber NOT IN (SELECT DISTINCT customerNumber FROM orders) LIMIT 500",
+      "category": "complex",
+      "tables": ["customers", "orders"],
+      "has_aggregation": false,
+      "has_join": false,
+      "has_subquery": true
+    },
+    {
+      "id": "complex_002",
+      "question": "ยอดขายรวมแยกตามปีและเดือน",
+      "gold_sql": "SELECT strftime('%Y', o.orderDate) AS year, strftime('%m', o.orderDate) AS month, SUM(od.quantityOrdered * od.priceEach) AS total_sales FROM orders o JOIN orderdetails od ON o.orderNumber = od.orderNumber GROUP BY strftime('%Y', o.orderDate), strftime('%m', o.orderDate) ORDER BY year, month LIMIT 500",
+      "category": "complex",
+      "tables": ["orders", "orderdetails"],
+      "has_aggregation": true,
+      "has_join": true,
+      "has_subquery": false
+    },
+    {
+      "id": "complex_003",
+      "question": "ลูกค้าที่มียอดชำระเงินรวมสูงกว่าค่าเฉลี่ย",
+      "gold_sql": "SELECT c.customerName, SUM(p.amount) AS total_paid FROM customers c JOIN payments p ON c.customerNumber = p.customerNumber GROUP BY c.customerName HAVING SUM(p.amount) > (SELECT AVG(total) FROM (SELECT SUM(amount) AS total FROM payments GROUP BY customerNumber)) LIMIT 500",
+      "category": "complex",
+      "tables": ["customers", "payments"],
+      "has_aggregation": true,
+      "has_join": true,
+      "has_subquery": true
+    },
+    {
+      "id": "complex_004",
+      "question": "ยอดขายต่อพนักงานของแต่ละสำนักงาน",
+      "gold_sql": "SELECT o.city AS office, COUNT(DISTINCT e.employeeNumber) AS employees, ROUND(SUM(od.quantityOrdered * od.priceEach) / COUNT(DISTINCT e.employeeNumber), 2) AS sales_per_employee FROM offices o JOIN employees e ON o.officeCode = e.officeCode LEFT JOIN customers c ON e.employeeNumber = c.salesRepEmployeeNumber LEFT JOIN orders ord ON c.customerNumber = ord.customerNumber LEFT JOIN orderdetails od ON ord.orderNumber = od.orderNumber GROUP BY o.officeCode LIMIT 500",
+      "category": "complex",
+      "tables": ["offices", "employees", "customers", "orders", "orderdetails"],
+      "has_aggregation": true,
+      "has_join": true,
+      "has_subquery": false
+    },
+    {
+      "id": "complex_005",
+      "question": "สัดส่วนยอดขาย (เปอร์เซ็นต์) ของแต่ละ Product Line",
+      "gold_sql": "SELECT p.productLine, ROUND(SUM(od.quantityOrdered * od.priceEach) * 100.0 / (SELECT SUM(quantityOrdered * priceEach) FROM orderdetails), 2) AS pct FROM products p JOIN orderdetails od ON p.productCode = od.productCode GROUP BY p.productLine ORDER BY pct DESC LIMIT 500",
+      "category": "complex",
+      "tables": ["products", "orderdetails"],
+      "has_aggregation": true,
+      "has_join": true,
+      "has_subquery": true
+    },
+    {
+      "id": "complex_006",
+      "question": "สินค้าที่ไม่เคยถูกสั่งซื้อเลย",
+      "gold_sql": "SELECT productName FROM products WHERE productCode NOT IN (SELECT DISTINCT productCode FROM orderdetails) LIMIT 500",
+      "category": "complex",
+      "tables": ["products", "orderdetails"],
+      "has_aggregation": false,
+      "has_join": false,
+      "has_subquery": true
+    }
+  ]
+}

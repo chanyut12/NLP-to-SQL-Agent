@@ -1,0 +1,340 @@
+{
+  "benchmark": "eval/benchmark_classicmodels.json",
+  "database": "classicmodels.db",
+  "evaluated_at": "2026-03-21T15:29:49.586581",
+  "model": "openai/gpt-4o-mini",
+  "summary": {
+    "total": 25,
+    "sql_valid": 25,
+    "executable": 25,
+    "ex_pass": 13,
+    "sql_validity_rate": 1.0,
+    "executability_rate": 1.0,
+    "execution_accuracy": 0.52,
+    "elapsed_sec": 33.7
+  },
+  "by_category": {
+    "simple": {
+      "n": 5,
+      "ex_pass": 3,
+      "execution_accuracy": 0.6
+    },
+    "aggregation": {
+      "n": 7,
+      "ex_pass": 4,
+      "execution_accuracy": 0.5714285714285714
+    },
+    "join": {
+      "n": 7,
+      "ex_pass": 2,
+      "execution_accuracy": 0.2857142857142857
+    },
+    "complex": {
+      "n": 6,
+      "ex_pass": 4,
+      "execution_accuracy": 0.6666666666666666
+    }
+  },
+  "results": [
+    {
+      "id": "simple_001",
+      "question": "แสดงชื่อสินค้าทั้งหมด",
+      "category": "simple",
+      "gold_sql": "SELECT productName FROM products LIMIT 500",
+      "pred_sql": "SELECT\n  productName\nFROM products\nLIMIT 500",
+      "sql_valid": true,
+      "executable": true,
+      "ex_pass": true,
+      "error": null,
+      "duration_sec": 1.25
+    },
+    {
+      "id": "simple_002",
+      "question": "แสดงรายชื่อพนักงานทั้งหมด",
+      "category": "simple",
+      "gold_sql": "SELECT firstName, lastName FROM employees LIMIT 500",
+      "pred_sql": "SELECT\n  *\nFROM employees\nLIMIT 500",
+      "sql_valid": true,
+      "executable": true,
+      "ex_pass": false,
+      "error": null,
+      "duration_sec": 1.42
+    },
+    {
+      "id": "simple_003",
+      "question": "แสดงรายชื่อลูกค้าในประเทศ USA",
+      "category": "simple",
+      "gold_sql": "SELECT customerName FROM customers WHERE country = 'USA' LIMIT 500",
+      "pred_sql": "SELECT\n  customerName\nFROM customers\nWHERE\n  country = 'USA'\nLIMIT 500",
+      "sql_valid": true,
+      "executable": true,
+      "ex_pass": true,
+      "error": null,
+      "duration_sec": 0.95
+    },
+    {
+      "id": "simple_004",
+      "question": "สินค้า 5 อันดับที่มีราคาสูงสุด",
+      "category": "simple",
+      "gold_sql": "SELECT productName, MSRP FROM products ORDER BY MSRP DESC LIMIT 5",
+      "pred_sql": "SELECT\n  productCode,\n  productName,\n  buyPrice\nFROM products\nORDER BY\n  buyPrice DESC\nLIMIT 5",
+      "sql_valid": true,
+      "executable": true,
+      "ex_pass": false,
+      "error": null,
+      "duration_sec": 1.63
+    },
+    {
+      "id": "simple_005",
+      "question": "แสดงรายชื่อสำนักงานทั้งหมดพร้อมประเทศ",
+      "category": "simple",
+      "gold_sql": "SELECT city, country FROM offices LIMIT 500",
+      "pred_sql": "SELECT\n  city,\n  country\nFROM offices\nLIMIT 500",
+      "sql_valid": true,
+      "executable": true,
+      "ex_pass": true,
+      "error": null,
+      "duration_sec": 0.98
+    },
+    {
+      "id": "aggregation_001",
+      "question": "มีลูกค้าทั้งหมดกี่คน",
+      "category": "aggregation",
+      "gold_sql": "SELECT COUNT(*) AS customer_count FROM customers",
+      "pred_sql": "SELECT\n  COUNT(DISTINCT customerName) AS total_customers\nFROM customers\nLIMIT 500",
+      "sql_valid": true,
+      "executable": true,
+      "ex_pass": true,
+      "error": null,
+      "duration_sec": 0.89
+    },
+    {
+      "id": "aggregation_002",
+      "question": "ยอดขายรวมทั้งหมดของทุกออเดอร์",
+      "category": "aggregation",
+      "gold_sql": "SELECT SUM(quantityOrdered * priceEach) AS total_sales FROM orderdetails",
+      "pred_sql": "SELECT\n  SUM(od.priceEach * od.quantityOrdered) AS total_sales\nFROM orderdetails AS od\nJOIN orders AS o\n  ON od.orderNumber = o.orderNumber\nLIMIT 500",
+      "sql_valid": true,
+      "executable": true,
+      "ex_pass": true,
+      "error": null,
+      "duration_sec": 1.12
+    },
+    {
+      "id": "aggregation_003",
+      "question": "จำนวนสินค้าในแต่ละ Product Line",
+      "category": "aggregation",
+      "gold_sql": "SELECT productLine, COUNT(*) AS product_count FROM products GROUP BY productLine LIMIT 500",
+      "pred_sql": "SELECT\n  productLine,\n  SUM(quantityInStock) AS total_quantity\nFROM products\nGROUP BY\n  productLine\nORDER BY\n  total_quantity DESC\nLIMIT 500",
+      "sql_valid": true,
+      "executable": true,
+      "ex_pass": false,
+      "error": null,
+      "duration_sec": 1.64
+    },
+    {
+      "id": "aggregation_004",
+      "question": "จำนวนออเดอร์แยกตามสถานะ",
+      "category": "aggregation",
+      "gold_sql": "SELECT status, COUNT(*) AS order_count FROM orders GROUP BY status LIMIT 500",
+      "pred_sql": "SELECT\n  status,\n  COUNT(orderNumber) AS order_count\nFROM orders\nGROUP BY\n  status\nORDER BY\n  order_count DESC\nLIMIT 500",
+      "sql_valid": true,
+      "executable": true,
+      "ex_pass": true,
+      "error": null,
+      "duration_sec": 0.94
+    },
+    {
+      "id": "aggregation_005",
+      "question": "ลูกค้าที่สั่งซื้อมากกว่า 5 ครั้ง",
+      "category": "aggregation",
+      "gold_sql": "SELECT customerNumber, COUNT(*) AS order_count FROM orders GROUP BY customerNumber HAVING COUNT(*) > 5 LIMIT 500",
+      "pred_sql": "SELECT\n  customerNumber,\n  COUNT(orderNumber) AS order_count\nFROM orders\nGROUP BY\n  customerNumber\nHAVING\n  order_count > 5\nLIMIT 500",
+      "sql_valid": true,
+      "executable": true,
+      "ex_pass": true,
+      "error": null,
+      "duration_sec": 1.54
+    },
+    {
+      "id": "aggregation_006",
+      "question": "ยอดชำระเงินเฉลี่ยต่อใบชำระ",
+      "category": "aggregation",
+      "gold_sql": "SELECT AVG(amount) AS avg_payment FROM payments",
+      "pred_sql": "SELECT\n  AVG(amount) AS avg_payment\nFROM payments\nGROUP BY\n  customerNumber\nLIMIT 500",
+      "sql_valid": true,
+      "executable": true,
+      "ex_pass": false,
+      "error": null,
+      "duration_sec": 0.95
+    },
+    {
+      "id": "aggregation_007",
+      "question": "ราคาสูงสุดและต่ำสุดของสินค้า",
+      "category": "aggregation",
+      "gold_sql": "SELECT MAX(MSRP) AS max_price, MIN(MSRP) AS min_price FROM products",
+      "pred_sql": "SELECT\n  MAX(buyPrice) AS max_price,\n  MIN(buyPrice) AS min_price\nFROM products\nLIMIT 500",
+      "sql_valid": true,
+      "executable": true,
+      "ex_pass": false,
+      "error": null,
+      "duration_sec": 1.66
+    },
+    {
+      "id": "join_001",
+      "question": "แสดงชื่อลูกค้าพร้อมชื่อพนักงานที่ดูแล",
+      "category": "join",
+      "gold_sql": "SELECT c.customerName, e.firstName || ' ' || e.lastName AS salesRep FROM customers c LEFT JOIN employees e ON c.salesRepEmployeeNumber = e.employeeNumber LIMIT 500",
+      "pred_sql": "SELECT\n  c.customerName,\n  e.firstName || ' ' || e.lastName AS employeeName\nFROM customers AS c\nLEFT JOIN employees AS e\n  ON c.salesRepEmployeeNumber = e.employeeNumber\nLIMIT 500",
+      "sql_valid": true,
+      "executable": true,
+      "ex_pass": true,
+      "error": null,
+      "duration_sec": 1.57
+    },
+    {
+      "id": "join_002",
+      "question": "ยอดขายรวมของแต่ละลูกค้า",
+      "category": "join",
+      "gold_sql": "SELECT c.customerName, SUM(od.quantityOrdered * od.priceEach) AS total_sales FROM customers c JOIN orders o ON c.customerNumber = o.customerNumber JOIN orderdetails od ON o.orderNumber = od.orderNumber GROUP BY c.customerName ORDER BY total_sales DESC LIMIT 500",
+      "pred_sql": "SELECT\n  customerNumber,\n  SUM(amount) AS total_sales\nFROM payments\nGROUP BY\n  customerNumber\nORDER BY\n  total_sales DESC\nLIMIT 500",
+      "sql_valid": true,
+      "executable": true,
+      "ex_pass": false,
+      "error": null,
+      "duration_sec": 1.09
+    },
+    {
+      "id": "join_003",
+      "question": "แสดงออเดอร์พร้อมชื่อลูกค้าและสถานะ",
+      "category": "join",
+      "gold_sql": "SELECT o.orderNumber, c.customerName, o.orderDate, o.status FROM orders o JOIN customers c ON o.customerNumber = c.customerNumber LIMIT 500",
+      "pred_sql": "SELECT\n  o.orderNumber,\n  c.customerName,\n  o.status\nFROM orders AS o\nJOIN customers AS c\n  ON o.customerNumber = c.customerNumber\nLIMIT 500",
+      "sql_valid": true,
+      "executable": true,
+      "ex_pass": false,
+      "error": null,
+      "duration_sec": 1.15
+    },
+    {
+      "id": "join_004",
+      "question": "สินค้า 10 อันดับที่ขายดีที่สุดตามจำนวนที่สั่ง",
+      "category": "join",
+      "gold_sql": "SELECT p.productName, SUM(od.quantityOrdered) AS total_qty FROM products p JOIN orderdetails od ON p.productCode = od.productCode GROUP BY p.productName ORDER BY total_qty DESC LIMIT 10",
+      "pred_sql": "SELECT\n  productCode,\n  SUM(quantityOrdered) AS total_quantity_sold\nFROM orderdetails\nGROUP BY\n  productCode\nORDER BY\n  total_quantity_sold DESC\nLIMIT 10",
+      "sql_valid": true,
+      "executable": true,
+      "ex_pass": false,
+      "error": null,
+      "duration_sec": 1.07
+    },
+    {
+      "id": "join_005",
+      "question": "พนักงานแต่ละคนดูแลลูกค้ากี่คน",
+      "category": "join",
+      "gold_sql": "SELECT e.firstName || ' ' || e.lastName AS employee, COUNT(c.customerNumber) AS customer_count FROM employees e LEFT JOIN customers c ON e.employeeNumber = c.salesRepEmployeeNumber GROUP BY e.employeeNumber LIMIT 500",
+      "pred_sql": "SELECT\n  e.employeeNumber,\n  COUNT(DISTINCT c.customerNumber) AS customer_count\nFROM employees AS e\nLEFT JOIN customers AS c\n  ON e.employeeNumber = c.salesRepEmployeeNumber\nGROUP BY\n  e.employeeNumber\nLIMIT 500",
+      "sql_valid": true,
+      "executable": true,
+      "ex_pass": false,
+      "error": null,
+      "duration_sec": 1.73
+    },
+    {
+      "id": "join_006",
+      "question": "ยอดชำระเงินรวมของลูกค้าในแต่ละประเทศ",
+      "category": "join",
+      "gold_sql": "SELECT c.country, SUM(p.amount) AS total_payments FROM customers c JOIN payments p ON c.customerNumber = p.customerNumber GROUP BY c.country ORDER BY total_payments DESC LIMIT 500",
+      "pred_sql": "SELECT\n  c.country,\n  SUM(p.amount) AS total_payment\nFROM customers AS c\nJOIN payments AS p\n  ON c.customerNumber = p.customerNumber\nGROUP BY\n  c.country\nLIMIT 500",
+      "sql_valid": true,
+      "executable": true,
+      "ex_pass": true,
+      "error": null,
+      "duration_sec": 1.23
+    },
+    {
+      "id": "join_007",
+      "question": "สำนักงานแต่ละแห่งมีพนักงานกี่คน",
+      "category": "join",
+      "gold_sql": "SELECT o.city, COUNT(e.employeeNumber) AS employee_count FROM offices o JOIN employees e ON o.officeCode = e.officeCode GROUP BY o.city ORDER BY employee_count DESC LIMIT 500",
+      "pred_sql": "SELECT\n  officeCode,\n  COUNT(employeeNumber) AS employee_count\nFROM employees\nGROUP BY\n  officeCode\nLIMIT 500",
+      "sql_valid": true,
+      "executable": true,
+      "ex_pass": false,
+      "error": null,
+      "duration_sec": 0.95
+    },
+    {
+      "id": "complex_001",
+      "question": "ลูกค้าที่ไม่เคยสั่งซื้อสินค้าเลย",
+      "category": "complex",
+      "gold_sql": "SELECT customerName FROM customers WHERE customerNumber NOT IN (SELECT DISTINCT customerNumber FROM orders) LIMIT 500",
+      "pred_sql": "SELECT\n  c.customerName\nFROM customers AS c\nLEFT JOIN orders AS o\n  ON c.customerNumber = o.customerNumber\nWHERE\n  o.orderNumber IS NULL\nLIMIT 500",
+      "sql_valid": true,
+      "executable": true,
+      "ex_pass": true,
+      "error": null,
+      "duration_sec": 1.37
+    },
+    {
+      "id": "complex_002",
+      "question": "ยอดขายรวมแยกตามปีและเดือน",
+      "category": "complex",
+      "gold_sql": "SELECT strftime('%Y', o.orderDate) AS year, strftime('%m', o.orderDate) AS month, SUM(od.quantityOrdered * od.priceEach) AS total_sales FROM orders o JOIN orderdetails od ON o.orderNumber = od.orderNumber GROUP BY strftime('%Y', o.orderDate), strftime('%m', o.orderDate) ORDER BY year, month LIMIT 500",
+      "pred_sql": "SELECT\n  STRFTIME('%Y', o.orderDate) AS year,\n  STRFTIME('%m', o.orderDate) AS month,\n  SUM(od.priceEach * od.quantityOrdered) AS total_sales\nFROM orders AS o\nJOIN orderdetails AS od\n  ON o.orderNumber = od.orderNumber\nGROUP BY\n  year,\n  month\nORDER BY\n  year,\n  month\nLIMIT 500",
+      "sql_valid": true,
+      "executable": true,
+      "ex_pass": true,
+      "error": null,
+      "duration_sec": 1.89
+    },
+    {
+      "id": "complex_003",
+      "question": "ลูกค้าที่มียอดชำระเงินรวมสูงกว่าค่าเฉลี่ย",
+      "category": "complex",
+      "gold_sql": "SELECT c.customerName, SUM(p.amount) AS total_paid FROM customers c JOIN payments p ON c.customerNumber = p.customerNumber GROUP BY c.customerName HAVING SUM(p.amount) > (SELECT AVG(total) FROM (SELECT SUM(amount) AS total FROM payments GROUP BY customerNumber)) LIMIT 500",
+      "pred_sql": "SELECT\n  c.customerName,\n  SUM(p.amount) AS total_payment\nFROM customers AS c\nJOIN payments AS p\n  ON c.customerNumber = p.customerNumber\nGROUP BY\n  c.customerName\nHAVING\n  total_payment > (\n    SELECT\n      AVG(total)\n    FROM (\n      SELECT\n        SUM(amount) AS total\n      FROM payments\n      GROUP BY\n        customerNumber\n    )\n  )\nLIMIT 500",
+      "sql_valid": true,
+      "executable": true,
+      "ex_pass": true,
+      "error": null,
+      "duration_sec": 1.56
+    },
+    {
+      "id": "complex_004",
+      "question": "ยอดขายต่อพนักงานของแต่ละสำนักงาน",
+      "category": "complex",
+      "gold_sql": "SELECT o.city AS office, COUNT(DISTINCT e.employeeNumber) AS employees, ROUND(SUM(od.quantityOrdered * od.priceEach) / COUNT(DISTINCT e.employeeNumber), 2) AS sales_per_employee FROM offices o JOIN employees e ON o.officeCode = e.officeCode LEFT JOIN customers c ON e.employeeNumber = c.salesRepEmployeeNumber LEFT JOIN orders ord ON c.customerNumber = ord.customerNumber LEFT JOIN orderdetails od ON ord.orderNumber = od.orderNumber GROUP BY o.officeCode LIMIT 500",
+      "pred_sql": "SELECT\n  offices.officeCode,\n  SUM(orderdetails.priceEach * orderdetails.quantityOrdered) AS sales_per_employee\nFROM offices\nJOIN employees\n  ON offices.officeCode = employees.officeCode\nJOIN orders\n  ON employees.employeeNumber = orders.customerNumber\nJOIN orderdetails\n  ON orders.orderNumber = orderdetails.orderNumber\nGROUP BY\n  offices.officeCode\nORDER BY\n  sales_per_employee DESC\nLIMIT 500",
+      "sql_valid": true,
+      "executable": true,
+      "ex_pass": false,
+      "error": null,
+      "duration_sec": 1.82
+    },
+    {
+      "id": "complex_005",
+      "question": "สัดส่วนยอดขาย (เปอร์เซ็นต์) ของแต่ละ Product Line",
+      "category": "complex",
+      "gold_sql": "SELECT p.productLine, ROUND(SUM(od.quantityOrdered * od.priceEach) * 100.0 / (SELECT SUM(quantityOrdered * priceEach) FROM orderdetails), 2) AS pct FROM products p JOIN orderdetails od ON p.productCode = od.productCode GROUP BY p.productLine ORDER BY pct DESC LIMIT 500",
+      "pred_sql": "SELECT\n  pl.productLine,\n  SUM(od.priceEach * od.quantityOrdered) * 100 / (\n    SELECT\n      SUM(priceEach * quantityOrdered)\n    FROM orderdetails\n  ) AS sales_ratio\nFROM orderdetails AS od\nJOIN products AS p\n  ON od.productCode = p.productCode\nJOIN productlines AS pl\n  ON p.productLine = pl.productLine\nGROUP BY\n  pl.productLine\nLIMIT 500",
+      "sql_valid": true,
+      "executable": true,
+      "ex_pass": true,
+      "error": null,
+      "duration_sec": 1.84
+    },
+    {
+      "id": "complex_006",
+      "question": "สินค้าที่ไม่เคยถูกสั่งซื้อเลย",
+      "category": "complex",
+      "gold_sql": "SELECT productName FROM products WHERE productCode NOT IN (SELECT DISTINCT productCode FROM orderdetails) LIMIT 500",
+      "pred_sql": "SELECT\n  p.productCode,\n  p.productName\nFROM products AS p\nLEFT JOIN orderdetails AS od\n  ON p.productCode = od.productCode\nWHERE\n  od.orderNumber IS NULL\nLIMIT 500",
+      "sql_valid": true,
+      "executable": true,
+      "ex_pass": false,
+      "error": null,
+      "duration_sec": 1.4
+    }
+  ]
+}
