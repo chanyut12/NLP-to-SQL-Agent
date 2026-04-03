@@ -15,6 +15,14 @@ class Settings:
     # OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "a-kore/Arctic-Text2SQL-R1-7B") # If you have a lot of RAM , processing will be faster
     OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
+    # OpenRouter Settings (OpenAI-compatible, free tier available)
+    OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+    OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "meta-llama/llama-4-maverick:free")
+
+    # Zhipu AI (GLM) Settings (OpenAI-compatible)
+    ZHIPU_API_KEY = os.getenv("ZHIPU_API_KEY", "")
+    ZHIPU_MODEL = os.getenv("ZHIPU_MODEL", "glm-4-flash")
+
     # ===========================================================================
     # RAG Configuration (การดึงตัวอย่าง SQL ที่ใกล้เคียง)
     # ===========================================================================

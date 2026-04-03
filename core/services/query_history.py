@@ -36,6 +36,19 @@ class HistoryEntry:
     feedback_text: str = ""  # User-typed feedback comment
     dialect: str = "sqlite"
     retry_count: int = 0
+    # Richer metrics fields (optional, safe defaults for backward compatibility)
+    tables_used: list = None
+    join_count: int = 0
+    has_aggregation: bool = False
+    has_subquery: bool = False
+    has_group_by: bool = False
+    result_row_count: int = -1
+    rag_examples_count: int = 0
+    model_name: str = ""
+
+    def __post_init__(self):
+        if self.tables_used is None:
+            self.tables_used = []
 
 
 @dataclass
@@ -114,7 +127,15 @@ class QueryHistoryManager:
                             feedback=data.get("feedback", ""),
                             feedback_text=data.get("feedback_text", ""),
                             dialect=data.get("dialect", "sqlite"),
-                            retry_count=data.get("retry_count", 0)
+                            retry_count=data.get("retry_count", 0),
+                            tables_used=data.get("tables_used", []),
+                            join_count=data.get("join_count", 0),
+                            has_aggregation=data.get("has_aggregation", False),
+                            has_subquery=data.get("has_subquery", False),
+                            has_group_by=data.get("has_group_by", False),
+                            result_row_count=data.get("result_row_count", -1),
+                            rag_examples_count=data.get("rag_examples_count", 0),
+                            model_name=data.get("model_name", ""),
                         )
 
                         # Apply filters
@@ -166,7 +187,15 @@ class QueryHistoryManager:
                                 feedback=data.get("feedback", ""),
                                 feedback_text=data.get("feedback_text", ""),
                                 dialect=data.get("dialect", "sqlite"),
-                                retry_count=data.get("retry_count", 0)
+                                retry_count=data.get("retry_count", 0),
+                                tables_used=data.get("tables_used", []),
+                                join_count=data.get("join_count", 0),
+                                has_aggregation=data.get("has_aggregation", False),
+                                has_subquery=data.get("has_subquery", False),
+                                has_group_by=data.get("has_group_by", False),
+                                result_row_count=data.get("result_row_count", -1),
+                                rag_examples_count=data.get("rag_examples_count", 0),
+                                model_name=data.get("model_name", ""),
                             )
                     except json.JSONDecodeError:
                         continue

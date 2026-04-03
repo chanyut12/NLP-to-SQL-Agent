@@ -294,7 +294,7 @@ def smart_filter_schema(
     # 4. If we found some tables, include their related tables for JOINs
     if schema_rag is not None and relevant_tables:
         try:
-            from core.schema_rag import expand_tables_with_relationships
+            from core.data.schema_rag import expand_tables_with_relationships
             relationships = schema_rag.get_table_relationships()
             expanded = expand_tables_with_relationships(
                 list(relevant_tables),
@@ -302,8 +302,8 @@ def smart_filter_schema(
                 max_total=top_k + 3
             )
             relevant_tables.update(expanded)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Warning: Could not expand related tables: {e}")
 
     # 5. Fallback: If still nothing found, return all
     if not relevant_tables:
@@ -481,4 +481,3 @@ def find_missing_tables(
                     pass
     
     return suggestions
-
