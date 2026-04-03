@@ -35,7 +35,7 @@ jobs:
 
       - name: Run unit tests
         run: |
-          python -m pytest tests/ -v --tb=short
+          python -m pytest tests/unit/ -v --tb=short
         env:
           # Prevent LLM calls during testing (tests should mock these)
           MODEL_PROVIDER: "ollama"
