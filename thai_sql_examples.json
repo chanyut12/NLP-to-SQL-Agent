@@ -144,13 +144,6 @@
       "category": "join_ranking"
     },
     {
-      "question": "ยอดขายรวมทั้งหมดแบบไม่มีเงื่อนไข",
-      "sql": "SELECT SUM(quantityOrdered * priceEach) AS total_sales FROM orderdetails;",
-      "category": "aggregation",
-      "dialect": "mysql",
-      "notes": "classicmodels example"
-    },
-    {
       "question": "เปรียบเทียบยอดขายรายปี",
       "sql": "SELECT YEAR(orderDate) as year, SUM(quantityOrdered * priceEach) as total_sales FROM orders JOIN orderdetails ON orders.orderNumber = orderdetails.orderNumber GROUP BY YEAR(orderDate) ORDER BY total_sales DESC;",
       "category": "groupby",
@@ -158,30 +151,11 @@
       "notes": "Yearly sales using MySQL YEAR()"
     },
     {
-      "question": "สินค้าที่ขายดีที่สุด 5 อันดับแรก",
-      "sql": "SELECT p.productName, SUM(od.quantityOrdered) as total_sold FROM products p JOIN orderdetails od ON p.productCode = od.productCode GROUP BY p.productName ORDER BY total_sold DESC LIMIT 5;",
-      "category": "join_ranking",
-      "dialect": "mysql",
-      "notes": "Best selling products"
-    },
-    {
       "question": "สัดส่วนยอดขายตาม Product Line",
       "sql": "SELECT p.productLine, SUM(od.quantityOrdered * od.priceEach) as sales FROM products p JOIN orderdetails od ON p.productCode = od.productCode GROUP BY p.productLine ORDER BY sales DESC;",
       "category": "groupby",
       "dialect": "mysql",
       "notes": "Sales by category"
-    },
-    {
-      "question": "จำนวนออเดอร์แยกตามสถานะ",
-      "sql": "SELECT status, COUNT(*) as count FROM orders GROUP BY status ORDER BY count DESC;",
-      "category": "groupby",
-      "dialect": "mysql"
-    },
-    {
-      "question": "ยอดขายรวมทั้งหมด",
-      "sql": "SELECT SUM(od.quantityOrdered * od.priceEach) AS total_sales FROM orderdetails od;",
-      "category": "aggregation",
-      "dialect": "mysql"
     },
     {
       "question": "ยอดขายรวมปี 2004",
@@ -214,12 +188,6 @@
       "dialect": "mysql"
     },
     {
-      "question": "จำนวนลูกค้าทั้งหมด",
-      "sql": "SELECT COUNT(*) AS total_customers FROM customers;",
-      "category": "count",
-      "dialect": "mysql"
-    },
-    {
       "question": "จำนวนออเดอร์ทั้งหมด",
       "sql": "SELECT COUNT(*) AS total_orders FROM orders;",
       "category": "count",
@@ -232,27 +200,9 @@
       "dialect": "mysql"
     },
     {
-      "question": "ยอดชำระเงินรวม",
-      "sql": "SELECT SUM(amount) AS total_payments FROM payments;",
-      "category": "aggregation",
-      "dialect": "mysql"
-    },
-    {
       "question": "ยอดชำระเงินปี 2004",
       "sql": "SELECT SUM(amount) AS total_payments FROM payments WHERE YEAR(paymentDate) = 2004;",
       "category": "aggregation",
-      "dialect": "mysql"
-    },
-    {
-      "question": "รายชื่อพนักงานทั้งหมด",
-      "sql": "SELECT firstName, lastName, jobTitle FROM employees ORDER BY lastName;",
-      "category": "select",
-      "dialect": "mysql"
-    },
-    {
-      "question": "จำนวนพนักงานแต่ละสำนักงาน",
-      "sql": "SELECT o.city, COUNT(e.employeeNumber) AS employee_count FROM offices o JOIN employees e ON o.officeCode = e.officeCode GROUP BY o.city ORDER BY employee_count DESC;",
-      "category": "groupby",
       "dialect": "mysql"
     },
     {
@@ -313,6 +263,97 @@
       "category": "cross_name_fk",
       "dialect": "mysql",
       "notes": "Cross-name FK: customers.salesRepEmployeeNumber -> employees.employeeNumber"
+    },
+    {
+      "question": "ยอดชำระเงินของลูกค้าแต่ละราย",
+      "sql": "SELECT c.customerName, SUM(p.amount) AS total_paid FROM customers c JOIN payments p ON c.customerNumber = p.customerNumber GROUP BY c.customerName ORDER BY total_paid DESC LIMIT 500;",
+      "category": "join_aggregation",
+      "dialect": "mysql",
+      "notes": "customers JOIN payments via customerNumber"
+    },
+    {
+      "question": "ออเดอร์ทั้งหมดพร้อมชื่อลูกค้า",
+      "sql": "SELECT o.orderNumber, o.orderDate, o.status, c.customerName FROM orders o JOIN customers c ON o.customerNumber = c.customerNumber ORDER BY o.orderDate DESC LIMIT 500;",
+      "category": "join_select",
+      "dialect": "mysql",
+      "notes": "orders JOIN customers via customerNumber"
+    },
+    {
+      "question": "ลูกค้าที่มีออเดอร์มากกว่า 3 รายการ",
+      "sql": "SELECT c.customerName, COUNT(o.orderNumber) AS order_count FROM customers c JOIN orders o ON c.customerNumber = o.customerNumber GROUP BY c.customerNumber, c.customerName HAVING COUNT(o.orderNumber) > 3 ORDER BY order_count DESC;",
+      "category": "having",
+      "dialect": "mysql",
+      "notes": "HAVING COUNT > threshold — same pattern as customers with >N orders"
+    },
+    {
+      "question": "สินค้าที่มีราคาสูงกว่าค่าเฉลี่ยของทุกสินค้า",
+      "sql": "SELECT productName, MSRP FROM products WHERE MSRP > (SELECT AVG(MSRP) FROM products) ORDER BY MSRP DESC LIMIT 500;",
+      "category": "subquery_filter",
+      "dialect": "mysql",
+      "notes": "Correlated subquery: WHERE value > (SELECT AVG ...)"
+    },
+    {
+      "question": "ออเดอร์ที่ยังไม่มีการชำระเงิน",
+      "sql": "SELECT o.orderNumber, o.orderDate, c.customerName FROM orders o JOIN customers c ON o.customerNumber = c.customerNumber WHERE o.orderNumber NOT IN (SELECT DISTINCT orderNumber FROM orderdetails WHERE orderNumber IN (SELECT orderNumber FROM orders)) LIMIT 500;",
+      "category": "subquery_not_in",
+      "dialect": "mysql",
+      "notes": "NOT IN subquery pattern for exclusion"
+    },
+    {
+      "question": "พนักงานที่ยังไม่มีลูกค้าในความดูแล",
+      "sql": "SELECT e.firstName, e.lastName, e.jobTitle FROM employees e WHERE e.employeeNumber NOT IN (SELECT DISTINCT salesRepEmployeeNumber FROM customers WHERE salesRepEmployeeNumber IS NOT NULL) ORDER BY e.lastName;",
+      "category": "subquery_not_in",
+      "dialect": "mysql",
+      "notes": "NOT IN to find employees with no assigned customers — cross-name FK pattern"
+    },
+    {
+      "question": "ยอดขายแยกตามปีและเดือน (SQLite)",
+      "sql": "SELECT strftime('%Y', o.orderDate) AS year, strftime('%m', o.orderDate) AS month, SUM(od.quantityOrdered * od.priceEach) AS monthly_sales FROM orders o JOIN orderdetails od ON o.orderNumber = od.orderNumber GROUP BY strftime('%Y', o.orderDate), strftime('%m', o.orderDate) ORDER BY year, month;",
+      "category": "groupby_date",
+      "dialect": "sqlite",
+      "notes": "SQLite strftime for year+month grouping"
+    },
+    {
+      "question": "ราคาแพงสุดและถูกสุดในแต่ละ Product Line",
+      "sql": "SELECT productLine, MAX(MSRP) AS max_price, MIN(MSRP) AS min_price, AVG(MSRP) AS avg_price FROM products GROUP BY productLine ORDER BY max_price DESC;",
+      "category": "aggregation_groupby",
+      "dialect": "mysql",
+      "notes": "MAX/MIN/AVG per group — products.MSRP"
+    },
+    {
+      "question": "พนักงานแต่ละคนมีลูกค้าในความดูแลกี่ราย",
+      "sql": "SELECT e.firstName, e.lastName, COUNT(c.customerNumber) AS customer_count FROM employees e LEFT JOIN customers c ON e.employeeNumber = c.salesRepEmployeeNumber GROUP BY e.employeeNumber, e.firstName, e.lastName ORDER BY customer_count DESC;",
+      "category": "join_count",
+      "dialect": "mysql",
+      "notes": "COUNT customers per employee — cross-name FK: salesRepEmployeeNumber -> employeeNumber"
+    },
+    {
+      "question": "ยอดชำระเงินแยกตามประเทศของลูกค้า",
+      "sql": "SELECT c.country, SUM(p.amount) AS total_payments, COUNT(p.checkNumber) AS payment_count FROM customers c JOIN payments p ON c.customerNumber = p.customerNumber GROUP BY c.country ORDER BY total_payments DESC;",
+      "category": "join_aggregation",
+      "dialect": "mysql",
+      "notes": "customers JOIN payments grouped by country — for country-level payment analysis"
+    },
+    {
+      "question": "ลูกค้าที่มียอดชำระเงินรวมสูงกว่าค่าเฉลี่ยของทุกลูกค้า",
+      "sql": "SELECT c.customerName, SUM(p.amount) AS total_paid FROM customers c JOIN payments p ON c.customerNumber = p.customerNumber GROUP BY c.customerNumber, c.customerName HAVING SUM(p.amount) > (SELECT AVG(total) FROM (SELECT SUM(amount) AS total FROM payments GROUP BY customerNumber) AS sub) ORDER BY total_paid DESC;",
+      "category": "having_subquery",
+      "dialect": "mysql",
+      "notes": "HAVING with subquery AVG — customers above average payment total"
+    },
+    {
+      "question": "สินค้าที่ไม่มีใครสั่งซื้อเลย",
+      "sql": "SELECT p.productName, p.productLine FROM products p LEFT JOIN orderdetails od ON p.productCode = od.productCode WHERE od.productCode IS NULL ORDER BY p.productName;",
+      "category": "left_join_null",
+      "dialect": "mysql",
+      "notes": "LEFT JOIN + WHERE IS NULL to find products never ordered"
+    },
+    {
+      "question": "สัดส่วนยอดขายของแต่ละ Product Line เทียบกับยอดรวม",
+      "sql": "SELECT p.productLine, SUM(od.quantityOrdered * od.priceEach) AS line_sales, ROUND(SUM(od.quantityOrdered * od.priceEach) * 100.0 / (SELECT SUM(quantityOrdered * priceEach) FROM orderdetails), 2) AS pct FROM products p JOIN orderdetails od ON p.productCode = od.productCode GROUP BY p.productLine ORDER BY line_sales DESC;",
+      "category": "ratio_subquery",
+      "dialect": "mysql",
+      "notes": "Percentage ratio using scalar subquery for total denominator"
     }
   ]
 }
