@@ -64,6 +64,26 @@ class NLPEngine:
                 google_api_key=settings.GOOGLE_API_KEY,
                 convert_system_message_to_human=True
             )
+        elif settings.MODEL_PROVIDER == "zhipu":
+            from langchain_openai import ChatOpenAI
+            if not settings.ZHIPU_API_KEY:
+                raise ValueError("ZHIPU_API_KEY not found in environment variables")
+            self._llm = ChatOpenAI(
+                model=settings.ZHIPU_MODEL,
+                temperature=0,
+                api_key=settings.ZHIPU_API_KEY,
+                base_url="https://api.z.ai/api/coding/paas/v4",
+            )
+        elif settings.MODEL_PROVIDER == "openrouter":
+            from langchain_openai import ChatOpenAI
+            if not settings.OPENROUTER_API_KEY:
+                raise ValueError("OPENROUTER_API_KEY not found in environment variables")
+            self._llm = ChatOpenAI(
+                model=settings.OPENROUTER_MODEL,
+                temperature=0,
+                api_key=settings.OPENROUTER_API_KEY,
+                base_url="https://openrouter.ai/api/v1",
+            )
         else:
             from langchain_ollama import ChatOllama
             self._llm = ChatOllama(
@@ -108,6 +128,15 @@ Given an input question (possibly in Thai), create a syntactically correct, read
 - "น้อยที่สุด" / "ต่ำสุด" -> ORDER BY ... ASC LIMIT
 - "จำนวน" / "กี่รายการ" / "นับ" -> COUNT(...)
 
+**Schema Column Mapping (receipt table):**
+- "ลูกค้า" / "คนซื้อ" -> customer_name
+- "ยอดขาย" / "ยอดรวม" -> total_price (use SUM for aggregation)
+- "จำนวนใบเสร็จ" / "กี่ใบ" -> COUNT(receipt_id)
+- "หมวดหมู่" / "ประเภทสินค้า" -> product_category
+- "การชำระเงิน" / "จ่ายเงิน" -> payment_method
+- "เดือน" -> month column (IMPORTANT: stored as TEXT e.g. 'January', 'February', ..., 'December' — do NOT use date functions on this column, use GROUP BY month directly)
+- "ปี" -> year column (stored as INTEGER)
+
 **Ratio & Rate:**
 - "อัตราส่วน" / "สัดส่วน" / "เปอร์เซ็นต์" -> SUM(A) / SUM(B) * 100 (aggregate BOTH numerator AND denominator)
 - "อัตราการแปลง" / "conversion" -> COUNT(condition) / COUNT(*) * 100
@@ -116,12 +145,13 @@ Given an input question (possibly in Thai), create a syntactically correct, read
 - "เติบโต" / "growth" -> (current - previous) / previous * 100
 
 **Time Grouping:**
-- "รายเดือน" / "แต่ละเดือน" -> GROUP BY YEAR, MONTH
-- "รายปี" / "แต่ละปี" -> GROUP BY YEAR
+- "รายเดือน" / "แต่ละเดือน" -> GROUP BY year, month (use actual column names from schema, not date functions unless column is a date type)
+- "รายปี" / "แต่ละปี" -> GROUP BY year
 - "รายไตรมาส" / "quarter" -> GROUP BY YEAR, QUARTER
 - "ล่าสุด" / "ใหม่สุด" -> ORDER BY date DESC LIMIT
 - "ระหว่าง" / "ช่วง" -> WHERE date BETWEEN ... AND ...
 - "กี่วัน" / "ระยะเวลา" -> DATEDIFF or julianday difference
+- "ลูกค้าใหม่" / "เพิ่มขึ้น" -> COUNT customers whose MIN(date/receipt) falls in that period (use subquery or MIN to find first purchase)
 
 **Negation & NULL:**
 - "ไม่เคย" / "ยังไม่" -> LEFT JOIN ... WHERE right.id IS NULL or NOT EXISTS
@@ -201,10 +231,10 @@ SQL:"""
         # Execute Example RAG and Schema processing concurrently
         
         async def get_examples():
-            """Async task: Get similar examples from RAG store."""
-            return await self._example_store.async_format_examples_for_prompt(
-                question, 
-                top_k=settings.RAG_TOP_K, 
+            """Async task: Get similar examples from RAG store (returns (text, count))."""
+            return await self._example_store.async_format_examples_for_prompt_with_count(
+                question,
+                top_k=settings.RAG_TOP_K,
                 dialect=dialect,
                 threshold=settings.RAG_DISTANCE_THRESHOLD
             )
@@ -243,7 +273,7 @@ SQL:"""
                 return schema_text
         
         # Run both tasks in parallel
-        dynamic_examples, schema_text = await asyncio.gather(
+        (dynamic_examples, rag_count), schema_text = await asyncio.gather(
             get_examples(),
             get_schema_text()
         )
@@ -262,12 +292,12 @@ SQL:"""
             | StrOutputParser()
         )
         
-        # First Attempt - Use async invoke if available
+        # First Attempt - Use native async invoke
         try:
-            response = await asyncio.to_thread(chain.invoke, {"question": question})
+            response = await chain.ainvoke({"question": question})
             sql = self.clean_sql(response, dialect)
         except Exception as e:
-            return None, None, f"LLM Generation Failed: {str(e)}", 0, None
+            return None, None, f"LLM Generation Failed: {str(e)}", 0, None, 0
 
         # Retry Loop — extract table names from new schema format
         tables_dict = raw_schema.get("tables", raw_schema) if isinstance(raw_schema, dict) and "tables" in raw_schema else raw_schema
@@ -304,7 +334,7 @@ SQL:"""
                 viz_config = self._viz_service.recommend(df, question, preferred_chart_type)
                 logger.info(f"VIZ_DEBUG: chart={viz_config.get('chart_type')}, x={viz_config.get('x_col')}, y={viz_config.get('y_col')}, series={viz_config.get('series_col')}")
 
-                return sql, result_data, None, attempt, viz_config
+                return sql, result_data, None, attempt, viz_config, rag_count
 
             except Exception as e:
                 error_msg = str(e)
@@ -359,10 +389,9 @@ Please analyze the error and provide a corrected SQL query.
 Return ONLY the corrected SQL query without any explanation or markdown.
 Corrected SQL:"""
                     
-                    corrected = await asyncio.to_thread(self._llm.invoke, correction_prompt)
+                    corrected = await self._llm.ainvoke(correction_prompt)
                     sql = self.clean_sql(corrected.content if hasattr(corrected, 'content') else str(corrected), dialect)
                 else:
-                    return sql, None, error_msg, attempt, None
+                    return sql, None, error_msg, attempt, None, rag_count
 
-        return sql, None, "Max retries exceeded", max_retries, None
-
+        return sql, None, "Max retries exceeded", max_retries, None, rag_count
