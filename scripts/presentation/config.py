@@ -1,0 +1,22 @@
+"""
+Configuration and styling constants for the presentation.
+"""
+from pptx.util import Inches
+from pptx.dml.color import RGBColor
+
+# Slide dimensions (widescreen 16:9)
+W = Inches(13.33)
+H = Inches(7.5)
+
+# Color palette
+NAVY    = RGBColor(0x1F, 0x38, 0x64)
+BLUE    = RGBColor(0x25, 0x63, 0xA8)
+STEEL   = RGBColor(0x1F, 0x6B, 0x9E)
+WHITE   = RGBColor(0xFF, 0xFF, 0xFF)
+LIGHT   = RGBColor(0xEE, 0xF3, 0xFA)
+GRAY    = RGBColor(0xF2, 0xF2, 0xF2)
+DARK    = RGBColor(0x1A, 0x1A, 0x2E)
+ACCENT  = RGBColor(0x00, 0xB4, 0xD8)
+GREEN   = RGBColor(0x06, 0xD6, 0xA0)
+ORANGE  = RGBColor(0xF4, 0xA2, 0x61)
+RED     = RGBColor(0xE6, 0x3B, 0x3B)
