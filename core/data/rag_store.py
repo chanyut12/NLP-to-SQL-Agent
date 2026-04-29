@@ -9,12 +9,17 @@ import json
 import os
 import asyncio
 from typing import List, Dict, Optional, Any
+import logging
 import chromadb
 from chromadb.config import Settings
 from sentence_transformers import SentenceTransformer
 
 from core.utils.common import generate_stable_id
+from core.utils.embedding import load_sentence_transformer
 from core.config import settings
+
+
+logger = logging.getLogger(__name__)
 
 
 class ExampleStore:
@@ -39,8 +44,8 @@ class ExampleStore:
         self.persist_directory = persist_directory
 
         # Eagerly load embedding model at startup (not on first query)
-        print(f"Loading embedding model: {self.model_name}")
-        self._embedder = SentenceTransformer(self.model_name)
+        logger.info("Loading embedding model: %s", self.model_name)
+        self._embedder = load_sentence_transformer(self.model_name)
 
         # Initialize ChromaDB
         if self.persist_directory:
@@ -69,7 +74,7 @@ class ExampleStore:
     def _sync_examples(self):
         """Load examples from JSON file and upsert them only if new."""
         if not os.path.exists(self.examples_path):
-            print(f"Warning: Examples file not found: {self.examples_path}")
+            logger.warning("Examples file not found: %s", self.examples_path)
             return
         
         with open(self.examples_path, 'r', encoding='utf-8') as f:
@@ -119,7 +124,7 @@ class ExampleStore:
         
         # Batch upsert only new items
         if new_ids:
-            print(f"Syncing {len(new_ids)} new examples to RAG store...")
+            logger.info("Syncing %s new examples to RAG store.", len(new_ids))
             self.collection.upsert(
                 ids=new_ids,
                 embeddings=new_embeddings,
@@ -127,7 +132,7 @@ class ExampleStore:
                 metadatas=new_metadatas
             )
         else:
-            print("RAG store is up to date. No new examples to sync.")
+            logger.info("RAG store is up to date. No new examples to sync.")
 
     def get_similar_examples(
         self,
@@ -170,7 +175,11 @@ class ExampleStore:
 
         # Fallback: If no results found with dialect filter, try without filter
         if dialect and (not results['documents'] or not results['documents'][0] or len(results['documents'][0]) < top_k):
-            print(f"⚠ RAG: Only {len(results['documents'][0]) if results['documents'] and results['documents'][0] else 0} examples found for dialect '{dialect}'. Fetching more without filter...")
+            logger.warning(
+                "RAG: Only %s examples found for dialect '%s'. Fetching more without filter.",
+                len(results['documents'][0]) if results['documents'] and results['documents'][0] else 0,
+                dialect,
+            )
             results_fallback = self.collection.query(
                 query_embeddings=[query_embedding],
                 n_results=top_k,
@@ -214,10 +223,15 @@ class ExampleStore:
                         )
                         if transpiled_sql:
                             sql = transpiled_sql
-                            print(f"✓ RAG: Transpiled example from {source} to {target}")
+                            logger.info("RAG: Transpiled example from %s to %s", source, target)
                     except Exception as e:
                         # If transpilation fails, use original SQL (LLM will handle it)
-                        print(f"⚠ RAG: Transpilation failed ({source_dialect} → {dialect}): {e}")
+                        logger.warning(
+                            "RAG: Transpilation failed (%s -> %s): %s",
+                            source_dialect,
+                            dialect,
+                            e,
+                        )
                         pass
 
                 examples.append({

@@ -7,11 +7,16 @@ with Thai-English mapping support for improved Local LLM accuracy.
 
 import asyncio
 from typing import List, Dict, Optional, Any, Set
+import logging
 from sentence_transformers import SentenceTransformer
 import chromadb
 from sqlalchemy import Engine, inspect
 
 from core.utils.common import generate_stable_id
+from core.utils.embedding import load_sentence_transformer
+
+
+logger = logging.getLogger(__name__)
 
 
 # =============================================================================
@@ -107,8 +112,8 @@ class SchemaRAG:
     def _get_embedder(self) -> SentenceTransformer:
         """Get or lazy load the embedding model."""
         if self._embedder is None:
-            print(f"Loading schema embedding model: {self.model_name}")
-            self._embedder = SentenceTransformer(self.model_name)
+            logger.info("Loading schema embedding model: %s", self.model_name)
+            self._embedder = load_sentence_transformer(self.model_name)
         return self._embedder
     
     def _get_collection(self):
@@ -174,11 +179,11 @@ class SchemaRAG:
             if existing and existing.get('metadatas'):
                 existing_tables = {m.get('table') for m in existing['metadatas'] if m.get('table')}
                 if existing_tables == set(table_names):
-                    print(f"Schema already indexed ({len(table_names)} tables). Skipping.")
+                    logger.info("Schema already indexed (%s tables). Skipping.", len(table_names))
                     self._indexed_tables = existing_tables
                     return
-        
-        print(f"Indexing schema: {len(table_names)} tables...")
+
+        logger.info("Indexing schema: %s tables...", len(table_names))
         
         embedder = self._get_embedder()
         
@@ -210,7 +215,7 @@ class SchemaRAG:
                 self._indexed_tables.add(table)
                 
             except Exception as e:
-                print(f"Warning: Could not index table {table}: {e}")
+                logger.warning("Could not index table %s: %s", table, e)
                 continue
         
         if ids:
@@ -221,7 +226,7 @@ class SchemaRAG:
                 metadatas=metadatas
             )
         
-        print(f"Schema indexing complete. {len(ids)} tables indexed.")
+        logger.info("Schema indexing complete. %s tables indexed.", len(ids))
     
     def get_relevant_tables(
         self,
@@ -250,7 +255,7 @@ class SchemaRAG:
         # 2. Semantic search
         collection = self._get_collection()
         if collection.count() == 0:
-            print("Warning: Schema not indexed. Returning all tables.")
+            logger.warning("Schema not indexed. Returning all tables.")
             return list(self._indexed_tables)
         
         embedder = self._get_embedder()
