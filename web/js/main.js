@@ -31,6 +31,10 @@ let connectBtn = null;
 let chartSelector = null;
 let sidebar = null;
 let openSidebarBtn = null;
+let sidebarBackdrop = null;
+
+const MOBILE_QUERY = '(max-width: 767px)';
+const isMobileViewport = () => window.matchMedia(MOBILE_QUERY).matches;
 
 /**
  * Initialize application when DOM is ready
@@ -44,6 +48,7 @@ function init() {
     chartSelector = document.getElementById('chart-type-selector');
     sidebar = document.getElementById('sidebar');
     openSidebarBtn = document.getElementById('open-sidebar-btn');
+    sidebarBackdrop = document.getElementById('sidebar-backdrop');
 
     // Initialize UI module
     initUI();
@@ -113,6 +118,10 @@ function setupEventListeners() {
 
     // Global click event delegation for all data-action elements
     document.addEventListener('click', handleAction);
+
+    // Keep responsive layout in sync across viewport changes
+    window.addEventListener('resize', handleResize);
+    window.addEventListener('orientationchange', handleResize);
 }
 
 /**
@@ -132,6 +141,9 @@ function handleAction(e) {
             break;
         case 'switchTab':
             switchTab(target.dataset.tab);
+            if (isMobileViewport() && !sidebar.classList.contains('collapsed')) {
+                toggleSidebar();
+            }
             break;
         case 'sendMessage':
             sendMessage();
@@ -215,35 +227,57 @@ async function deleteFavorite(favId) {
 }
 
 /**
- * Toggle sidebar visibility
+ * Apply collapsed visual state without persisting (used by resize handler).
  */
-function toggleSidebar() {
-    const isCollapsed = sidebar.classList.contains('collapsed');
-
-    if (isCollapsed) {
-        sidebar.classList.remove('collapsed');
-        openSidebarBtn.style.display = 'none';
-        localStorage.setItem('sidebarCollapsed', 'false');
-    } else {
+function applySidebarCollapsed(collapsed) {
+    if (collapsed) {
         sidebar.classList.add('collapsed');
         openSidebarBtn.style.display = 'flex';
-        localStorage.setItem('sidebarCollapsed', 'true');
+        sidebarBackdrop?.classList.remove('active');
+    } else {
+        sidebar.classList.remove('collapsed');
+        openSidebarBtn.style.display = 'none';
+        if (isMobileViewport()) {
+            sidebarBackdrop?.classList.add('active');
+        } else {
+            sidebarBackdrop?.classList.remove('active');
+        }
     }
 }
 
 /**
- * Restore sidebar state from localStorage
+ * Toggle sidebar visibility
+ */
+function toggleSidebar() {
+    const isCollapsed = sidebar.classList.contains('collapsed');
+    applySidebarCollapsed(!isCollapsed);
+    localStorage.setItem('sidebarCollapsed', String(!isCollapsed));
+}
+
+/**
+ * Restore sidebar state from localStorage. On mobile, default to collapsed
+ * when no user preference has been stored yet.
  */
 function restoreSidebarState() {
-    const isCollapsed = localStorage.getItem('sidebarCollapsed') === 'true';
+    const stored = localStorage.getItem('sidebarCollapsed');
+    const isCollapsed = stored === null ? isMobileViewport() : stored === 'true';
+    applySidebarCollapsed(isCollapsed);
+}
 
-    if (isCollapsed) {
-        sidebar.classList.add('collapsed');
-        openSidebarBtn.style.display = 'flex';
-    } else {
-        sidebar.classList.remove('collapsed');
-        openSidebarBtn.style.display = 'none';
-    }
+/**
+ * Keep layout sane across viewport resizes (e.g. orientation change,
+ * dragging window across breakpoints, devtools toggling).
+ */
+let resizeTimer = null;
+function handleResize() {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+        if (!isMobileViewport()) {
+            sidebarBackdrop?.classList.remove('active');
+        } else if (!sidebar.classList.contains('collapsed')) {
+            sidebarBackdrop?.classList.add('active');
+        }
+    }, 120);
 }
 
 /**
