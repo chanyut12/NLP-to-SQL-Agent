@@ -26,7 +26,7 @@ class Settings:
     # ===========================================================================
     # RAG Configuration (การดึงตัวอย่าง SQL ที่ใกล้เคียง)
     # ===========================================================================
-    RAG_DISTANCE_THRESHOLD = 15.0  # ค่า threshold สำหรับกรอง example ที่ไกลเกินไป (ยิ่งต่ำยิ่งเข้มงวด)
+    RAG_DISTANCE_THRESHOLD = 10.0  # ค่า threshold สำหรับกรอง example ที่ไกลเกินไป (ยิ่งต่ำยิ่งเข้มงวด, ลดจาก 15.0 เพื่อลด latency)
     RAG_TOP_K = 3                  # จำนวนตัวอย่าง SQL ที่จะดึงมาช่วย LLM (Few-shot examples)
     
     # ===========================================================================
@@ -39,6 +39,8 @@ class Settings:
     # ===========================================================================
     # โมเดลนี้รองรับภาษาไทย ใช้สำหรับ RAG และ Schema search
     EMBEDDING_MODEL = "intfloat/multilingual-e5-small"
+    EMBEDDING_DEVICE = os.getenv("EMBEDDING_DEVICE", "").strip()
+    HF_TOKEN = os.getenv("HF_TOKEN", "").strip()
     
     # ===========================================================================
     # SQL Execution Configuration (การรัน SQL)

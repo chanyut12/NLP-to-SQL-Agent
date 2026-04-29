@@ -3,13 +3,44 @@ load_dotenv()
 
 import asyncio
 import logging
+from contextlib import asynccontextmanager, suppress
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from api.dependencies import state_manager
 from api.routes import router
+from core.utils.embedding import configure_third_party_logging
 
-app = FastAPI(title="Thai NLP-to-SQL API", version="1.0.0")
 logger = logging.getLogger(__name__)
+configure_third_party_logging()
+
+
+async def _preload_nlp_engine():
+    """Warm the NLP engine without blocking app startup."""
+    try:
+        await asyncio.to_thread(state_manager.get_nlp_engine)
+        logger.info("NLPEngine preloaded successfully.")
+    except asyncio.CancelledError:
+        logger.info("NLPEngine preload cancelled during shutdown.")
+        raise
+    except Exception as e:
+        # Keep server running; /connect and /query can retry initialization later.
+        logger.warning("NLPEngine preload failed on startup: %s", e)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    preload_task = asyncio.create_task(_preload_nlp_engine())
+    app.state.preload_task = preload_task
+    try:
+        yield
+    finally:
+        if not preload_task.done():
+            preload_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await preload_task
+
+
+app = FastAPI(title="Thai NLP-to-SQL API", version="1.0.0", lifespan=lifespan)
 
 # Enable CORS for frontend
 app.add_middleware(
@@ -21,16 +52,6 @@ app.add_middleware(
 )
 
 app.include_router(router, prefix="/api")
-
-@app.on_event("startup")
-async def preload_nlp_engine():
-    """Preload NLPEngine at app startup to avoid first-query cold start."""
-    try:
-        await asyncio.to_thread(state_manager.get_nlp_engine)
-        logger.info("NLPEngine preloaded successfully.")
-    except Exception as e:
-        # Keep server running; /connect and /query can retry initialization later.
-        logger.warning("NLPEngine preload failed on startup: %s", e)
 
 # Mount Frontend (Must be after API routes)
 from fastapi.staticfiles import StaticFiles

@@ -33,6 +33,9 @@ class NLPEngine:
         self._viz_service: VizService = None
         self._current_engine: Engine = None  # Track for schema indexing
         self._schema_cache: dict = None  # Cache for database schema
+        self._schema_text_cache: str = None  # Cache for formatted schema text
+        self._join_hints_cache: str = None   # Cache for join hints
+        self._all_tables_cache: list = None  # Cache for table list
         self._initialize_resources()
 
     def _initialize_resources(self):
@@ -215,6 +218,10 @@ SQL:"""
             raw_schema = await asyncio.to_thread(get_database_schema, engine)
             self._schema_cache = raw_schema
             self._current_engine = engine
+            # Invalidate derived caches when engine changes
+            self._schema_text_cache = None
+            self._join_hints_cache = None
+            self._all_tables_cache = None
         
         # Initialize Schema RAG if needed (for local LLM)
         if settings.MODEL_PROVIDER == "ollama" and self._schema_rag is None:
@@ -224,6 +231,19 @@ SQL:"""
         # Index schema if engine changed
         if settings.MODEL_PROVIDER == "ollama" and engine_changed:
             await asyncio.to_thread(self._schema_rag.index_schema_from_db, engine)
+        
+        # Pre-compute and cache schema-derived data (once per engine)
+        if self._all_tables_cache is None:
+            tables_dict = raw_schema.get("tables", raw_schema) if isinstance(raw_schema, dict) and "tables" in raw_schema else raw_schema
+            self._all_tables_cache = list(tables_dict.keys())
+        
+        # Cache formatted schema text for Cloud LLM (same every query for same engine)
+        if settings.MODEL_PROVIDER != "ollama" and self._schema_text_cache is None:
+            schema_text = format_schema_for_prompt(raw_schema)
+            join_hints = get_join_hints(self._all_tables_cache, raw_schema)
+            if join_hints:
+                schema_text += f"\n\n{join_hints}"
+            self._schema_text_cache = schema_text
         
         # =============================================================
         # PARALLEL RAG RETRIEVAL - Key Performance Optimization
@@ -240,9 +260,9 @@ SQL:"""
             )
         
         async def get_schema_text():
-            """Async task: Get filtered schema (for local LLM) or full schema with FK hints."""
+            """Async task: Get filtered schema (for local LLM) or cached full schema."""
             if settings.MODEL_PROVIDER == "ollama":
-                # Use smart filtering (semantic + Thai mapping)
+                # Use smart filtering (semantic + Thai mapping) — per-query (depends on question)
                 filtered_schema = await asyncio.to_thread(
                     smart_filter_schema,
                     raw_schema,
@@ -252,25 +272,16 @@ SQL:"""
                     settings.SCHEMA_TOP_K
                 )
 
-                # format_schema_for_prompt now includes FK annotations inline
                 schema_text = format_schema_for_prompt(filtered_schema)
 
-                # Add JOIN hints (now FK-based when available)
                 tables_dict = filtered_schema.get("tables", filtered_schema) if isinstance(filtered_schema, dict) and "tables" in filtered_schema else filtered_schema
                 join_hints = get_join_hints(list(tables_dict.keys()), filtered_schema)
                 if join_hints:
                     schema_text += f"\n\n{join_hints}"
                 return schema_text
             else:
-                # Cloud LLM: full schema WITH FK annotations + join hints
-                schema_text = format_schema_for_prompt(raw_schema)
-
-                # เพิ่ม join hints สำหรับ Cloud LLM ด้วย (เดิมไม่มี)
-                tables_dict = raw_schema.get("tables", raw_schema) if isinstance(raw_schema, dict) and "tables" in raw_schema else raw_schema
-                join_hints = get_join_hints(list(tables_dict.keys()), raw_schema)
-                if join_hints:
-                    schema_text += f"\n\n{join_hints}"
-                return schema_text
+                # Cloud LLM: return cached full schema (already computed above)
+                return self._schema_text_cache
         
         # Run both tasks in parallel
         (dynamic_examples, rag_count), schema_text = await asyncio.gather(
@@ -299,12 +310,11 @@ SQL:"""
         except Exception as e:
             return None, None, f"LLM Generation Failed: {str(e)}", 0, None, 0
 
-        # Retry Loop — extract table names from new schema format
-        tables_dict = raw_schema.get("tables", raw_schema) if isinstance(raw_schema, dict) and "tables" in raw_schema else raw_schema
-        all_tables = list(tables_dict.keys())
+        # Use cached table list
+        all_tables = self._all_tables_cache
 
-        # Pre-format full schema with FK info for retry prompts
-        full_schema_text = format_schema_for_prompt(raw_schema)
+        # Lazy: full_schema_text only computed if a retry actually needs it
+        full_schema_text = None
 
         for attempt in range(max_retries + 1):
             try:
@@ -316,13 +326,6 @@ SQL:"""
                     allowed_tables=all_tables
                 )
                 sql = safe_sql_obj.sql
-
-                # Re-format for readability after validation (which may minify it)
-                try:
-                    import sqlglot
-                    sql = sqlglot.transpile(sql, read=dialect, write=dialect, pretty=True)[0]
-                except Exception:
-                    pass # Keep as is if formatting fails
 
                 # Execution - wrap in thread to not block event loop
                 df = await asyncio.to_thread(pd.read_sql, sql, engine)
@@ -341,6 +344,10 @@ SQL:"""
                 logger.warning(f"Attempt {attempt} failed: {error_msg}")
 
                 if attempt < max_retries:
+                    # Lazy compute full schema text (only on first retry)
+                    if full_schema_text is None:
+                        full_schema_text = format_schema_for_prompt(raw_schema)
+
                     # Check if it's a "table not found" error
                     is_table_error = any(phrase in error_msg.lower() for phrase in [
                         "no such table", "table not found", "doesn't exist",
