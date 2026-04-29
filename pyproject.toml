@@ -1,0 +1,39 @@
+[project]
+name = "thai-nlp-sql"
+version = "0.1.0"
+description = "Thai NLP-to-SQL Agent with RAG and multi-provider LLM support"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pandas",
+    "sqlalchemy",
+    "langchain",
+    "langchain-community",
+    "langchain-ollama",
+    "langchain-openai",
+    "langchain-google-genai",
+
+    "pymysql",
+    "psycopg2-binary",
+
+    "chromadb>=0.4.0",
+    "sentence-transformers>=2.2.0",
+
+    "sqlglot>=23.0.0",
+
+    "fastapi",
+    "uvicorn",
+    "python-multipart",
+    "pydantic",
+
+    "python-dotenv",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+]
+
+[tool.uv]
+package = false
