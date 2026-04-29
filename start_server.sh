@@ -1,32 +1,46 @@
 #!/bin/bash
 
-# NLP-to-SQL Agent Server Startup Script
-# This script starts the FastAPI server with proper file watching exclusions
-# to prevent infinite reload loops from virtual environment changes
+# NLP-to-SQL Agent Server Startup Script (uv-powered)
+# Runs uvicorn inside the project's uv-managed venv — no manual activation needed.
+
+set -e
 
 echo "🚀 Starting NLP-to-SQL Agent Backend Server..."
 echo ""
 
-# Check if virtual environment is activated
-if [[ -z "$VIRTUAL_ENV" ]]; then
-    echo "⚠️  Warning: Virtual environment not detected"
-    echo "   Activate it first with: source venv/bin/activate"
-    echo ""
-    read -p "Continue anyway? (y/n) " -n 1 -r
-    echo ""
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+# ==============================================================================
+# Ensure uv is available
+# ==============================================================================
+if ! command -v uv &> /dev/null; then
+    if [ -x "$HOME/.local/bin/uv" ]; then
+        export PATH="$HOME/.local/bin:$PATH"
+    else
+        echo "❌ uv not found. Run ./setup.sh first, or install uv manually:"
+        echo "   curl -LsSf https://astral.sh/uv/install.sh | sh"
         exit 1
     fi
 fi
 
-# Check if Ollama is running
-if ! curl -s http://localhost:11434/api/tags > /dev/null 2>&1; then
-    echo "⚠️  Warning: Ollama server doesn't seem to be running"
-    echo "   Start it with: ollama serve"
+# ==============================================================================
+# Ensure dependencies are synced (idempotent — fast if already up to date)
+# ==============================================================================
+if [ ! -d ".venv" ]; then
+    echo "📦 .venv not found — running uv sync..."
+    uv sync
     echo ""
 fi
 
-# Start uvicorn with proper file watching
+# ==============================================================================
+# Optional: warn if Ollama is selected but not running
+# ==============================================================================
+if [ -f ".env" ] && grep -q "^MODEL_PROVIDER=ollama" .env; then
+    if ! curl -s http://localhost:11434/api/tags > /dev/null 2>&1; then
+        echo "⚠️  Warning: Ollama server doesn't seem to be running"
+        echo "   Start it with: ollama serve"
+        echo ""
+    fi
+fi
+
 echo "📡 Starting uvicorn on http://localhost:8000"
 echo "   API Docs: http://localhost:8000/docs"
 echo ""
@@ -34,10 +48,8 @@ echo "Watching directories:"
 echo "  - api/ (API routes and endpoints)"
 echo "  - core/ (business logic and services)"
 echo ""
-echo "✅ This prevents reload loops from venv changes"
-echo ""
 
-uvicorn api.main:app \
+uv run uvicorn api.main:app \
     --reload \
     --reload-dir api \
     --reload-dir core \
