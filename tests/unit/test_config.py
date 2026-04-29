@@ -49,6 +49,14 @@ class TestConfigDefaults(unittest.TestCase):
         self.assertIsInstance(settings.EMBEDDING_MODEL, str)
         self.assertTrue(len(settings.EMBEDDING_MODEL) > 0)
 
+    def test_embedding_device_is_string(self):
+        """EMBEDDING_DEVICE should be a string, even when unset."""
+        self.assertIsInstance(settings.EMBEDDING_DEVICE, str)
+
+    def test_hf_token_is_string(self):
+        """HF_TOKEN should be a string, even when unset."""
+        self.assertIsInstance(settings.HF_TOKEN, str)
+
 
 class TestConfigModelProvider(unittest.TestCase):
     """Test LLM provider configuration."""
@@ -95,7 +103,7 @@ class TestConfigSingleton(unittest.TestCase):
         required_attrs = [
             'MODEL_PROVIDER', 'OLLAMA_MODEL', 'OLLAMA_BASE_URL',
             'MAX_SQL_LIMIT', 'MAX_RETRIES', 'RAG_TOP_K', 'SCHEMA_TOP_K',
-            'RAG_DISTANCE_THRESHOLD', 'EMBEDDING_MODEL',
+            'RAG_DISTANCE_THRESHOLD', 'EMBEDDING_MODEL', 'EMBEDDING_DEVICE', 'HF_TOKEN',
             'ENABLE_INTELLIGENT_VIZ', 'LOG_FILE_JSONL', 'LOG_FILE_CSV'
         ]
         for attr in required_attrs:
