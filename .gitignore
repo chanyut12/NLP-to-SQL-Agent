@@ -6,6 +6,7 @@ __pycache__/
 
 # Virtual Environment
 venv/
+.venv/
 env/
 .env
 
@@ -79,7 +80,17 @@ codeflow/
 
 *.docx
 *.xlsx
+*.pptx
 package.json
 package-lock.json
 create_report.js
 .last_connection.json
+
+# Claude Code dev tooling
+.agents/
+.cortex/
+skills-lock.json
+
+# Office temp files & extracted artifacts
+~$*
+report_unpacked/

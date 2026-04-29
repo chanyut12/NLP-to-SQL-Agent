@@ -66,34 +66,42 @@ chmod +x setup.sh
 setup.bat
 ```
 
-### Manual Setup
+### Manual Setup (with uv — recommended)
+
+[uv](https://docs.astral.sh/uv/) replaces `python -m venv` + `pip` and works the same way on Windows / Linux / macOS — no more `venv/bin/activate` vs `venv\Scripts\activate` confusion.
 
 ```bash
+# 0. Install uv (one time, any OS)
+#    macOS / Linux:
+curl -LsSf https://astral.sh/uv/install.sh | sh
+#    Windows (PowerShell):
+#    irm https://astral.sh/uv/install.ps1 | iex
+
 # 1. Clone project
 git clone <your-repo-url>
 cd nlp_sql_project
 
-# 2. Create virtual environment
-python3 -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+# 2. Install all dependencies (auto-creates .venv/)
+uv sync
 
-# 3. Install dependencies
-pip install -r requirements.txt
-
-# 4. Configure environment
+# 3. Configure environment
 cp .env.example .env
 # Edit .env and set:
 #   MODEL_PROVIDER=google
 #   GOOGLE_API_KEY=your-api-key-here
 
-# 5. Create sample database
-python scripts/setup_db.py
+# 4. Create sample database (no need to activate venv!)
+uv run python scripts/setup_db.py
 
-# 6. Start server
-uvicorn api.main:app --reload
+# 5. Start server
+uv run uvicorn api.main:app --reload
+# or just: ./start_server.sh    (Linux/macOS)
+#         start_server.bat      (Windows)
 
-# 7. Open http://localhost:8000
+# 6. Open http://localhost:8000
 ```
+
+> 💡 With `uv run`, every command runs inside `.venv/` automatically — you never need to type `source venv/bin/activate` again.
 
 ✅ **Done!** ใช้เวลา 5-10 นาที
 
@@ -112,9 +120,7 @@ uvicorn api.main:app --reload
 # 1-3. Same as Option 2
 git clone <your-repo-url>
 cd nlp_sql_project
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+uv sync
 
 # 4. Install and setup Ollama
 # Download from: https://ollama.com/
@@ -127,8 +133,8 @@ cp .env.example .env
 #   OLLAMA_MODEL=qwen2.5-coder:7b
 
 # 6. Create database and start
-python scripts/setup_db.py
-uvicorn api.main:app --reload
+uv run python scripts/setup_db.py
+uv run uvicorn api.main:app --reload
 ```
 
 ✅ **Done!** ใช้เวลา 15-20 นาที (รวม download model)
@@ -181,8 +187,8 @@ ollama serve
 
 ### Error: "Module not found"
 ```bash
-# Reinstall dependencies
-pip install --upgrade -r requirements.txt
+# Re-sync dependencies
+uv sync --reinstall
 ```
 
 ### Out of Memory (Ollama)
