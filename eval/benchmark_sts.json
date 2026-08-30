@@ -1,0 +1,227 @@
+{
+  "dialect": "postgresql",
+  "questions": [
+    {
+      "id": "attendance_absence_by_weekday",
+      "source_tag": "held_out",
+      "category": "time_groupby",
+      "question": "จำนวนการขาดเรียนแยกตามวันในสัปดาห์ ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+      "gold_sql": "SELECT EXTRACT(ISODOW FROM day.\"AttendanceDate\")::int AS iso_weekday, COUNT(*)::int AS absent_student_day_count FROM attendance_day day WHERE day.\"AttendanceStatus\" = 2 AND day.\"AttendanceDate\" >= '2026-06-01'::date AND day.\"AttendanceDate\" < '2026-09-01'::date GROUP BY iso_weekday ORDER BY iso_weekday ASC"
+    },
+    {
+      "id": "attendance_absent_days_by_school_in_date_range",
+      "source_tag": "held_out",
+      "category": "count_filter_groupby",
+      "question": "จำนวนวันขาดเรียนรวมแยกตามโรงเรียน ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+      "gold_sql": "SELECT school.id AS school_id, school.name AS school_name, COUNT(*)::int AS absent_student_day_count FROM attendance_day day JOIN student_term enrollment ON enrollment.student_uuid = day.student_uuid JOIN schools school ON school.id = enrollment.\"SchoolID_Onec\" WHERE day.\"AttendanceStatus\" = 2 AND day.\"AttendanceDate\" >= '2026-06-01'::date AND day.\"AttendanceDate\" < '2026-09-01'::date AND enrollment.deleted_at IS NULL GROUP BY school.id, school.name ORDER BY absent_student_day_count DESC, school.id ASC"
+    },
+    {
+      "id": "attendance_classrooms_below_rate_threshold",
+      "source_tag": "held_out",
+      "category": "having_ratio",
+      "question": "ห้องเรียนที่มีอัตราการมาเรียนต่ำกว่า 80 เปอร์เซ็นต์ ปีการศึกษา 2569 ภาคเรียน 1",
+      "gold_sql": "SELECT classroom.school_id, classroom.id AS classroom_id, grade.label AS grade_label, classroom.room_name, ROUND(100.0 * COUNT(*) FILTER (WHERE day.\"AttendanceStatus\" IN (1, 3)) / NULLIF(COUNT(*) FILTER (WHERE day.\"AttendanceStatus\" <> 4), 0), 1) AS attendance_rate_percent FROM attendance_day day JOIN student_term enrollment ON enrollment.student_uuid = day.student_uuid JOIN school_classrooms classroom ON classroom.id = enrollment.classroom_id AND classroom.school_id = enrollment.\"SchoolID_Onec\" JOIN grade_levels grade ON grade.id = classroom.grade_level_id WHERE day.\"AcademicYear_Onec\" = 2569 AND day.\"Semester_Onec\" = 1 AND enrollment.deleted_at IS NULL AND classroom.deleted_at IS NULL GROUP BY classroom.school_id, classroom.id, grade.id, grade.label, classroom.room_name HAVING 100.0 * COUNT(*) FILTER (WHERE day.\"AttendanceStatus\" IN (1, 3)) / NULLIF(COUNT(*) FILTER (WHERE day.\"AttendanceStatus\" <> 4), 0) < 80 ORDER BY attendance_rate_percent ASC NULLS LAST, classroom.school_id ASC, classroom.id ASC"
+    },
+    {
+      "id": "case_count_by_workflow_phase",
+      "source_tag": "held_out",
+      "category": "count_groupby",
+      "question": "จำนวนเคสแยกตามระยะ workflow",
+      "gold_sql": "SELECT case_row.workflow_phase_code, phase.label_th AS workflow_phase_label_th, COUNT(DISTINCT case_row.id)::int AS case_count FROM cases case_row JOIN case_workflow_phases phase ON phase.code = case_row.workflow_phase_code WHERE case_row.deleted_at IS NULL GROUP BY case_row.workflow_phase_code, phase.label_th, phase.sort_order ORDER BY phase.sort_order ASC"
+    },
+    {
+      "id": "case_created_count_by_month",
+      "source_tag": "held_out",
+      "category": "time_groupby",
+      "question": "จำนวนเคสที่สร้างรายเดือน ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+      "gold_sql": "SELECT date_trunc('month', case_row.created_at AT TIME ZONE 'Asia/Bangkok')::date AS month_start, COUNT(DISTINCT case_row.id)::int AS case_count FROM cases case_row WHERE case_row.created_at >= '2026-06-01T00:00:00+07:00'::timestamptz AND case_row.created_at < '2026-09-01T00:00:00+07:00'::timestamptz AND case_row.deleted_at IS NULL GROUP BY month_start ORDER BY month_start ASC"
+    },
+    {
+      "id": "case_open_count_by_school",
+      "source_tag": "held_out",
+      "category": "count_filter_groupby",
+      "question": "จำนวนเคสที่ยังไม่เสร็จสิ้นแยกตามโรงเรียน",
+      "gold_sql": "SELECT case_row.school_id, COUNT(DISTINCT case_row.id)::int AS open_case_count FROM cases case_row WHERE case_row.status <> 'RESOLVED' AND case_row.deleted_at IS NULL GROUP BY case_row.school_id ORDER BY open_case_count DESC, case_row.school_id ASC"
+    },
+    {
+      "id": "student_average_term_gpa_by_grade",
+      "source_tag": "held_out",
+      "category": "average_groupby",
+      "question": "เกรดเฉลี่ยรายภาคแยกตามระดับชั้น ปีการศึกษา 2569 ภาคเรียน 1",
+      "gold_sql": "SELECT grade.id AS grade_level_id, grade.label AS grade_label, COUNT(enrollment.term_gpa)::int AS graded_student_count, ROUND(AVG(enrollment.term_gpa), 2) AS average_term_gpa FROM student_term enrollment JOIN grade_levels grade ON grade.id = enrollment.\"GradeLevelID_Onec\" WHERE enrollment.\"AcademicYear_Onec\" = 2569 AND enrollment.\"Semester_Onec\" = 1 AND enrollment.deleted_at IS NULL GROUP BY grade.id, grade.label ORDER BY grade.id ASC"
+    },
+    {
+      "id": "student_current_classroom_occupancy_summary_by_school",
+      "source_tag": "held_out",
+      "category": "summary_groupby",
+      "question": "สรุปจำนวนห้องและจำนวนนักเรียนเฉลี่ยต่อห้องของแต่ละโรงเรียนปัจจุบัน",
+      "gold_sql": "WITH classroom_counts AS (SELECT classroom.school_id, classroom.id AS classroom_id, COUNT(DISTINCT enrollment.person_uuid)::int AS student_count FROM student_term enrollment JOIN student_current_enrollment_resolution current_enrollment ON current_enrollment.person_uuid = enrollment.person_uuid AND current_enrollment.selected_student_uuid = enrollment.student_uuid AND current_enrollment.resolution_state = 'ACTIVE' JOIN school_classrooms classroom ON classroom.id = enrollment.classroom_id AND classroom.school_id = enrollment.\"SchoolID_Onec\" WHERE enrollment.deleted_at IS NULL AND classroom.deleted_at IS NULL AND classroom.classroom_status = 'ACTIVE' GROUP BY classroom.school_id, classroom.id) SELECT school_id, COUNT(*)::int AS occupied_classroom_count, ROUND(AVG(student_count), 1) AS average_students_per_classroom, MIN(student_count)::int AS minimum_students_per_classroom, MAX(student_count)::int AS maximum_students_per_classroom FROM classroom_counts GROUP BY school_id ORDER BY average_students_per_classroom DESC, school_id ASC"
+    },
+    {
+      "id": "student_current_count_by_classroom",
+      "source_tag": "held_out",
+      "category": "count_groupby",
+      "question": "จำนวนนักเรียนปัจจุบันแยกตามห้องเรียน",
+      "gold_sql": "SELECT classroom.school_id, classroom.id AS classroom_id, grade.label AS grade_label, classroom.room_name, COUNT(DISTINCT enrollment.person_uuid)::int AS student_count FROM student_term enrollment JOIN student_current_enrollment_resolution current_enrollment ON current_enrollment.person_uuid = enrollment.person_uuid AND current_enrollment.selected_student_uuid = enrollment.student_uuid AND current_enrollment.resolution_state = 'ACTIVE' JOIN school_classrooms classroom ON classroom.id = enrollment.classroom_id AND classroom.school_id = enrollment.\"SchoolID_Onec\" JOIN grade_levels grade ON grade.id = classroom.grade_level_id WHERE enrollment.deleted_at IS NULL AND classroom.deleted_at IS NULL AND classroom.classroom_status = 'ACTIVE' GROUP BY classroom.school_id, classroom.id, grade.id, grade.label, classroom.room_name ORDER BY classroom.school_id ASC, grade.id ASC, classroom.id ASC"
+    },
+    {
+      "id": "teacher_comment_count_by_category",
+      "source_tag": "held_out",
+      "category": "count_groupby",
+      "question": "จำนวนความเห็นครูแยกตามหมวดปัญหา ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+      "gold_sql": "SELECT comment.problem_category_code, category.label_th AS problem_category_label_th, COUNT(*)::int AS comment_count FROM classroom_student_comments comment JOIN classroom_student_problem_categories category ON category.code = comment.problem_category_code WHERE comment.created_at >= '2026-06-01T00:00:00+07:00'::timestamptz AND comment.created_at < '2026-09-01T00:00:00+07:00'::timestamptz GROUP BY comment.problem_category_code, category.label_th, category.sort_order ORDER BY comment_count DESC, category.sort_order ASC"
+    },
+    {
+      "id": "paraphrase_01",
+      "source_tag": "paraphrase",
+      "category": "count_groupby",
+      "question": "แต่ละโรงเรียนตอนนี้มีนักเรียนอยู่กี่คน",
+      "gold_sql": "SELECT school.id AS school_id, school.name AS school_name, COUNT(DISTINCT enrollment.person_uuid)::int AS student_count FROM student_term enrollment JOIN student_current_enrollment_resolution current_enrollment ON current_enrollment.person_uuid = enrollment.person_uuid AND current_enrollment.selected_student_uuid = enrollment.student_uuid AND current_enrollment.resolution_state = 'ACTIVE' JOIN schools school ON school.id = enrollment.\"SchoolID_Onec\" WHERE enrollment.deleted_at IS NULL AND school.school_status = 'ACTIVE' GROUP BY school.id, school.name ORDER BY student_count DESC, school.id ASC",
+      "gold_from": "student_current_count_by_school"
+    },
+    {
+      "id": "paraphrase_02",
+      "source_tag": "paraphrase",
+      "category": "count_groupby",
+      "question": "นับ นร. ปัจจุบันตาม risk tier ให้หน่อย",
+      "gold_sql": "SELECT risk.risk_tier, COUNT(DISTINCT enrollment.person_uuid)::int AS student_count, MAX(risk.profile_calculated_at) AS data_as_of FROM student_risk_profiles risk JOIN student_term enrollment ON enrollment.student_uuid = risk.student_uuid JOIN student_current_enrollment_resolution current_enrollment ON current_enrollment.person_uuid = enrollment.person_uuid AND current_enrollment.selected_student_uuid = enrollment.student_uuid AND current_enrollment.resolution_state = 'ACTIVE' WHERE enrollment.deleted_at IS NULL GROUP BY risk.risk_tier ORDER BY CASE risk.risk_tier WHEN 'HIGH' THEN 1 WHEN 'WATCH' THEN 2 ELSE 3 END, risk.risk_tier",
+      "gold_from": "current_risk_count_by_tier"
+    },
+    {
+      "id": "paraphrase_03",
+      "source_tag": "paraphrase",
+      "category": "ratio_groupby",
+      "question": "อยากรู้ % การมาเรียนของแต่ละ ร.ร. เทอม 1 ปี 2569",
+      "gold_sql": "SELECT school.id AS school_id, school.name AS school_name, ROUND(100.0 * COUNT(*) FILTER (WHERE day.\"AttendanceStatus\" IN (1, 3)) / NULLIF(COUNT(*) FILTER (WHERE day.\"AttendanceStatus\" <> 4), 0), 1) AS attendance_rate_percent FROM attendance_day day JOIN student_term enrollment ON enrollment.student_uuid = day.student_uuid JOIN schools school ON school.id = enrollment.\"SchoolID_Onec\" WHERE day.\"AcademicYear_Onec\" = 2569 AND day.\"Semester_Onec\" = 1 AND enrollment.deleted_at IS NULL GROUP BY school.id, school.name ORDER BY attendance_rate_percent DESC NULLS LAST, school.id ASC",
+      "gold_from": "attendance_rate_by_school_and_term"
+    },
+    {
+      "id": "paraphrase_04",
+      "source_tag": "paraphrase",
+      "category": "ranking_per_group",
+      "question": "ขอ top 3 ห้องที่มีเด็กเสี่ยง HIGH เยอะสุดของแต่ละโรงเรียน",
+      "gold_sql": "WITH classroom_risk_counts AS (SELECT classroom.school_id, classroom.id AS classroom_id, classroom.room_name, grade.label AS grade_label, COUNT(DISTINCT enrollment.person_uuid)::int AS high_risk_student_count FROM student_risk_profiles risk JOIN student_term enrollment ON enrollment.student_uuid = risk.student_uuid JOIN student_current_enrollment_resolution current_enrollment ON current_enrollment.person_uuid = enrollment.person_uuid AND current_enrollment.selected_student_uuid = enrollment.student_uuid AND current_enrollment.resolution_state = 'ACTIVE' JOIN school_classrooms classroom ON classroom.id = enrollment.classroom_id AND classroom.school_id = enrollment.\"SchoolID_Onec\" JOIN grade_levels grade ON grade.id = classroom.grade_level_id WHERE risk.risk_tier = 'HIGH' AND enrollment.deleted_at IS NULL AND classroom.deleted_at IS NULL AND classroom.classroom_status = 'ACTIVE' GROUP BY classroom.school_id, classroom.id, classroom.room_name, grade.id, grade.label), ranked AS (SELECT classroom_risk_counts.school_id, classroom_risk_counts.classroom_id, classroom_risk_counts.room_name, classroom_risk_counts.grade_label, classroom_risk_counts.high_risk_student_count, ROW_NUMBER() OVER (PARTITION BY classroom_risk_counts.school_id ORDER BY classroom_risk_counts.high_risk_student_count DESC, classroom_risk_counts.classroom_id ASC) AS rank_in_school FROM classroom_risk_counts) SELECT school_id, classroom_id, room_name, grade_label, high_risk_student_count, rank_in_school FROM ranked WHERE rank_in_school <= 3 ORDER BY school_id ASC, rank_in_school ASC",
+      "gold_from": "top_high_risk_classrooms_per_school"
+    },
+    {
+      "id": "paraphrase_05",
+      "source_tag": "paraphrase",
+      "category": "having",
+      "question": "โรงเรียนอะไรที่มีนักเรียนเกิน 500 คน",
+      "gold_sql": "SELECT school.id AS school_id, school.name AS school_name, COUNT(DISTINCT enrollment.person_uuid)::int AS student_count FROM student_term enrollment JOIN student_current_enrollment_resolution current_enrollment ON current_enrollment.person_uuid = enrollment.person_uuid AND current_enrollment.selected_student_uuid = enrollment.student_uuid AND current_enrollment.resolution_state = 'ACTIVE' JOIN schools school ON school.id = enrollment.\"SchoolID_Onec\" WHERE enrollment.deleted_at IS NULL AND school.school_status = 'ACTIVE' GROUP BY school.id, school.name HAVING COUNT(DISTINCT enrollment.person_uuid) > 500 ORDER BY student_count DESC, school.id ASC",
+      "gold_from": "student_current_schools_above_threshold"
+    },
+    {
+      "id": "paraphrase_06",
+      "source_tag": "paraphrase",
+      "category": "not_exists_groupby",
+      "question": "เคสที่ยังไม่ได้มอบหมายงานเลย มีกี่เคสต่อโรงเรียน",
+      "gold_sql": "SELECT case_row.school_id, COUNT(DISTINCT case_row.id)::int AS case_count FROM cases case_row WHERE case_row.deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM tasks task WHERE task.case_id = case_row.id AND task.deleted_at IS NULL) GROUP BY case_row.school_id ORDER BY case_count DESC, case_row.school_id ASC",
+      "gold_from": "cases_without_tasks_by_school"
+    },
+    {
+      "id": "paraphrase_07",
+      "source_tag": "paraphrase",
+      "category": "count_filter_groupby",
+      "question": "รวมวันที่เด็กมาสายของแต่ละ ร.ร. ตั้งแต่ 1 มิถุนายน ถึง 31 สิงหาคม 2026",
+      "gold_sql": "SELECT school.id AS school_id, school.name AS school_name, COUNT(*)::int AS late_student_day_count FROM attendance_day day JOIN student_term enrollment ON enrollment.student_uuid = day.student_uuid JOIN schools school ON school.id = enrollment.\"SchoolID_Onec\" WHERE day.\"AttendanceStatus\" = 3 AND day.\"AttendanceDate\" >= '2026-06-01'::date AND day.\"AttendanceDate\" < '2026-09-01'::date AND enrollment.deleted_at IS NULL GROUP BY school.id, school.name ORDER BY late_student_day_count DESC, school.id ASC",
+      "gold_from": "attendance_late_days_by_school_in_date_range"
+    },
+    {
+      "id": "paraphrase_08",
+      "source_tag": "paraphrase",
+      "category": "ranking_per_group",
+      "question": "5 ห้องที่ขาดเรียนหนักสุดของแต่ละโรงเรียน เทอม 1/2569",
+      "gold_sql": "WITH classroom_absences AS (SELECT classroom.school_id, classroom.id AS classroom_id, classroom.room_name, COUNT(*) FILTER (WHERE day.\"AttendanceStatus\" = 2)::int AS absent_student_day_count FROM attendance_day day JOIN student_term enrollment ON enrollment.student_uuid = day.student_uuid JOIN school_classrooms classroom ON classroom.id = enrollment.classroom_id AND classroom.school_id = enrollment.\"SchoolID_Onec\" WHERE day.\"AcademicYear_Onec\" = 2569 AND day.\"Semester_Onec\" = 1 AND enrollment.deleted_at IS NULL AND classroom.deleted_at IS NULL GROUP BY classroom.school_id, classroom.id, classroom.room_name), ranked AS (SELECT classroom_absences.school_id, classroom_absences.classroom_id, classroom_absences.room_name, classroom_absences.absent_student_day_count, ROW_NUMBER() OVER (PARTITION BY classroom_absences.school_id ORDER BY classroom_absences.absent_student_day_count DESC, classroom_absences.classroom_id ASC) AS rank_in_school FROM classroom_absences) SELECT school_id, classroom_id, room_name, absent_student_day_count, rank_in_school FROM ranked WHERE rank_in_school <= 5 ORDER BY school_id ASC, rank_in_school ASC",
+      "gold_from": "attendance_top_absence_classrooms_per_school"
+    },
+    {
+      "id": "paraphrase_09",
+      "source_tag": "paraphrase",
+      "category": "average_groupby",
+      "question": "คะแนน risk เฉลี่ยของเด็กปัจจุบันในแต่ละ ร.ร.",
+      "gold_sql": "SELECT risk.school_id, COUNT(DISTINCT enrollment.person_uuid)::int AS profiled_student_count, ROUND(AVG(risk.risk_score), 2) AS average_risk_score, MAX(risk.profile_calculated_at) AS data_as_of FROM student_risk_profiles risk JOIN student_term enrollment ON enrollment.student_uuid = risk.student_uuid JOIN student_current_enrollment_resolution current_enrollment ON current_enrollment.person_uuid = enrollment.person_uuid AND current_enrollment.selected_student_uuid = enrollment.student_uuid AND current_enrollment.resolution_state = 'ACTIVE' WHERE enrollment.deleted_at IS NULL GROUP BY risk.school_id ORDER BY average_risk_score DESC, risk.school_id ASC",
+      "gold_from": "risk_current_average_score_by_school"
+    },
+    {
+      "id": "paraphrase_10",
+      "source_tag": "paraphrase",
+      "category": "time_ratio_groupby",
+      "question": "แนวโน้ม % การมาเรียนรายวัน ช่วง 1 มิ.ย. ถึง 31 ส.ค. 2026",
+      "gold_sql": "SELECT day.\"AttendanceDate\" AS attendance_date, ROUND(100.0 * COUNT(*) FILTER (WHERE day.\"AttendanceStatus\" IN (1, 3)) / NULLIF(COUNT(*) FILTER (WHERE day.\"AttendanceStatus\" <> 4), 0), 1) AS attendance_rate_percent FROM attendance_day day WHERE day.\"AttendanceDate\" >= '2026-06-01'::date AND day.\"AttendanceDate\" < '2026-09-01'::date GROUP BY day.\"AttendanceDate\" ORDER BY attendance_date ASC",
+      "gold_from": "attendance_daily_rate_in_date_range"
+    },
+    {
+      "id": "paraphrase_11",
+      "source_tag": "paraphrase",
+      "category": "freshness_groupby",
+      "question": "ข้อมูล risk ของแต่ละโรงเรียน อัปเดตล่าสุดเมื่อไหร่ เก่าสุดเมื่อไหร่",
+      "gold_sql": "SELECT risk.school_id, MIN(risk.profile_calculated_at) AS oldest_profile_calculated_at, MAX(risk.profile_calculated_at) AS newest_profile_calculated_at, COUNT(*)::int AS profile_count FROM student_risk_profiles risk GROUP BY risk.school_id ORDER BY newest_profile_calculated_at ASC, risk.school_id ASC",
+      "gold_from": "risk_profile_freshness_by_school"
+    },
+    {
+      "id": "paraphrase_12",
+      "source_tag": "paraphrase",
+      "category": "ratio_groupby",
+      "question": "คอมเมนต์ครูระดับ concern คิดเป็นสัดส่วนเท่าไรในแต่ละหมวด ช่วง มิ.ย. - ส.ค. 2026",
+      "gold_sql": "SELECT comment.problem_category_code, category.label_th AS problem_category_label_th, COUNT(*) FILTER (WHERE comment.concern_level_code = 'CONCERN')::int AS concern_count, COUNT(*)::int AS comment_count, ROUND(100.0 * COUNT(*) FILTER (WHERE comment.concern_level_code = 'CONCERN') / NULLIF(COUNT(*), 0), 1) AS concern_percent FROM classroom_student_comments comment JOIN classroom_student_problem_categories category ON category.code = comment.problem_category_code JOIN school_classrooms classroom ON classroom.id = comment.classroom_id WHERE comment.created_at >= '2026-06-01T00:00:00+07:00'::timestamptz AND comment.created_at < '2026-09-01T00:00:00+07:00'::timestamptz GROUP BY comment.problem_category_code, category.label_th, category.sort_order ORDER BY concern_percent DESC NULLS LAST, category.sort_order ASC",
+      "gold_from": "teacher_concern_ratio_by_category"
+    },
+    {
+      "id": "novel_01",
+      "source_tag": "novel",
+      "category": "count_filter_groupby",
+      "question": "จำนวนนักเรียนปัจจุบันที่ขาดเรียนติดต่อกันเกิน 3 วัน แยกตามโรงเรียน",
+      "gold_sql": "SELECT school.id AS school_id, school.name AS school_name, COUNT(DISTINCT enrollment.person_uuid)::int AS student_count FROM student_risk_profiles risk JOIN student_term enrollment ON enrollment.student_uuid = risk.student_uuid JOIN student_current_enrollment_resolution ce ON ce.person_uuid = enrollment.person_uuid AND ce.selected_student_uuid = enrollment.student_uuid AND ce.resolution_state = 'ACTIVE' JOIN schools school ON school.id = risk.school_id WHERE enrollment.deleted_at IS NULL AND risk.consecutive_absent_days > 3 GROUP BY school.id, school.name ORDER BY student_count DESC, school.id ASC"
+    },
+    {
+      "id": "novel_02",
+      "source_tag": "novel",
+      "category": "ratio_groupby",
+      "question": "สัดส่วนนักเรียนปัจจุบันที่เสี่ยง WATCH หรือ HIGH ต่อนักเรียนทั้งหมด แยกตามโรงเรียน",
+      "gold_sql": "SELECT school.id AS school_id, school.name AS school_name, ROUND(100.0 * COUNT(DISTINCT enrollment.person_uuid) FILTER (WHERE risk.risk_tier IN ('WATCH', 'HIGH')) / NULLIF(COUNT(DISTINCT enrollment.person_uuid), 0), 1) AS at_risk_percent FROM student_risk_profiles risk JOIN student_term enrollment ON enrollment.student_uuid = risk.student_uuid JOIN student_current_enrollment_resolution ce ON ce.person_uuid = enrollment.person_uuid AND ce.selected_student_uuid = enrollment.student_uuid AND ce.resolution_state = 'ACTIVE' JOIN schools school ON school.id = risk.school_id WHERE enrollment.deleted_at IS NULL GROUP BY school.id, school.name ORDER BY at_risk_percent DESC NULLS LAST, school.id ASC"
+    },
+    {
+      "id": "novel_03",
+      "source_tag": "novel",
+      "category": "time_groupby",
+      "question": "จำนวนวันที่มีการเช็กชื่อ แยกตามเดือน ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+      "gold_sql": "SELECT date_trunc('month', day.\"AttendanceDate\")::date AS month_start, COUNT(DISTINCT day.\"AttendanceDate\")::int AS check_in_day_count FROM attendance_day day WHERE day.\"AttendanceDate\" >= DATE '2026-06-01' AND day.\"AttendanceDate\" <= DATE '2026-08-31' GROUP BY month_start ORDER BY month_start ASC"
+    },
+    {
+      "id": "novel_04",
+      "source_tag": "novel",
+      "category": "average_groupby",
+      "question": "จำนวนนักเรียนปัจจุบันเฉลี่ยต่อห้อง แยกตามระดับชั้น",
+      "gold_sql": "WITH classroom_counts AS ( SELECT enrollment.classroom_id, classroom.grade_level_id, COUNT(DISTINCT enrollment.person_uuid) AS n_students FROM student_term enrollment JOIN student_current_enrollment_resolution ce ON ce.person_uuid = enrollment.person_uuid AND ce.selected_student_uuid = enrollment.student_uuid AND ce.resolution_state = 'ACTIVE' JOIN school_classrooms classroom ON classroom.id = enrollment.classroom_id WHERE enrollment.deleted_at IS NULL AND classroom.deleted_at IS NULL AND classroom.classroom_status = 'ACTIVE' GROUP BY enrollment.classroom_id, classroom.grade_level_id ) SELECT grade.id AS grade_level_id, grade.label AS grade_label, ROUND(AVG(classroom_counts.n_students), 2) AS avg_students_per_classroom FROM classroom_counts JOIN grade_levels grade ON grade.id = classroom_counts.grade_level_id GROUP BY grade.id, grade.label ORDER BY grade.id ASC"
+    },
+    {
+      "id": "novel_05",
+      "source_tag": "novel",
+      "category": "having_ratio",
+      "question": "โรงเรียนที่มีอัตราการมาเรียนเฉลี่ยต่ำกว่า 85 เปอร์เซ็นต์ ปีการศึกษา 2569 ภาคเรียน 1",
+      "gold_sql": "SELECT school.id AS school_id, school.name AS school_name, ROUND(100.0 * COUNT(*) FILTER (WHERE day.\"AttendanceStatus\" IN (1, 3)) / NULLIF(COUNT(*) FILTER (WHERE day.\"AttendanceStatus\" <> 4), 0), 1) AS attendance_rate_percent FROM attendance_day day JOIN student_term enrollment ON enrollment.student_uuid = day.student_uuid JOIN schools school ON school.id = enrollment.\"SchoolID_Onec\" WHERE day.\"AcademicYear_Onec\" = 2569 AND day.\"Semester_Onec\" = 1 AND enrollment.deleted_at IS NULL GROUP BY school.id, school.name HAVING ROUND(100.0 * COUNT(*) FILTER (WHERE day.\"AttendanceStatus\" IN (1, 3)) / NULLIF(COUNT(*) FILTER (WHERE day.\"AttendanceStatus\" <> 4), 0), 1) < 85 ORDER BY attendance_rate_percent ASC, school.id ASC"
+    },
+    {
+      "id": "novel_06",
+      "source_tag": "novel",
+      "category": "ranking_global",
+      "question": "5 โรงเรียนที่มีนักเรียนเสี่ยง HIGH ปัจจุบันมากที่สุด",
+      "gold_sql": "SELECT school.id AS school_id, school.name AS school_name, COUNT(DISTINCT enrollment.person_uuid)::int AS high_risk_student_count FROM student_risk_profiles risk JOIN student_term enrollment ON enrollment.student_uuid = risk.student_uuid JOIN student_current_enrollment_resolution ce ON ce.person_uuid = enrollment.person_uuid AND ce.selected_student_uuid = enrollment.student_uuid AND ce.resolution_state = 'ACTIVE' JOIN schools school ON school.id = risk.school_id WHERE risk.risk_tier = 'HIGH' AND enrollment.deleted_at IS NULL GROUP BY school.id, school.name ORDER BY high_risk_student_count DESC, school.id ASC LIMIT 5"
+    },
+    {
+      "id": "novel_07",
+      "source_tag": "novel",
+      "category": "ranking_global",
+      "question": "3 ระดับชั้นที่มีนักเรียนเสี่ยง HIGH ปัจจุบันมากที่สุด",
+      "gold_sql": "SELECT grade.id AS grade_level_id, grade.label AS grade_label, COUNT(DISTINCT enrollment.person_uuid)::int AS high_risk_student_count FROM student_risk_profiles risk JOIN student_term enrollment ON enrollment.student_uuid = risk.student_uuid JOIN student_current_enrollment_resolution ce ON ce.person_uuid = enrollment.person_uuid AND ce.selected_student_uuid = enrollment.student_uuid AND ce.resolution_state = 'ACTIVE' JOIN grade_levels grade ON grade.id = enrollment.\"GradeLevelID_Onec\" WHERE risk.risk_tier = 'HIGH' AND enrollment.deleted_at IS NULL GROUP BY grade.id, grade.label ORDER BY high_risk_student_count DESC, grade.id ASC LIMIT 3"
+    },
+    {
+      "id": "novel_08",
+      "source_tag": "novel",
+      "category": "multi_join_aggregation",
+      "question": "จำนวนนักเรียนปัจจุบันที่มีเคสที่ยังไม่เสร็จสิ้น แยกตามระดับชั้น",
+      "gold_sql": "SELECT grade.id AS grade_level_id, grade.label AS grade_label, COUNT(DISTINCT enrollment.person_uuid)::int AS student_count FROM student_term enrollment JOIN student_current_enrollment_resolution ce ON ce.person_uuid = enrollment.person_uuid AND ce.selected_student_uuid = enrollment.student_uuid AND ce.resolution_state = 'ACTIVE' JOIN grade_levels grade ON grade.id = enrollment.\"GradeLevelID_Onec\" WHERE enrollment.deleted_at IS NULL AND EXISTS ( SELECT 1 FROM cases c WHERE c.student_uuid = enrollment.student_uuid AND c.deleted_at IS NULL AND c.status <> 'RESOLVED' ) GROUP BY grade.id, grade.label ORDER BY student_count DESC, grade.id ASC"
+    }
+  ]
+}

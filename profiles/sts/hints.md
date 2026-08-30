@@ -33,9 +33,10 @@ The full scope-enforcement / PII gateway in the guide is out of scope here
 - Current student risk = `student_risk_profiles.risk_tier` ∈ `HIGH` (เสี่ยง), `WATCH` (เฝ้าระวัง), `NORMAL`.
   Do NOT substitute `cases.risk_tier` (different semantics). `student_risk_profiles` is a snapshot —
   if freshness is asked, use its `profile_calculated_at`; never imply the query recomputed it.
-- Case workflow status (`cases.workflow_status`): `OPEN` รอมอบหมาย, `IN_PROGRESS` รอติดตาม,
-  `PENDING_REVIEW` รอพิจารณา, `RESOLVED` เสร็จสิ้น, `STUDENT_NOT_FOUND` ไม่พบนักเรียน.
-  Workflow phase: `FOLLOW_UP` ติดตาม, `ASSISTANCE` ให้ความช่วยเหลือ.
+- Case status = `cases.status` (code), labels in `case_workflow_statuses.label_th`:
+  `OPEN` รอมอบหมาย, `IN_PROGRESS` รอติดตาม, `PENDING_REVIEW` รอพิจารณา,
+  `RESOLVED` เสร็จสิ้น, `STUDENT_NOT_FOUND` ไม่พบนักเรียน.
+  Workflow phase = `cases.workflow_phase_code`, labels in `case_workflow_phases.label_th`.
 - Task type (`tasks.task_type`): `VISIT` ลงพื้นที่ติดตาม, `ASSIST` ให้ความช่วยเหลือ.
 - Academic year / semester come from the academic columns (`school_terms.academic_year`,
   `student_term."AcademicYear_Onec"` / `"Semester_Onec"`), NOT from the Gregorian year and never by adding 543.

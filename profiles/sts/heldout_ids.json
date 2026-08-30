@@ -1,12 +1,12 @@
 [
-  "active_classroom_count_by_subject",
-  "assistance_measure_count_summary_by_school",
-  "assistance_measure_usage_count",
   "attendance_absence_by_weekday",
   "attendance_absent_days_by_school_in_date_range",
+  "attendance_classrooms_below_rate_threshold",
   "case_count_by_workflow_phase",
   "case_created_count_by_month",
+  "case_open_count_by_school",
   "student_average_term_gpa_by_grade",
   "student_current_classroom_occupancy_summary_by_school",
+  "student_current_count_by_classroom",
   "teacher_comment_count_by_category"
 ]

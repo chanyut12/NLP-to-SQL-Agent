@@ -15,14 +15,15 @@ SRC = os.path.join(ROOT, "TEXT_TO_SQL_STS_RAG_EXAMPLES.json")
 OUT_DIR = os.path.join(ROOT, "profiles", "sts")
 DB_URL = os.getenv("STS_DB_URL", "postgresql://postgres:stsLocalDev2026@localhost:5432/sts")
 
-# primary pack -> how many to hold out (roughly proportional to corpus coverage)
+# primary pack -> how many to hold out. Skewed toward the domains that actually
+# have data in the dev DB (task_assistance measures are empty; cases are ~all OPEN).
 HELDOUT_PER_PACK = {
-    "student_enrollment": 2,
-    "attendance": 2,
-    "risk_case": 2,
-    "task_assistance": 2,
-    "teacher_subject": 1,
+    "student_enrollment": 3,
+    "attendance": 3,
+    "risk_case": 3,
     "teacher_comment_analytics": 1,
+    "task_assistance": 0,
+    "teacher_subject": 0,
 }
 
 

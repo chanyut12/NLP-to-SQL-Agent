@@ -97,6 +97,10 @@ report_unpacked/
 
 idea*
 
+# Eval sweep outputs (regenerate with eval/sweep_sts.py)
+eval/sts/results_*.json
+eval/sts/_*.json
+
 # Local-only material handed over for reference (contains real STS secrets)
 prompt hardcode_example*
 graphify-out/
