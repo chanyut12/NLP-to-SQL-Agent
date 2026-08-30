@@ -49,15 +49,19 @@ Slugs live at the top of `eval/sweep_sts.py` — verify against openrouter.ai/mo
 ## Running
 
 ```bash
-# one config
-python eval/run_eval_sts.py --model openai/gpt-4o-mini --rag-top-k 5 --max-retries 2
+rm -rf rag_db schema_rag_db                    # after any profile / schema-format change
 
-# matrix (anchor: 4 configs × 5 repeats; others: best-config × 5). Resumable.
+# one config (30 questions, 8 in parallel, ~1 min)
+python eval/run_eval_sts.py --model openai/gpt-4o-mini --rag-top-k 3 --max-retries 2
+
+# matrix: gpt-4o-mini 4 configs × 5 repeats = 20 runs / ~600 calls / ~25 min. Resumable.
 python eval/sweep_sts.py
 
 # aggregate → eval/sts/COMPARISON.md
 python eval/compare.py
 ```
 
-Needs `OPENAI_API_KEY`, `OPENROUTER_API_KEY` in `.env`, and the dev DB reachable
-at `DATABASE_URL`.
+Needs `OPENAI_API_KEY` (and `OPENROUTER_API_KEY` once those models are enabled) in
+`.env`, and the dev DB reachable at `DATABASE_URL`. Most of the wall time is
+sequential LLM latency; `--concurrency` (default 8) trades against the provider's
+rate limit.

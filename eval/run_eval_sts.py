@@ -48,6 +48,7 @@ def main():
     ap.add_argument("--schema-strategy", default=None, choices=["pruned", "full"])
     ap.add_argument("--output", default=None)
     ap.add_argument("--limit", type=int, default=None, help="only the first N questions (smoke)")
+    ap.add_argument("--concurrency", type=int, default=8, help="questions answered in parallel")
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args()
 
@@ -100,7 +101,8 @@ def main():
 
     bench = json.load(open(os.path.join(ROOT, args.benchmark), encoding="utf-8"))
     questions = bench["questions"][: args.limit] if args.limit else bench["questions"]
-    db = create_engine(args.db_url)
+    # Pool must cover concurrent gold + predicted-SQL executions.
+    db = create_engine(args.db_url, pool_size=args.concurrency * 3, max_overflow=args.concurrency * 2)
     print(f"model={provider}/{model_id} rag_top_k={settings.RAG_TOP_K} "
           f"max_retries={settings.MAX_RETRIES} schema={settings.SCHEMA_STRATEGY}")
     eng = NLPEngine()
@@ -131,7 +133,7 @@ def main():
             return rec
         rec["executable"] = True
         try:
-            gold_df = pd.read_sql(q["gold_sql"], db)
+            gold_df = await asyncio.to_thread(pd.read_sql, q["gold_sql"], db)
             pred_df = pd.DataFrame(data) if data else pd.DataFrame()
         except Exception as e:
             rec["error"], rec["error_class"] = f"gold error: {e}", "gold_error"
@@ -149,11 +151,22 @@ def main():
         return rec
 
     async def run_all():
-        out = []
-        for i, q in enumerate(questions, 1):
-            print(f"[{i:02d}/{len(questions)}] {q['id']}")
-            out.append(await run_one(q))
-        return out
+        sem = asyncio.Semaphore(max(1, args.concurrency))
+        done = [0]
+
+        async def guarded(q):
+            async with sem:
+                r = await run_one(q)
+            done[0] += 1
+            print(f"[{done[0]:02d}/{len(questions)}] {q['id']} "
+                  f"{'PASS' if r['ex_pass'] else (r['error_class'] or 'fail')}")
+            return r
+
+        # First question alone: builds the schema cache / RAG index once (under the
+        # engine's lock) before the rest fan out.
+        first = await guarded(questions[0])
+        rest = await asyncio.gather(*(guarded(q) for q in questions[1:]))
+        return [first, *rest]
 
     t_start = time.time()
     results = asyncio.run(run_all())
