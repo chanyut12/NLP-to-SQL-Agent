@@ -1,0 +1,2435 @@
+{
+  "description": "Thai-to-PostgreSQL STS aggregate-safe semantic SQL examples for capability-filtered RAG few-shot retrieval. SQL is pre-scope and pre-outer-limit and must never be executed without the STS gateway.",
+  "version": "2.0",
+  "coverage_summary": {
+    "example_count": 86,
+    "primary_distribution": {
+      "student_enrollment": 14,
+      "attendance": 22,
+      "risk_case": 18,
+      "task_assistance": 15,
+      "teacher_subject": 10,
+      "teacher_comment_analytics": 7
+    },
+    "retrieval_note": "Corpus size is independent from prompt size. Retrieve only policy-approved top-k examples; default 3 and maximum 5."
+  },
+  "examples": [
+    {
+      "id": "student_current_count_by_school",
+      "question": "จำนวนนักเรียนปัจจุบันแยกตามโรงเรียน",
+      "sql": "SELECT school.id AS school_id, school.name AS school_name, COUNT(DISTINCT enrollment.person_uuid)::int AS student_count FROM student_term enrollment JOIN student_current_enrollment_resolution current_enrollment ON current_enrollment.person_uuid = enrollment.person_uuid AND current_enrollment.selected_student_uuid = enrollment.student_uuid AND current_enrollment.resolution_state = 'ACTIVE' JOIN schools school ON school.id = enrollment.\"SchoolID_Onec\" WHERE enrollment.deleted_at IS NULL AND school.school_status = 'ACTIVE' GROUP BY school.id, school.name ORDER BY student_count DESC, school.id ASC",
+      "category": "count_groupby",
+      "dialect": "postgresql",
+      "schema_packs": ["student_enrollment"],
+      "grain": "one row per school",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [],
+      "requested_result_limit": 100,
+      "retrieval_tags": ["จำนวนนักเรียน", "นักเรียนปัจจุบัน", "แยกตามโรงเรียน", "current enrollment"]
+    },
+    {
+      "id": "current_risk_count_by_tier",
+      "question": "จำนวนนักเรียนเสี่ยงปัจจุบันแยกตามระดับความเสี่ยง",
+      "sql": "SELECT risk.risk_tier, COUNT(DISTINCT enrollment.person_uuid)::int AS student_count, MAX(risk.profile_calculated_at) AS data_as_of FROM student_risk_profiles risk JOIN student_term enrollment ON enrollment.student_uuid = risk.student_uuid JOIN student_current_enrollment_resolution current_enrollment ON current_enrollment.person_uuid = enrollment.person_uuid AND current_enrollment.selected_student_uuid = enrollment.student_uuid AND current_enrollment.resolution_state = 'ACTIVE' WHERE enrollment.deleted_at IS NULL GROUP BY risk.risk_tier ORDER BY CASE risk.risk_tier WHEN 'HIGH' THEN 1 WHEN 'WATCH' THEN 2 ELSE 3 END, risk.risk_tier",
+      "category": "count_groupby",
+      "dialect": "postgresql",
+      "schema_packs": ["student_enrollment", "risk_case"],
+      "grain": "one row per current risk tier",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "data_as_of_column": "student_risk_profiles.profile_calculated_at",
+      "parameters": [],
+      "requested_result_limit": 20,
+      "retrieval_tags": ["นักเรียนเสี่ยง", "ระดับความเสี่ยง", "HIGH", "WATCH", "NORMAL", "risk snapshot"]
+    },
+    {
+      "id": "attendance_rate_by_school_and_term",
+      "question": "อัตราการมาเรียนรายโรงเรียน ปีการศึกษา 2569 ภาคเรียน 1",
+      "sql": "SELECT school.id AS school_id, school.name AS school_name, ROUND(100.0 * COUNT(*) FILTER (WHERE day.\"AttendanceStatus\" IN (1, 3)) / NULLIF(COUNT(*) FILTER (WHERE day.\"AttendanceStatus\" <> 4), 0), 1) AS attendance_rate_percent FROM attendance_day day JOIN student_term enrollment ON enrollment.student_uuid = day.student_uuid JOIN schools school ON school.id = enrollment.\"SchoolID_Onec\" WHERE day.\"AcademicYear_Onec\" = $1 AND day.\"Semester_Onec\" = $2 AND enrollment.deleted_at IS NULL GROUP BY school.id, school.name ORDER BY attendance_rate_percent DESC NULLS LAST, school.id ASC",
+      "category": "ratio_groupby",
+      "dialect": "postgresql",
+      "schema_packs": ["student_enrollment", "attendance"],
+      "grain": "one row per school",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [
+        {"position": 1, "name": "academic_year", "source": "question_value", "type": "integer", "value": 2569},
+        {"position": 2, "name": "semester", "source": "question_value", "type": "integer", "value": 1}
+      ],
+      "requested_result_limit": 100,
+      "retrieval_tags": ["อัตราการมาเรียน", "เปอร์เซ็นต์มาเรียน", "รายโรงเรียน", "ปีการศึกษา", "ภาคเรียน"]
+    },
+    {
+      "id": "high_risk_classrooms_above_threshold",
+      "question": "ห้องที่มีนักเรียนเสี่ยง HIGH ปัจจุบันมากกว่า 5 คน",
+      "sql": "SELECT classroom.id AS classroom_id, classroom.room_name, grade.label AS grade_label, COUNT(DISTINCT enrollment.person_uuid)::int AS high_risk_student_count FROM student_risk_profiles risk JOIN student_term enrollment ON enrollment.student_uuid = risk.student_uuid JOIN student_current_enrollment_resolution current_enrollment ON current_enrollment.person_uuid = enrollment.person_uuid AND current_enrollment.selected_student_uuid = enrollment.student_uuid AND current_enrollment.resolution_state = 'ACTIVE' JOIN school_classrooms classroom ON classroom.id = enrollment.classroom_id AND classroom.school_id = enrollment.\"SchoolID_Onec\" JOIN grade_levels grade ON grade.id = classroom.grade_level_id WHERE risk.risk_tier = 'HIGH' AND enrollment.deleted_at IS NULL AND classroom.deleted_at IS NULL AND classroom.classroom_status = 'ACTIVE' GROUP BY classroom.id, classroom.room_name, grade.id, grade.label HAVING COUNT(DISTINCT enrollment.person_uuid) > $1 ORDER BY high_risk_student_count DESC, classroom.id ASC",
+      "category": "having",
+      "dialect": "postgresql",
+      "schema_packs": ["student_enrollment", "risk_case"],
+      "grain": "one row per classroom",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "data_as_of_column": "student_risk_profiles.profile_calculated_at",
+      "parameters": [
+        {"position": 1, "name": "minimum_student_count", "source": "question_value", "type": "integer", "value": 5}
+      ],
+      "requested_result_limit": 100,
+      "retrieval_tags": ["ห้องเรียน", "นักเรียนเสี่ยงสูง", "มากกว่า", "HAVING", "HIGH"]
+    },
+    {
+      "id": "top_high_risk_classrooms_per_school",
+      "question": "3 ห้องที่มีนักเรียนเสี่ยง HIGH ปัจจุบันมากที่สุดของแต่ละโรงเรียน",
+      "sql": "WITH classroom_risk_counts AS (SELECT classroom.school_id, classroom.id AS classroom_id, classroom.room_name, grade.label AS grade_label, COUNT(DISTINCT enrollment.person_uuid)::int AS high_risk_student_count FROM student_risk_profiles risk JOIN student_term enrollment ON enrollment.student_uuid = risk.student_uuid JOIN student_current_enrollment_resolution current_enrollment ON current_enrollment.person_uuid = enrollment.person_uuid AND current_enrollment.selected_student_uuid = enrollment.student_uuid AND current_enrollment.resolution_state = 'ACTIVE' JOIN school_classrooms classroom ON classroom.id = enrollment.classroom_id AND classroom.school_id = enrollment.\"SchoolID_Onec\" JOIN grade_levels grade ON grade.id = classroom.grade_level_id WHERE risk.risk_tier = 'HIGH' AND enrollment.deleted_at IS NULL AND classroom.deleted_at IS NULL AND classroom.classroom_status = 'ACTIVE' GROUP BY classroom.school_id, classroom.id, classroom.room_name, grade.id, grade.label), ranked AS (SELECT classroom_risk_counts.school_id, classroom_risk_counts.classroom_id, classroom_risk_counts.room_name, classroom_risk_counts.grade_label, classroom_risk_counts.high_risk_student_count, ROW_NUMBER() OVER (PARTITION BY classroom_risk_counts.school_id ORDER BY classroom_risk_counts.high_risk_student_count DESC, classroom_risk_counts.classroom_id ASC) AS rank_in_school FROM classroom_risk_counts) SELECT school_id, classroom_id, room_name, grade_label, high_risk_student_count, rank_in_school FROM ranked WHERE rank_in_school <= $1 ORDER BY school_id ASC, rank_in_school ASC",
+      "category": "ranking_per_group",
+      "dialect": "postgresql",
+      "schema_packs": ["student_enrollment", "risk_case"],
+      "grain": "up to N classroom rows per school",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "data_as_of_column": "student_risk_profiles.profile_calculated_at",
+      "parameters": [
+        {"position": 1, "name": "top_n_per_school", "source": "question_value", "type": "integer", "value": 3}
+      ],
+      "requested_result_limit": 200,
+      "retrieval_tags": ["อันดับห้องเรียน", "มากที่สุดแต่ละโรงเรียน", "top n per group", "window function", "ROW_NUMBER"]
+    },
+    {
+      "id": "cases_without_tasks_by_school",
+      "question": "จำนวนเคสที่ยังไม่มีงานแยกตามโรงเรียน",
+      "sql": "SELECT case_row.school_id, COUNT(DISTINCT case_row.id)::int AS case_count FROM cases case_row WHERE case_row.deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM tasks task WHERE task.case_id = case_row.id AND task.deleted_at IS NULL) GROUP BY case_row.school_id ORDER BY case_count DESC, case_row.school_id ASC",
+      "category": "not_exists_groupby",
+      "dialect": "postgresql",
+      "schema_packs": ["risk_case", "task_assistance"],
+      "grain": "one row per school",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [],
+      "requested_result_limit": 100,
+      "retrieval_tags": ["เคสไม่มีงาน", "ยังไม่ได้มอบหมายงาน", "NOT EXISTS", "แยกตามโรงเรียน"]
+    },
+    {
+      "id": "case_count_by_workflow_status",
+      "question": "จำนวนเคสแยกตามสถานะ workflow",
+      "sql": "SELECT case_row.status AS case_status, status.label_th AS case_status_label_th, COUNT(DISTINCT case_row.id)::int AS case_count FROM cases case_row JOIN case_workflow_statuses status ON status.code = case_row.status WHERE case_row.deleted_at IS NULL GROUP BY case_row.status, status.label_th, status.sort_order ORDER BY status.sort_order ASC, case_row.status ASC",
+      "category": "count_groupby",
+      "dialect": "postgresql",
+      "schema_packs": ["risk_case"],
+      "grain": "one row per case workflow status",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [],
+      "requested_result_limit": 20,
+      "retrieval_tags": ["สถานะเคส", "workflow", "รอมอบหมาย", "รอติดตาม", "รอพิจารณา", "เสร็จสิ้น"]
+    },
+    {
+      "id": "task_count_by_thai_month",
+      "question": "จำนวนงาน VISIT และ ASSIST แยกตามเดือนที่สร้าง ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+      "sql": "SELECT date_trunc('month', task.created_at AT TIME ZONE 'Asia/Bangkok')::date AS month_start, task.task_type, COUNT(DISTINCT task.id)::int AS task_count FROM tasks task WHERE task.deleted_at IS NULL AND task.task_type IN ('VISIT', 'ASSIST') AND task.created_at >= $1::timestamptz AND task.created_at < $2::timestamptz GROUP BY month_start, task.task_type ORDER BY month_start ASC, task.task_type ASC",
+      "category": "time_groupby",
+      "dialect": "postgresql",
+      "schema_packs": ["task_assistance"],
+      "grain": "one row per Thai-local month and task type",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [
+        {"position": 1, "name": "start_at", "source": "question_value", "type": "timestamptz", "value": "2026-06-01T00:00:00+07:00"},
+        {"position": 2, "name": "end_at_exclusive", "source": "question_value", "type": "timestamptz", "value": "2026-09-01T00:00:00+07:00"}
+      ],
+      "requested_result_limit": 100,
+      "retrieval_tags": ["งานรายเดือน", "VISIT", "ASSIST", "ช่วงวันที่", "Asia/Bangkok", "half-open range"]
+    },
+    {
+      "id": "active_teacher_subject_summary_by_school",
+      "question": "สรุปจำนวนครูและจำนวนวิชาที่เปิดสอนแยกตามโรงเรียนปัจจุบัน",
+      "sql": "SELECT membership.school_id, COUNT(DISTINCT teacher.id)::int AS teacher_count, COUNT(DISTINCT school_subject.subject_id)::int AS subject_count, COUNT(DISTINCT classroom_subject.id)::int AS classroom_subject_count FROM classroom_subject_teachers assignment JOIN school_teacher_memberships membership ON membership.id = assignment.teacher_membership_id AND membership.school_id = assignment.school_id JOIN schools school ON school.id = membership.school_id JOIN teachers teacher ON teacher.id = membership.teacher_id JOIN classroom_subjects classroom_subject ON classroom_subject.id = assignment.classroom_subject_id AND classroom_subject.classroom_id = assignment.classroom_id AND classroom_subject.school_id = assignment.school_id JOIN school_classrooms classroom ON classroom.id = classroom_subject.classroom_id AND classroom.school_id = classroom_subject.school_id JOIN school_terms school_term ON school_term.id = classroom.school_term_id AND school_term.school_id = classroom.school_id JOIN school_subjects school_subject ON school_subject.id = classroom_subject.school_subject_id AND school_subject.school_id = classroom_subject.school_id JOIN subjects subject ON subject.id = school_subject.subject_id WHERE assignment.deleted_at IS NULL AND assignment.assignment_status = 'ACTIVE' AND classroom_subject.deleted_at IS NULL AND classroom_subject.offering_status = 'ACTIVE' AND classroom.deleted_at IS NULL AND classroom.classroom_status = 'ACTIVE' AND school_term.status = 'ACTIVE' AND school_subject.deleted_at IS NULL AND school_subject.subject_status = 'ACTIVE' AND subject.deleted_at IS NULL AND subject.is_active = TRUE AND membership.deleted_at IS NULL AND membership.membership_status = 'ACTIVE' AND teacher.deleted_at IS NULL AND teacher.teacher_status = 'ACTIVE' AND school.school_status = 'ACTIVE' GROUP BY membership.school_id ORDER BY teacher_count DESC, membership.school_id ASC",
+      "category": "multi_join_aggregation",
+      "dialect": "postgresql",
+      "schema_packs": ["teacher_subject"],
+      "grain": "one row per school",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [],
+      "requested_result_limit": 100,
+      "retrieval_tags": ["จำนวนครู", "จำนวนวิชา", "เปิดสอนปัจจุบัน", "โรงเรียน", "active term"]
+    },
+    {
+      "id": "teacher_concern_ratio_by_category",
+      "question": "สัดส่วนความเห็นครูระดับ CONCERN แยกตามหมวด ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+      "sql": "SELECT comment.problem_category_code, category.label_th AS problem_category_label_th, COUNT(*) FILTER (WHERE comment.concern_level_code = 'CONCERN')::int AS concern_count, COUNT(*)::int AS comment_count, ROUND(100.0 * COUNT(*) FILTER (WHERE comment.concern_level_code = 'CONCERN') / NULLIF(COUNT(*), 0), 1) AS concern_percent FROM classroom_student_comments comment JOIN classroom_student_problem_categories category ON category.code = comment.problem_category_code JOIN school_classrooms classroom ON classroom.id = comment.classroom_id WHERE comment.created_at >= $1::timestamptz AND comment.created_at < $2::timestamptz GROUP BY comment.problem_category_code, category.label_th, category.sort_order ORDER BY concern_percent DESC NULLS LAST, category.sort_order ASC",
+      "category": "ratio_groupby",
+      "dialect": "postgresql",
+      "schema_packs": ["teacher_comment_analytics"],
+      "grain": "one row per teacher-comment problem category",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [
+        {"position": 1, "name": "start_at", "source": "question_value", "type": "timestamptz", "value": "2026-06-01T00:00:00+07:00"},
+        {"position": 2, "name": "end_at_exclusive", "source": "question_value", "type": "timestamptz", "value": "2026-09-01T00:00:00+07:00"}
+      ],
+      "requested_result_limit": 100,
+      "retrieval_tags": ["ความเห็นครู", "CONCERN", "หมวดปัญหา", "สัดส่วน", "เปอร์เซ็นต์"]
+    },
+    {
+      "id": "student_current_count_by_province",
+      "question": "จำนวนนักเรียนปัจจุบันแยกตามจังหวัด",
+      "sql": "SELECT COALESCE(school.province, 'ไม่ระบุ') AS province, COUNT(DISTINCT enrollment.person_uuid)::int AS student_count FROM student_term enrollment JOIN student_current_enrollment_resolution current_enrollment ON current_enrollment.person_uuid = enrollment.person_uuid AND current_enrollment.selected_student_uuid = enrollment.student_uuid AND current_enrollment.resolution_state = 'ACTIVE' JOIN schools school ON school.id = enrollment.\"SchoolID_Onec\" WHERE enrollment.deleted_at IS NULL AND school.school_status = 'ACTIVE' GROUP BY COALESCE(school.province, 'ไม่ระบุ') ORDER BY student_count DESC, province ASC",
+      "category": "count_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "student_enrollment"
+      ],
+      "grain": "one row per province",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [],
+      "requested_result_limit": 100,
+      "retrieval_tags": [
+        "จำนวนนักเรียนปัจจุบันแยกตามจังหวัด",
+        "student",
+        "current",
+        "count",
+        "by"
+      ]
+    },
+    {
+      "id": "student_current_count_by_district",
+      "question": "จำนวนนักเรียนปัจจุบันแยกตามอำเภอ",
+      "sql": "SELECT COALESCE(school.province, 'ไม่ระบุ') AS province, COALESCE(school.district, 'ไม่ระบุ') AS district, COUNT(DISTINCT enrollment.person_uuid)::int AS student_count FROM student_term enrollment JOIN student_current_enrollment_resolution current_enrollment ON current_enrollment.person_uuid = enrollment.person_uuid AND current_enrollment.selected_student_uuid = enrollment.student_uuid AND current_enrollment.resolution_state = 'ACTIVE' JOIN schools school ON school.id = enrollment.\"SchoolID_Onec\" WHERE enrollment.deleted_at IS NULL AND school.school_status = 'ACTIVE' GROUP BY COALESCE(school.province, 'ไม่ระบุ'), COALESCE(school.district, 'ไม่ระบุ') ORDER BY student_count DESC, province ASC, district ASC",
+      "category": "count_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "student_enrollment"
+      ],
+      "grain": "one row per province and district",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [],
+      "requested_result_limit": 300,
+      "retrieval_tags": [
+        "จำนวนนักเรียนปัจจุบันแยกตามอำเภอ",
+        "student",
+        "current",
+        "count",
+        "by"
+      ]
+    },
+    {
+      "id": "student_current_count_by_grade",
+      "question": "จำนวนนักเรียนปัจจุบันแยกตามระดับชั้น",
+      "sql": "SELECT grade.id AS grade_level_id, grade.label AS grade_label, COUNT(DISTINCT enrollment.person_uuid)::int AS student_count FROM student_term enrollment JOIN student_current_enrollment_resolution current_enrollment ON current_enrollment.person_uuid = enrollment.person_uuid AND current_enrollment.selected_student_uuid = enrollment.student_uuid AND current_enrollment.resolution_state = 'ACTIVE' JOIN grade_levels grade ON grade.id = enrollment.\"GradeLevelID_Onec\" WHERE enrollment.deleted_at IS NULL GROUP BY grade.id, grade.label ORDER BY grade.id ASC",
+      "category": "count_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "student_enrollment"
+      ],
+      "grain": "one row per grade level",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [],
+      "requested_result_limit": 50,
+      "retrieval_tags": [
+        "จำนวนนักเรียนปัจจุบันแยกตามระดับชั้น",
+        "student",
+        "current",
+        "count",
+        "by"
+      ]
+    },
+    {
+      "id": "student_current_count_by_classroom",
+      "question": "จำนวนนักเรียนปัจจุบันแยกตามห้องเรียน",
+      "sql": "SELECT classroom.school_id, classroom.id AS classroom_id, grade.label AS grade_label, classroom.room_name, COUNT(DISTINCT enrollment.person_uuid)::int AS student_count FROM student_term enrollment JOIN student_current_enrollment_resolution current_enrollment ON current_enrollment.person_uuid = enrollment.person_uuid AND current_enrollment.selected_student_uuid = enrollment.student_uuid AND current_enrollment.resolution_state = 'ACTIVE' JOIN school_classrooms classroom ON classroom.id = enrollment.classroom_id AND classroom.school_id = enrollment.\"SchoolID_Onec\" JOIN grade_levels grade ON grade.id = classroom.grade_level_id WHERE enrollment.deleted_at IS NULL AND classroom.deleted_at IS NULL AND classroom.classroom_status = 'ACTIVE' GROUP BY classroom.school_id, classroom.id, grade.id, grade.label, classroom.room_name ORDER BY classroom.school_id ASC, grade.id ASC, classroom.id ASC",
+      "category": "count_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "student_enrollment"
+      ],
+      "grain": "one row per classroom",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [],
+      "requested_result_limit": 500,
+      "retrieval_tags": [
+        "จำนวนนักเรียนปัจจุบันแยกตามห้องเรียน",
+        "student",
+        "current",
+        "count",
+        "by"
+      ]
+    },
+    {
+      "id": "student_current_count_for_term",
+      "question": "จำนวนนักเรียนปัจจุบัน ปีการศึกษา 2569 ภาคเรียน 1",
+      "sql": "SELECT COUNT(DISTINCT enrollment.person_uuid)::int AS student_count FROM student_term enrollment JOIN student_current_enrollment_resolution current_enrollment ON current_enrollment.person_uuid = enrollment.person_uuid AND current_enrollment.selected_student_uuid = enrollment.student_uuid AND current_enrollment.resolution_state = 'ACTIVE' WHERE enrollment.\"AcademicYear_Onec\" = $1 AND enrollment.\"Semester_Onec\" = $2 AND enrollment.deleted_at IS NULL",
+      "category": "count_filter",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "student_enrollment"
+      ],
+      "grain": "one aggregate row",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [
+        {
+          "position": 1,
+          "name": "academic_year",
+          "source": "question_value",
+          "type": "integer",
+          "value": 2569
+        },
+        {
+          "position": 2,
+          "name": "semester",
+          "source": "question_value",
+          "type": "integer",
+          "value": 1
+        }
+      ],
+      "requested_result_limit": 1,
+      "retrieval_tags": [
+        "จำนวนนักเรียนปัจจุบัน ปีการศึกษา 2569 ภาคเรียน 1",
+        "student",
+        "current",
+        "count",
+        "for"
+      ]
+    },
+    {
+      "id": "student_historical_enrollment_count_by_term",
+      "question": "จำนวนระเบียนการลงทะเบียนเรียนแยกตามปีการศึกษาและภาคเรียน",
+      "sql": "SELECT enrollment.\"AcademicYear_Onec\" AS academic_year, enrollment.\"Semester_Onec\" AS semester, COUNT(DISTINCT enrollment.student_uuid)::int AS enrollment_count FROM student_term enrollment WHERE enrollment.deleted_at IS NULL GROUP BY enrollment.\"AcademicYear_Onec\", enrollment.\"Semester_Onec\" ORDER BY academic_year ASC, semester ASC",
+      "category": "count_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "student_enrollment"
+      ],
+      "grain": "one row per academic year and semester",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [],
+      "requested_result_limit": 100,
+      "retrieval_tags": [
+        "จำนวนระเบียนการลงทะเบียนเรียนแยกตามปีการศึกษาและภาคเรียน",
+        "student",
+        "historical",
+        "enrollment",
+        "count"
+      ]
+    },
+    {
+      "id": "student_historical_person_count_by_term",
+      "question": "จำนวนนักเรียนไม่ซ้ำแยกตามปีการศึกษาและภาคเรียน",
+      "sql": "SELECT enrollment.\"AcademicYear_Onec\" AS academic_year, enrollment.\"Semester_Onec\" AS semester, COUNT(DISTINCT enrollment.person_uuid)::int AS student_count FROM student_term enrollment WHERE enrollment.deleted_at IS NULL GROUP BY enrollment.\"AcademicYear_Onec\", enrollment.\"Semester_Onec\" ORDER BY academic_year ASC, semester ASC",
+      "category": "count_distinct_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "student_enrollment"
+      ],
+      "grain": "one row per academic year and semester",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [],
+      "requested_result_limit": 100,
+      "retrieval_tags": [
+        "จำนวนนักเรียนไม่ซ้ำแยกตามปีการศึกษาและภาคเรียน",
+        "student",
+        "historical",
+        "person",
+        "count"
+      ]
+    },
+    {
+      "id": "student_status_count_for_term",
+      "question": "จำนวนนักเรียนแยกตามสถานะ ปีการศึกษา 2569 ภาคเรียน 1",
+      "sql": "SELECT status.code AS student_status_code, status.label_th AS student_status_label_th, COUNT(DISTINCT enrollment.person_uuid)::int AS student_count FROM student_term enrollment JOIN student_status status ON status.code = COALESCE(enrollment.student_status_code, enrollment.\"StudentStatusID_Onec\") AND status.deleted_at IS NULL WHERE enrollment.\"AcademicYear_Onec\" = $1 AND enrollment.\"Semester_Onec\" = $2 AND enrollment.deleted_at IS NULL GROUP BY status.code, status.label_th, status.sort_order ORDER BY status.sort_order ASC, status.code ASC",
+      "category": "count_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "student_enrollment"
+      ],
+      "grain": "one row per student status",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [
+        {
+          "position": 1,
+          "name": "academic_year",
+          "source": "question_value",
+          "type": "integer",
+          "value": 2569
+        },
+        {
+          "position": 2,
+          "name": "semester",
+          "source": "question_value",
+          "type": "integer",
+          "value": 1
+        }
+      ],
+      "requested_result_limit": 50,
+      "retrieval_tags": [
+        "จำนวนนักเรียนแยกตามสถานะ ปีการศึกษา 2569 ภาคเรียน 1",
+        "student",
+        "status",
+        "count",
+        "for"
+      ]
+    },
+    {
+      "id": "student_current_followup_status_count_by_school",
+      "question": "จำนวนนักเรียนปัจจุบันที่มีสถานะต้องติดตามแยกตามโรงเรียน",
+      "sql": "SELECT school.id AS school_id, school.name AS school_name, COUNT(DISTINCT enrollment.person_uuid)::int AS student_count FROM student_term enrollment JOIN student_current_enrollment_resolution current_enrollment ON current_enrollment.person_uuid = enrollment.person_uuid AND current_enrollment.selected_student_uuid = enrollment.student_uuid AND current_enrollment.resolution_state = 'ACTIVE' JOIN student_status status ON status.code = COALESCE(enrollment.student_status_code, enrollment.\"StudentStatusID_Onec\") AND status.deleted_at IS NULL JOIN schools school ON school.id = enrollment.\"SchoolID_Onec\" WHERE status.requires_followup IS TRUE AND enrollment.deleted_at IS NULL AND school.school_status = 'ACTIVE' GROUP BY school.id, school.name ORDER BY student_count DESC, school.id ASC",
+      "category": "count_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "student_enrollment"
+      ],
+      "grain": "one row per school",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [],
+      "requested_result_limit": 100,
+      "retrieval_tags": [
+        "จำนวนนักเรียนปัจจุบันที่มีสถานะต้องติดตามแยกตามโรงเรียน",
+        "student",
+        "current",
+        "followup",
+        "status"
+      ]
+    },
+    {
+      "id": "student_average_term_gpa_by_grade",
+      "question": "เกรดเฉลี่ยรายภาคแยกตามระดับชั้น ปีการศึกษา 2569 ภาคเรียน 1",
+      "sql": "SELECT grade.id AS grade_level_id, grade.label AS grade_label, COUNT(enrollment.term_gpa)::int AS graded_student_count, ROUND(AVG(enrollment.term_gpa), 2) AS average_term_gpa FROM student_term enrollment JOIN grade_levels grade ON grade.id = enrollment.\"GradeLevelID_Onec\" WHERE enrollment.\"AcademicYear_Onec\" = $1 AND enrollment.\"Semester_Onec\" = $2 AND enrollment.deleted_at IS NULL GROUP BY grade.id, grade.label ORDER BY grade.id ASC",
+      "category": "average_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "student_enrollment"
+      ],
+      "grain": "one row per grade level",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [
+        {
+          "position": 1,
+          "name": "academic_year",
+          "source": "question_value",
+          "type": "integer",
+          "value": 2569
+        },
+        {
+          "position": 2,
+          "name": "semester",
+          "source": "question_value",
+          "type": "integer",
+          "value": 1
+        }
+      ],
+      "requested_result_limit": 50,
+      "retrieval_tags": [
+        "เกรดเฉลี่ยรายภาคแยกตามระดับชั้น ปีการศึกษา 2569 ภาคเรียน 1",
+        "student",
+        "average",
+        "term",
+        "gpa"
+      ]
+    },
+    {
+      "id": "student_missing_term_gpa_by_school",
+      "question": "จำนวนนักเรียนที่ยังไม่มีเกรดเฉลี่ยรายภาคแยกตามโรงเรียน ปีการศึกษา 2569 ภาคเรียน 1",
+      "sql": "SELECT school.id AS school_id, school.name AS school_name, COUNT(DISTINCT enrollment.person_uuid)::int AS student_count FROM student_term enrollment JOIN schools school ON school.id = enrollment.\"SchoolID_Onec\" WHERE enrollment.\"AcademicYear_Onec\" = $1 AND enrollment.\"Semester_Onec\" = $2 AND enrollment.term_gpa IS NULL AND enrollment.deleted_at IS NULL GROUP BY school.id, school.name ORDER BY student_count DESC, school.id ASC",
+      "category": "count_filter_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "student_enrollment"
+      ],
+      "grain": "one row per school",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [
+        {
+          "position": 1,
+          "name": "academic_year",
+          "source": "question_value",
+          "type": "integer",
+          "value": 2569
+        },
+        {
+          "position": 2,
+          "name": "semester",
+          "source": "question_value",
+          "type": "integer",
+          "value": 1
+        }
+      ],
+      "requested_result_limit": 100,
+      "retrieval_tags": [
+        "จำนวนนักเรียนที่ยังไม่มีเกรดเฉลี่ยรายภาคแยกตามโรงเรียน ปีการศึกษา 2569 ภาคเรียน 1",
+        "student",
+        "missing",
+        "term",
+        "gpa"
+      ]
+    },
+    {
+      "id": "student_current_schools_above_threshold",
+      "question": "โรงเรียนที่มีนักเรียนปัจจุบันมากกว่า 500 คน",
+      "sql": "SELECT school.id AS school_id, school.name AS school_name, COUNT(DISTINCT enrollment.person_uuid)::int AS student_count FROM student_term enrollment JOIN student_current_enrollment_resolution current_enrollment ON current_enrollment.person_uuid = enrollment.person_uuid AND current_enrollment.selected_student_uuid = enrollment.student_uuid AND current_enrollment.resolution_state = 'ACTIVE' JOIN schools school ON school.id = enrollment.\"SchoolID_Onec\" WHERE enrollment.deleted_at IS NULL AND school.school_status = 'ACTIVE' GROUP BY school.id, school.name HAVING COUNT(DISTINCT enrollment.person_uuid) > $1 ORDER BY student_count DESC, school.id ASC",
+      "category": "having",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "student_enrollment"
+      ],
+      "grain": "one row per school above threshold",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [
+        {
+          "position": 1,
+          "name": "minimum_student_count",
+          "source": "question_value",
+          "type": "integer",
+          "value": 500
+        }
+      ],
+      "requested_result_limit": 100,
+      "retrieval_tags": [
+        "โรงเรียนที่มีนักเรียนปัจจุบันมากกว่า 500 คน",
+        "student",
+        "current",
+        "schools",
+        "above"
+      ]
+    },
+    {
+      "id": "student_current_classroom_occupancy_summary_by_school",
+      "question": "สรุปจำนวนห้องและจำนวนนักเรียนเฉลี่ยต่อห้องของแต่ละโรงเรียนปัจจุบัน",
+      "sql": "WITH classroom_counts AS (SELECT classroom.school_id, classroom.id AS classroom_id, COUNT(DISTINCT enrollment.person_uuid)::int AS student_count FROM student_term enrollment JOIN student_current_enrollment_resolution current_enrollment ON current_enrollment.person_uuid = enrollment.person_uuid AND current_enrollment.selected_student_uuid = enrollment.student_uuid AND current_enrollment.resolution_state = 'ACTIVE' JOIN school_classrooms classroom ON classroom.id = enrollment.classroom_id AND classroom.school_id = enrollment.\"SchoolID_Onec\" WHERE enrollment.deleted_at IS NULL AND classroom.deleted_at IS NULL AND classroom.classroom_status = 'ACTIVE' GROUP BY classroom.school_id, classroom.id) SELECT school_id, COUNT(*)::int AS occupied_classroom_count, ROUND(AVG(student_count), 1) AS average_students_per_classroom, MIN(student_count)::int AS minimum_students_per_classroom, MAX(student_count)::int AS maximum_students_per_classroom FROM classroom_counts GROUP BY school_id ORDER BY average_students_per_classroom DESC, school_id ASC",
+      "category": "summary_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "student_enrollment"
+      ],
+      "grain": "one row per school",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [],
+      "requested_result_limit": 100,
+      "retrieval_tags": [
+        "สรุปจำนวนห้องและจำนวนนักเรียนเฉลี่ยต่อห้องของแต่ละโรงเรียนปัจจุบัน",
+        "student",
+        "current",
+        "classroom",
+        "occupancy"
+      ]
+    },
+    {
+      "id": "attendance_rate_by_grade_and_term",
+      "question": "อัตราการมาเรียนแยกตามระดับชั้น ปีการศึกษา 2569 ภาคเรียน 1",
+      "sql": "SELECT grade.id AS grade_level_id, grade.label AS grade_label, ROUND(100.0 * COUNT(*) FILTER (WHERE day.\"AttendanceStatus\" IN (1, 3)) / NULLIF(COUNT(*) FILTER (WHERE day.\"AttendanceStatus\" <> 4), 0), 1) AS attendance_rate_percent FROM attendance_day day JOIN student_term enrollment ON enrollment.student_uuid = day.student_uuid JOIN grade_levels grade ON grade.id = enrollment.\"GradeLevelID_Onec\" WHERE day.\"AcademicYear_Onec\" = $1 AND day.\"Semester_Onec\" = $2 AND enrollment.deleted_at IS NULL GROUP BY grade.id, grade.label ORDER BY grade.id ASC",
+      "category": "ratio_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "student_enrollment",
+        "attendance"
+      ],
+      "grain": "one row per grade level",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [
+        {
+          "position": 1,
+          "name": "academic_year",
+          "source": "question_value",
+          "type": "integer",
+          "value": 2569
+        },
+        {
+          "position": 2,
+          "name": "semester",
+          "source": "question_value",
+          "type": "integer",
+          "value": 1
+        }
+      ],
+      "requested_result_limit": 50,
+      "retrieval_tags": [
+        "อัตราการมาเรียนแยกตามระดับชั้น ปีการศึกษา 2569 ภาคเรียน 1",
+        "attendance",
+        "rate",
+        "by",
+        "grade"
+      ]
+    },
+    {
+      "id": "attendance_rate_by_classroom_and_term",
+      "question": "อัตราการมาเรียนแยกตามห้องเรียน ปีการศึกษา 2569 ภาคเรียน 1",
+      "sql": "SELECT classroom.school_id, classroom.id AS classroom_id, grade.label AS grade_label, classroom.room_name, ROUND(100.0 * COUNT(*) FILTER (WHERE day.\"AttendanceStatus\" IN (1, 3)) / NULLIF(COUNT(*) FILTER (WHERE day.\"AttendanceStatus\" <> 4), 0), 1) AS attendance_rate_percent FROM attendance_day day JOIN student_term enrollment ON enrollment.student_uuid = day.student_uuid JOIN school_classrooms classroom ON classroom.id = enrollment.classroom_id AND classroom.school_id = enrollment.\"SchoolID_Onec\" JOIN grade_levels grade ON grade.id = classroom.grade_level_id WHERE day.\"AcademicYear_Onec\" = $1 AND day.\"Semester_Onec\" = $2 AND enrollment.deleted_at IS NULL AND classroom.deleted_at IS NULL GROUP BY classroom.school_id, classroom.id, grade.id, grade.label, classroom.room_name ORDER BY attendance_rate_percent ASC NULLS LAST, classroom.school_id ASC, classroom.id ASC",
+      "category": "ratio_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "student_enrollment",
+        "attendance"
+      ],
+      "grain": "one row per classroom",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [
+        {
+          "position": 1,
+          "name": "academic_year",
+          "source": "question_value",
+          "type": "integer",
+          "value": 2569
+        },
+        {
+          "position": 2,
+          "name": "semester",
+          "source": "question_value",
+          "type": "integer",
+          "value": 1
+        }
+      ],
+      "requested_result_limit": 500,
+      "retrieval_tags": [
+        "อัตราการมาเรียนแยกตามห้องเรียน ปีการศึกษา 2569 ภาคเรียน 1",
+        "attendance",
+        "rate",
+        "by",
+        "classroom"
+      ]
+    },
+    {
+      "id": "attendance_status_distribution_in_date_range",
+      "question": "จำนวนสถานะการเข้าเรียนแต่ละแบบ ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+      "sql": "SELECT status.code AS attendance_status_code, status.label_th AS attendance_status_label_th, COUNT(*)::int AS student_day_count FROM attendance_day day JOIN attendance_record_statuses status ON status.code = day.\"AttendanceStatus\" WHERE day.\"AttendanceDate\" >= $1::date AND day.\"AttendanceDate\" < $2::date GROUP BY status.code, status.label_th, status.sort_order ORDER BY status.sort_order ASC",
+      "category": "count_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "attendance"
+      ],
+      "grain": "one row per attendance status",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [
+        {
+          "position": 1,
+          "name": "start_date",
+          "source": "question_value",
+          "type": "date",
+          "value": "2026-06-01"
+        },
+        {
+          "position": 2,
+          "name": "end_date_exclusive",
+          "source": "question_value",
+          "type": "date",
+          "value": "2026-09-01"
+        }
+      ],
+      "requested_result_limit": 20,
+      "retrieval_tags": [
+        "จำนวนสถานะการเข้าเรียนแต่ละแบบ ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+        "attendance",
+        "status",
+        "distribution",
+        "in"
+      ]
+    },
+    {
+      "id": "attendance_absent_days_by_school_in_date_range",
+      "question": "จำนวนวันขาดเรียนรวมแยกตามโรงเรียน ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+      "sql": "SELECT school.id AS school_id, school.name AS school_name, COUNT(*)::int AS absent_student_day_count FROM attendance_day day JOIN student_term enrollment ON enrollment.student_uuid = day.student_uuid JOIN schools school ON school.id = enrollment.\"SchoolID_Onec\" WHERE day.\"AttendanceStatus\" = 2 AND day.\"AttendanceDate\" >= $1::date AND day.\"AttendanceDate\" < $2::date AND enrollment.deleted_at IS NULL GROUP BY school.id, school.name ORDER BY absent_student_day_count DESC, school.id ASC",
+      "category": "count_filter_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "student_enrollment",
+        "attendance"
+      ],
+      "grain": "one row per school",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [
+        {
+          "position": 1,
+          "name": "start_date",
+          "source": "question_value",
+          "type": "date",
+          "value": "2026-06-01"
+        },
+        {
+          "position": 2,
+          "name": "end_date_exclusive",
+          "source": "question_value",
+          "type": "date",
+          "value": "2026-09-01"
+        }
+      ],
+      "requested_result_limit": 100,
+      "retrieval_tags": [
+        "จำนวนวันขาดเรียนรวมแยกตามโรงเรียน ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+        "attendance",
+        "absent",
+        "days",
+        "by"
+      ]
+    },
+    {
+      "id": "attendance_late_days_by_school_in_date_range",
+      "question": "จำนวนวันมาสายรวมแยกตามโรงเรียน ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+      "sql": "SELECT school.id AS school_id, school.name AS school_name, COUNT(*)::int AS late_student_day_count FROM attendance_day day JOIN student_term enrollment ON enrollment.student_uuid = day.student_uuid JOIN schools school ON school.id = enrollment.\"SchoolID_Onec\" WHERE day.\"AttendanceStatus\" = 3 AND day.\"AttendanceDate\" >= $1::date AND day.\"AttendanceDate\" < $2::date AND enrollment.deleted_at IS NULL GROUP BY school.id, school.name ORDER BY late_student_day_count DESC, school.id ASC",
+      "category": "count_filter_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "student_enrollment",
+        "attendance"
+      ],
+      "grain": "one row per school",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [
+        {
+          "position": 1,
+          "name": "start_date",
+          "source": "question_value",
+          "type": "date",
+          "value": "2026-06-01"
+        },
+        {
+          "position": 2,
+          "name": "end_date_exclusive",
+          "source": "question_value",
+          "type": "date",
+          "value": "2026-09-01"
+        }
+      ],
+      "requested_result_limit": 100,
+      "retrieval_tags": [
+        "จำนวนวันมาสายรวมแยกตามโรงเรียน ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+        "attendance",
+        "late",
+        "days",
+        "by"
+      ]
+    },
+    {
+      "id": "attendance_leave_days_by_school_in_date_range",
+      "question": "จำนวนวันลารวมแยกตามโรงเรียน ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+      "sql": "SELECT school.id AS school_id, school.name AS school_name, COUNT(*)::int AS leave_student_day_count FROM attendance_day day JOIN student_term enrollment ON enrollment.student_uuid = day.student_uuid JOIN schools school ON school.id = enrollment.\"SchoolID_Onec\" WHERE day.\"AttendanceStatus\" = 4 AND day.\"AttendanceDate\" >= $1::date AND day.\"AttendanceDate\" < $2::date AND enrollment.deleted_at IS NULL GROUP BY school.id, school.name ORDER BY leave_student_day_count DESC, school.id ASC",
+      "category": "count_filter_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "student_enrollment",
+        "attendance"
+      ],
+      "grain": "one row per school",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [
+        {
+          "position": 1,
+          "name": "start_date",
+          "source": "question_value",
+          "type": "date",
+          "value": "2026-06-01"
+        },
+        {
+          "position": 2,
+          "name": "end_date_exclusive",
+          "source": "question_value",
+          "type": "date",
+          "value": "2026-09-01"
+        }
+      ],
+      "requested_result_limit": 100,
+      "retrieval_tags": [
+        "จำนวนวันลารวมแยกตามโรงเรียน ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+        "attendance",
+        "leave",
+        "days",
+        "by"
+      ]
+    },
+    {
+      "id": "attendance_monthly_rate_in_date_range",
+      "question": "แนวโน้มอัตราการมาเรียนรายเดือน ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+      "sql": "SELECT date_trunc('month', day.\"AttendanceDate\")::date AS month_start, ROUND(100.0 * COUNT(*) FILTER (WHERE day.\"AttendanceStatus\" IN (1, 3)) / NULLIF(COUNT(*) FILTER (WHERE day.\"AttendanceStatus\" <> 4), 0), 1) AS attendance_rate_percent FROM attendance_day day WHERE day.\"AttendanceDate\" >= $1::date AND day.\"AttendanceDate\" < $2::date GROUP BY month_start ORDER BY month_start ASC",
+      "category": "time_ratio_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "attendance"
+      ],
+      "grain": "one row per month",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [
+        {
+          "position": 1,
+          "name": "start_date",
+          "source": "question_value",
+          "type": "date",
+          "value": "2026-06-01"
+        },
+        {
+          "position": 2,
+          "name": "end_date_exclusive",
+          "source": "question_value",
+          "type": "date",
+          "value": "2026-09-01"
+        }
+      ],
+      "requested_result_limit": 100,
+      "retrieval_tags": [
+        "แนวโน้มอัตราการมาเรียนรายเดือน ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+        "attendance",
+        "monthly",
+        "rate",
+        "in"
+      ]
+    },
+    {
+      "id": "attendance_daily_rate_in_date_range",
+      "question": "อัตราการมาเรียนรายวัน ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+      "sql": "SELECT day.\"AttendanceDate\" AS attendance_date, ROUND(100.0 * COUNT(*) FILTER (WHERE day.\"AttendanceStatus\" IN (1, 3)) / NULLIF(COUNT(*) FILTER (WHERE day.\"AttendanceStatus\" <> 4), 0), 1) AS attendance_rate_percent FROM attendance_day day WHERE day.\"AttendanceDate\" >= $1::date AND day.\"AttendanceDate\" < $2::date GROUP BY day.\"AttendanceDate\" ORDER BY attendance_date ASC",
+      "category": "time_ratio_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "attendance"
+      ],
+      "grain": "one row per attendance date",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [
+        {
+          "position": 1,
+          "name": "start_date",
+          "source": "question_value",
+          "type": "date",
+          "value": "2026-06-01"
+        },
+        {
+          "position": 2,
+          "name": "end_date_exclusive",
+          "source": "question_value",
+          "type": "date",
+          "value": "2026-09-01"
+        }
+      ],
+      "requested_result_limit": 200,
+      "retrieval_tags": [
+        "อัตราการมาเรียนรายวัน ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+        "attendance",
+        "daily",
+        "rate",
+        "in"
+      ]
+    },
+    {
+      "id": "attendance_absence_by_weekday",
+      "question": "จำนวนการขาดเรียนแยกตามวันในสัปดาห์ ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+      "sql": "SELECT EXTRACT(ISODOW FROM day.\"AttendanceDate\")::int AS iso_weekday, COUNT(*)::int AS absent_student_day_count FROM attendance_day day WHERE day.\"AttendanceStatus\" = 2 AND day.\"AttendanceDate\" >= $1::date AND day.\"AttendanceDate\" < $2::date GROUP BY iso_weekday ORDER BY iso_weekday ASC",
+      "category": "time_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "attendance"
+      ],
+      "grain": "one row per ISO weekday",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [
+        {
+          "position": 1,
+          "name": "start_date",
+          "source": "question_value",
+          "type": "date",
+          "value": "2026-06-01"
+        },
+        {
+          "position": 2,
+          "name": "end_date_exclusive",
+          "source": "question_value",
+          "type": "date",
+          "value": "2026-09-01"
+        }
+      ],
+      "requested_result_limit": 7,
+      "retrieval_tags": [
+        "จำนวนการขาดเรียนแยกตามวันในสัปดาห์ ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+        "attendance",
+        "absence",
+        "by",
+        "weekday"
+      ]
+    },
+    {
+      "id": "attendance_classrooms_below_rate_threshold",
+      "question": "ห้องเรียนที่มีอัตราการมาเรียนต่ำกว่า 80 เปอร์เซ็นต์ ปีการศึกษา 2569 ภาคเรียน 1",
+      "sql": "SELECT classroom.school_id, classroom.id AS classroom_id, grade.label AS grade_label, classroom.room_name, ROUND(100.0 * COUNT(*) FILTER (WHERE day.\"AttendanceStatus\" IN (1, 3)) / NULLIF(COUNT(*) FILTER (WHERE day.\"AttendanceStatus\" <> 4), 0), 1) AS attendance_rate_percent FROM attendance_day day JOIN student_term enrollment ON enrollment.student_uuid = day.student_uuid JOIN school_classrooms classroom ON classroom.id = enrollment.classroom_id AND classroom.school_id = enrollment.\"SchoolID_Onec\" JOIN grade_levels grade ON grade.id = classroom.grade_level_id WHERE day.\"AcademicYear_Onec\" = $1 AND day.\"Semester_Onec\" = $2 AND enrollment.deleted_at IS NULL AND classroom.deleted_at IS NULL GROUP BY classroom.school_id, classroom.id, grade.id, grade.label, classroom.room_name HAVING 100.0 * COUNT(*) FILTER (WHERE day.\"AttendanceStatus\" IN (1, 3)) / NULLIF(COUNT(*) FILTER (WHERE day.\"AttendanceStatus\" <> 4), 0) < $3 ORDER BY attendance_rate_percent ASC NULLS LAST, classroom.school_id ASC, classroom.id ASC",
+      "category": "having_ratio",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "student_enrollment",
+        "attendance"
+      ],
+      "grain": "one row per classroom below threshold",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [
+        {
+          "position": 1,
+          "name": "academic_year",
+          "source": "question_value",
+          "type": "integer",
+          "value": 2569
+        },
+        {
+          "position": 2,
+          "name": "semester",
+          "source": "question_value",
+          "type": "integer",
+          "value": 1
+        },
+        {
+          "position": 3,
+          "name": "maximum_attendance_rate_percent",
+          "source": "question_value",
+          "type": "numeric",
+          "value": 80
+        }
+      ],
+      "requested_result_limit": 500,
+      "retrieval_tags": [
+        "ห้องเรียนที่มีอัตราการมาเรียนต่ำกว่า 80 เปอร์เซ็นต์ ปีการศึกษา 2569 ภาคเรียน 1",
+        "attendance",
+        "classrooms",
+        "below",
+        "rate"
+      ]
+    },
+    {
+      "id": "attendance_top_absence_classrooms_per_school",
+      "question": "5 ห้องที่มีวันขาดเรียนมากที่สุดของแต่ละโรงเรียน ปีการศึกษา 2569 ภาคเรียน 1",
+      "sql": "WITH classroom_absences AS (SELECT classroom.school_id, classroom.id AS classroom_id, classroom.room_name, COUNT(*) FILTER (WHERE day.\"AttendanceStatus\" = 2)::int AS absent_student_day_count FROM attendance_day day JOIN student_term enrollment ON enrollment.student_uuid = day.student_uuid JOIN school_classrooms classroom ON classroom.id = enrollment.classroom_id AND classroom.school_id = enrollment.\"SchoolID_Onec\" WHERE day.\"AcademicYear_Onec\" = $1 AND day.\"Semester_Onec\" = $2 AND enrollment.deleted_at IS NULL AND classroom.deleted_at IS NULL GROUP BY classroom.school_id, classroom.id, classroom.room_name), ranked AS (SELECT classroom_absences.school_id, classroom_absences.classroom_id, classroom_absences.room_name, classroom_absences.absent_student_day_count, ROW_NUMBER() OVER (PARTITION BY classroom_absences.school_id ORDER BY classroom_absences.absent_student_day_count DESC, classroom_absences.classroom_id ASC) AS rank_in_school FROM classroom_absences) SELECT school_id, classroom_id, room_name, absent_student_day_count, rank_in_school FROM ranked WHERE rank_in_school <= $3 ORDER BY school_id ASC, rank_in_school ASC",
+      "category": "ranking_per_group",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "student_enrollment",
+        "attendance"
+      ],
+      "grain": "up to N classroom rows per school",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [
+        {
+          "position": 1,
+          "name": "academic_year",
+          "source": "question_value",
+          "type": "integer",
+          "value": 2569
+        },
+        {
+          "position": 2,
+          "name": "semester",
+          "source": "question_value",
+          "type": "integer",
+          "value": 1
+        },
+        {
+          "position": 3,
+          "name": "top_n_per_school",
+          "source": "question_value",
+          "type": "integer",
+          "value": 5
+        }
+      ],
+      "requested_result_limit": 500,
+      "retrieval_tags": [
+        "5 ห้องที่มีวันขาดเรียนมากที่สุดของแต่ละโรงเรียน ปีการศึกษา 2569 ภาคเรียน 1",
+        "attendance",
+        "top",
+        "absence",
+        "classrooms"
+      ]
+    },
+    {
+      "id": "attendance_subject_rate_in_date_range",
+      "question": "อัตราการเข้าเรียนแยกตามวิชา ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+      "sql": "SELECT subject.id AS subject_id, subject.code AS subject_code, subject.name_th AS subject_name_th, ROUND(100.0 * COUNT(*) FILTER (WHERE subject_day.\"AttendanceStatus\" IN (1, 3)) / NULLIF(COUNT(*) FILTER (WHERE subject_day.\"AttendanceStatus\" <> 4), 0), 1) AS attendance_rate_percent FROM attendance_subject_day subject_day JOIN subjects subject ON subject.id = subject_day.subject_id WHERE subject_day.\"AttendanceDate\" >= $1::date AND subject_day.\"AttendanceDate\" < $2::date AND subject.deleted_at IS NULL AND subject.is_active IS TRUE GROUP BY subject.id, subject.code, subject.name_th ORDER BY attendance_rate_percent ASC NULLS LAST, subject.id ASC",
+      "category": "ratio_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "attendance",
+        "teacher_subject"
+      ],
+      "grain": "one row per subject",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [
+        {
+          "position": 1,
+          "name": "start_date",
+          "source": "question_value",
+          "type": "date",
+          "value": "2026-06-01"
+        },
+        {
+          "position": 2,
+          "name": "end_date_exclusive",
+          "source": "question_value",
+          "type": "date",
+          "value": "2026-09-01"
+        }
+      ],
+      "requested_result_limit": 200,
+      "retrieval_tags": [
+        "อัตราการเข้าเรียนแยกตามวิชา ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+        "attendance",
+        "subject",
+        "rate",
+        "in"
+      ]
+    },
+    {
+      "id": "attendance_subject_late_days_in_date_range",
+      "question": "จำนวนการมาสายแยกตามวิชา ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+      "sql": "SELECT subject.id AS subject_id, subject.code AS subject_code, subject.name_th AS subject_name_th, COUNT(*) FILTER (WHERE subject_day.\"AttendanceStatus\" = 3)::int AS late_student_subject_day_count FROM attendance_subject_day subject_day JOIN subjects subject ON subject.id = subject_day.subject_id WHERE subject_day.\"AttendanceDate\" >= $1::date AND subject_day.\"AttendanceDate\" < $2::date AND subject.deleted_at IS NULL AND subject.is_active IS TRUE GROUP BY subject.id, subject.code, subject.name_th ORDER BY late_student_subject_day_count DESC, subject.id ASC",
+      "category": "count_filter_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "attendance",
+        "teacher_subject"
+      ],
+      "grain": "one row per subject",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [
+        {
+          "position": 1,
+          "name": "start_date",
+          "source": "question_value",
+          "type": "date",
+          "value": "2026-06-01"
+        },
+        {
+          "position": 2,
+          "name": "end_date_exclusive",
+          "source": "question_value",
+          "type": "date",
+          "value": "2026-09-01"
+        }
+      ],
+      "requested_result_limit": 200,
+      "retrieval_tags": [
+        "จำนวนการมาสายแยกตามวิชา ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+        "attendance",
+        "subject",
+        "late",
+        "days"
+      ]
+    },
+    {
+      "id": "attendance_rate_comparison_by_term",
+      "question": "เปรียบเทียบอัตราการมาเรียนแยกตามปีการศึกษาและภาคเรียน",
+      "sql": "SELECT day.\"AcademicYear_Onec\" AS academic_year, day.\"Semester_Onec\" AS semester, ROUND(100.0 * COUNT(*) FILTER (WHERE day.\"AttendanceStatus\" IN (1, 3)) / NULLIF(COUNT(*) FILTER (WHERE day.\"AttendanceStatus\" <> 4), 0), 1) AS attendance_rate_percent FROM attendance_day day GROUP BY day.\"AcademicYear_Onec\", day.\"Semester_Onec\" ORDER BY academic_year ASC, semester ASC",
+      "category": "ratio_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "attendance"
+      ],
+      "grain": "one row per academic year and semester",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [],
+      "requested_result_limit": 100,
+      "retrieval_tags": [
+        "เปรียบเทียบอัตราการมาเรียนแยกตามปีการศึกษาและภาคเรียน",
+        "attendance",
+        "rate",
+        "comparison",
+        "by"
+      ]
+    },
+    {
+      "id": "attendance_late_periods_by_school",
+      "question": "จำนวนคาบที่มาสายรวมแยกตามโรงเรียน ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+      "sql": "SELECT school.id AS school_id, school.name AS school_name, SUM(day.late_periods)::bigint AS late_period_count FROM attendance_day day JOIN student_term enrollment ON enrollment.student_uuid = day.student_uuid JOIN schools school ON school.id = enrollment.\"SchoolID_Onec\" WHERE day.\"AttendanceDate\" >= $1::date AND day.\"AttendanceDate\" < $2::date AND enrollment.deleted_at IS NULL GROUP BY school.id, school.name ORDER BY late_period_count DESC, school.id ASC",
+      "category": "sum_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "student_enrollment",
+        "attendance"
+      ],
+      "grain": "one row per school",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [
+        {
+          "position": 1,
+          "name": "start_date",
+          "source": "question_value",
+          "type": "date",
+          "value": "2026-06-01"
+        },
+        {
+          "position": 2,
+          "name": "end_date_exclusive",
+          "source": "question_value",
+          "type": "date",
+          "value": "2026-09-01"
+        }
+      ],
+      "requested_result_limit": 100,
+      "retrieval_tags": [
+        "จำนวนคาบที่มาสายรวมแยกตามโรงเรียน ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+        "attendance",
+        "late",
+        "periods",
+        "by"
+      ]
+    },
+    {
+      "id": "attendance_low_rate_school_days_count",
+      "question": "จำนวนวันที่แต่ละโรงเรียนมีอัตราการมาเรียนต่ำกว่า 80 เปอร์เซ็นต์ ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+      "sql": "WITH school_daily_rates AS (SELECT school.id AS school_id, day.\"AttendanceDate\" AS attendance_date, 100.0 * COUNT(*) FILTER (WHERE day.\"AttendanceStatus\" IN (1, 3)) / NULLIF(COUNT(*) FILTER (WHERE day.\"AttendanceStatus\" <> 4), 0) AS attendance_rate_percent FROM attendance_day day JOIN student_term enrollment ON enrollment.student_uuid = day.student_uuid JOIN schools school ON school.id = enrollment.\"SchoolID_Onec\" WHERE day.\"AttendanceDate\" >= $1::date AND day.\"AttendanceDate\" < $2::date AND enrollment.deleted_at IS NULL GROUP BY school.id, day.\"AttendanceDate\") SELECT school_id, COUNT(*) FILTER (WHERE attendance_rate_percent < $3)::int AS low_attendance_day_count FROM school_daily_rates GROUP BY school_id ORDER BY low_attendance_day_count DESC, school_id ASC",
+      "category": "conditional_count_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "student_enrollment",
+        "attendance"
+      ],
+      "grain": "one row per school",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [
+        {
+          "position": 1,
+          "name": "start_date",
+          "source": "question_value",
+          "type": "date",
+          "value": "2026-06-01"
+        },
+        {
+          "position": 2,
+          "name": "end_date_exclusive",
+          "source": "question_value",
+          "type": "date",
+          "value": "2026-09-01"
+        },
+        {
+          "position": 3,
+          "name": "maximum_attendance_rate_percent",
+          "source": "question_value",
+          "type": "numeric",
+          "value": 80
+        }
+      ],
+      "requested_result_limit": 100,
+      "retrieval_tags": [
+        "จำนวนวันที่แต่ละโรงเรียนมีอัตราการมาเรียนต่ำกว่า 80 เปอร์เซ็นต์ ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+        "attendance",
+        "low",
+        "rate",
+        "school"
+      ]
+    },
+    {
+      "id": "attendance_recorded_student_days_by_school",
+      "question": "จำนวนระเบียนนักเรียนรายวันที่บันทึกแล้วแยกตามโรงเรียน ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+      "sql": "SELECT school.id AS school_id, school.name AS school_name, COUNT(*)::int AS recorded_student_day_count, COUNT(DISTINCT day.\"AttendanceDate\")::int AS recorded_date_count FROM attendance_day day JOIN student_term enrollment ON enrollment.student_uuid = day.student_uuid JOIN schools school ON school.id = enrollment.\"SchoolID_Onec\" WHERE day.\"AttendanceDate\" >= $1::date AND day.\"AttendanceDate\" < $2::date AND enrollment.deleted_at IS NULL GROUP BY school.id, school.name ORDER BY recorded_student_day_count DESC, school.id ASC",
+      "category": "summary_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "student_enrollment",
+        "attendance"
+      ],
+      "grain": "one row per school",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [
+        {
+          "position": 1,
+          "name": "start_date",
+          "source": "question_value",
+          "type": "date",
+          "value": "2026-06-01"
+        },
+        {
+          "position": 2,
+          "name": "end_date_exclusive",
+          "source": "question_value",
+          "type": "date",
+          "value": "2026-09-01"
+        }
+      ],
+      "requested_result_limit": 100,
+      "retrieval_tags": [
+        "จำนวนระเบียนนักเรียนรายวันที่บันทึกแล้วแยกตามโรงเรียน ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+        "attendance",
+        "recorded",
+        "student",
+        "days"
+      ]
+    },
+    {
+      "id": "attendance_session_count_by_status",
+      "question": "จำนวนรอบเช็กชื่อแยกตามสถานะ ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+      "sql": "SELECT status.code AS session_status, status.label_th AS session_status_label_th, COUNT(DISTINCT session.id)::int AS session_count FROM attendance_sessions session JOIN attendance_session_statuses status ON status.code = session.status WHERE session.attendance_date >= $1::date AND session.attendance_date < $2::date AND session.deleted_at IS NULL GROUP BY status.code, status.label_th, status.sort_order ORDER BY status.sort_order ASC",
+      "category": "count_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "attendance"
+      ],
+      "grain": "one row per attendance session status",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [
+        {
+          "position": 1,
+          "name": "start_date",
+          "source": "question_value",
+          "type": "date",
+          "value": "2026-06-01"
+        },
+        {
+          "position": 2,
+          "name": "end_date_exclusive",
+          "source": "question_value",
+          "type": "date",
+          "value": "2026-09-01"
+        }
+      ],
+      "requested_result_limit": 20,
+      "retrieval_tags": [
+        "จำนวนรอบเช็กชื่อแยกตามสถานะ ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+        "attendance",
+        "session",
+        "count",
+        "by"
+      ]
+    },
+    {
+      "id": "attendance_session_recording_ratio_by_school",
+      "question": "อัตราความครบถ้วนของการเช็กชื่อแยกตามโรงเรียน ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+      "sql": "SELECT session.school_id, SUM(session.expected_roster_count)::bigint AS expected_record_count, SUM(session.recorded_count)::bigint AS recorded_count, ROUND(100.0 * SUM(session.recorded_count) / NULLIF(SUM(session.expected_roster_count), 0), 1) AS recording_rate_percent FROM attendance_sessions session WHERE session.attendance_date >= $1::date AND session.attendance_date < $2::date AND session.deleted_at IS NULL GROUP BY session.school_id ORDER BY recording_rate_percent ASC NULLS LAST, session.school_id ASC",
+      "category": "ratio_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "attendance"
+      ],
+      "grain": "one row per school",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [
+        {
+          "position": 1,
+          "name": "start_date",
+          "source": "question_value",
+          "type": "date",
+          "value": "2026-06-01"
+        },
+        {
+          "position": 2,
+          "name": "end_date_exclusive",
+          "source": "question_value",
+          "type": "date",
+          "value": "2026-09-01"
+        }
+      ],
+      "requested_result_limit": 100,
+      "retrieval_tags": [
+        "อัตราความครบถ้วนของการเช็กชื่อแยกตามโรงเรียน ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+        "attendance",
+        "session",
+        "recording",
+        "ratio"
+      ]
+    },
+    {
+      "id": "attendance_reopened_session_count_by_school",
+      "question": "จำนวนรอบเช็กชื่อที่เปิดแก้ไขแยกตามโรงเรียน ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+      "sql": "SELECT session.school_id, COUNT(DISTINCT session.id)::int AS reopened_session_count FROM attendance_sessions session WHERE session.status = 'REOPENED' AND session.attendance_date >= $1::date AND session.attendance_date < $2::date AND session.deleted_at IS NULL GROUP BY session.school_id ORDER BY reopened_session_count DESC, session.school_id ASC",
+      "category": "count_filter_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "attendance"
+      ],
+      "grain": "one row per school",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [
+        {
+          "position": 1,
+          "name": "start_date",
+          "source": "question_value",
+          "type": "date",
+          "value": "2026-06-01"
+        },
+        {
+          "position": 2,
+          "name": "end_date_exclusive",
+          "source": "question_value",
+          "type": "date",
+          "value": "2026-09-01"
+        }
+      ],
+      "requested_result_limit": 100,
+      "retrieval_tags": [
+        "จำนวนรอบเช็กชื่อที่เปิดแก้ไขแยกตามโรงเรียน ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+        "attendance",
+        "reopened",
+        "session",
+        "count"
+      ]
+    },
+    {
+      "id": "attendance_session_count_by_kind",
+      "question": "จำนวนรอบเช็กชื่อแยกตามประเภทรอบ ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+      "sql": "SELECT session.session_kind, COUNT(DISTINCT session.id)::int AS session_count FROM attendance_sessions session WHERE session.attendance_date >= $1::date AND session.attendance_date < $2::date AND session.deleted_at IS NULL GROUP BY session.session_kind ORDER BY session_count DESC, session.session_kind ASC",
+      "category": "count_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "attendance"
+      ],
+      "grain": "one row per attendance session kind",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [
+        {
+          "position": 1,
+          "name": "start_date",
+          "source": "question_value",
+          "type": "date",
+          "value": "2026-06-01"
+        },
+        {
+          "position": 2,
+          "name": "end_date_exclusive",
+          "source": "question_value",
+          "type": "date",
+          "value": "2026-09-01"
+        }
+      ],
+      "requested_result_limit": 20,
+      "retrieval_tags": [
+        "จำนวนรอบเช็กชื่อแยกตามประเภทรอบ ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+        "attendance",
+        "session",
+        "count",
+        "by"
+      ]
+    },
+    {
+      "id": "risk_current_count_by_school",
+      "question": "จำนวนนักเรียนเสี่ยง WATCH และ HIGH ปัจจุบันแยกตามโรงเรียน",
+      "sql": "SELECT school.id AS school_id, school.name AS school_name, COUNT(DISTINCT enrollment.person_uuid)::int AS at_risk_student_count, MAX(risk.profile_calculated_at) AS data_as_of FROM student_risk_profiles risk JOIN student_term enrollment ON enrollment.student_uuid = risk.student_uuid JOIN student_current_enrollment_resolution current_enrollment ON current_enrollment.person_uuid = enrollment.person_uuid AND current_enrollment.selected_student_uuid = enrollment.student_uuid AND current_enrollment.resolution_state = 'ACTIVE' JOIN schools school ON school.id = risk.school_id WHERE risk.risk_tier IN ('WATCH', 'HIGH') AND enrollment.deleted_at IS NULL GROUP BY school.id, school.name ORDER BY at_risk_student_count DESC, school.id ASC",
+      "category": "count_filter_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "student_enrollment",
+        "risk_case"
+      ],
+      "grain": "one row per school",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "data_as_of_column": "student_risk_profiles.profile_calculated_at",
+      "parameters": [],
+      "requested_result_limit": 100,
+      "retrieval_tags": [
+        "จำนวนนักเรียนเสี่ยง WATCH และ HIGH ปัจจุบันแยกตามโรงเรียน",
+        "risk",
+        "current",
+        "count",
+        "by"
+      ]
+    },
+    {
+      "id": "risk_current_count_by_grade_and_tier",
+      "question": "จำนวนนักเรียนเสี่ยงปัจจุบันแยกตามระดับชั้นและระดับความเสี่ยง",
+      "sql": "SELECT grade.id AS grade_level_id, grade.label AS grade_label, risk.risk_tier, COUNT(DISTINCT enrollment.person_uuid)::int AS student_count, MAX(risk.profile_calculated_at) AS data_as_of FROM student_risk_profiles risk JOIN student_term enrollment ON enrollment.student_uuid = risk.student_uuid JOIN student_current_enrollment_resolution current_enrollment ON current_enrollment.person_uuid = enrollment.person_uuid AND current_enrollment.selected_student_uuid = enrollment.student_uuid AND current_enrollment.resolution_state = 'ACTIVE' JOIN grade_levels grade ON grade.id = risk.grade_level_id WHERE enrollment.deleted_at IS NULL GROUP BY grade.id, grade.label, risk.risk_tier ORDER BY grade.id ASC, CASE risk.risk_tier WHEN 'HIGH' THEN 1 WHEN 'WATCH' THEN 2 ELSE 3 END",
+      "category": "count_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "student_enrollment",
+        "risk_case"
+      ],
+      "grain": "one row per grade level and risk tier",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "data_as_of_column": "student_risk_profiles.profile_calculated_at",
+      "parameters": [],
+      "requested_result_limit": 200,
+      "retrieval_tags": [
+        "จำนวนนักเรียนเสี่ยงปัจจุบันแยกตามระดับชั้นและระดับความเสี่ยง",
+        "risk",
+        "current",
+        "count",
+        "by"
+      ]
+    },
+    {
+      "id": "risk_current_average_score_by_school",
+      "question": "คะแนนความเสี่ยงเฉลี่ยของนักเรียนปัจจุบันแยกตามโรงเรียน",
+      "sql": "SELECT risk.school_id, COUNT(DISTINCT enrollment.person_uuid)::int AS profiled_student_count, ROUND(AVG(risk.risk_score), 2) AS average_risk_score, MAX(risk.profile_calculated_at) AS data_as_of FROM student_risk_profiles risk JOIN student_term enrollment ON enrollment.student_uuid = risk.student_uuid JOIN student_current_enrollment_resolution current_enrollment ON current_enrollment.person_uuid = enrollment.person_uuid AND current_enrollment.selected_student_uuid = enrollment.student_uuid AND current_enrollment.resolution_state = 'ACTIVE' WHERE enrollment.deleted_at IS NULL GROUP BY risk.school_id ORDER BY average_risk_score DESC, risk.school_id ASC",
+      "category": "average_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "student_enrollment",
+        "risk_case"
+      ],
+      "grain": "one row per school",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "data_as_of_column": "student_risk_profiles.profile_calculated_at",
+      "parameters": [],
+      "requested_result_limit": 100,
+      "retrieval_tags": [
+        "คะแนนความเสี่ยงเฉลี่ยของนักเรียนปัจจุบันแยกตามโรงเรียน",
+        "risk",
+        "current",
+        "average",
+        "score"
+      ]
+    },
+    {
+      "id": "risk_current_attendance_summary_by_tier",
+      "question": "สรุปอัตราการมาเรียนเฉลี่ยแยกตามระดับความเสี่ยงปัจจุบัน",
+      "sql": "SELECT risk.risk_tier, COUNT(DISTINCT enrollment.person_uuid)::int AS student_count, ROUND(AVG(risk.attendance_rate_percent), 1) AS average_attendance_rate_percent, ROUND(AVG(risk.consecutive_absent_days), 1) AS average_consecutive_absent_days, MAX(risk.profile_calculated_at) AS data_as_of FROM student_risk_profiles risk JOIN student_term enrollment ON enrollment.student_uuid = risk.student_uuid JOIN student_current_enrollment_resolution current_enrollment ON current_enrollment.person_uuid = enrollment.person_uuid AND current_enrollment.selected_student_uuid = enrollment.student_uuid AND current_enrollment.resolution_state = 'ACTIVE' WHERE enrollment.deleted_at IS NULL GROUP BY risk.risk_tier ORDER BY CASE risk.risk_tier WHEN 'HIGH' THEN 1 WHEN 'WATCH' THEN 2 ELSE 3 END",
+      "category": "summary_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "student_enrollment",
+        "risk_case"
+      ],
+      "grain": "one row per current risk tier",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "data_as_of_column": "student_risk_profiles.profile_calculated_at",
+      "parameters": [],
+      "requested_result_limit": 20,
+      "retrieval_tags": [
+        "สรุปอัตราการมาเรียนเฉลี่ยแยกตามระดับความเสี่ยงปัจจุบัน",
+        "risk",
+        "current",
+        "attendance",
+        "summary"
+      ]
+    },
+    {
+      "id": "risk_current_consecutive_absence_threshold_by_school",
+      "question": "จำนวนนักเรียนปัจจุบันที่ขาดเรียนต่อเนื่องอย่างน้อย 3 วันแยกตามโรงเรียน",
+      "sql": "SELECT risk.school_id, COUNT(DISTINCT enrollment.person_uuid)::int AS student_count, MAX(risk.profile_calculated_at) AS data_as_of FROM student_risk_profiles risk JOIN student_term enrollment ON enrollment.student_uuid = risk.student_uuid JOIN student_current_enrollment_resolution current_enrollment ON current_enrollment.person_uuid = enrollment.person_uuid AND current_enrollment.selected_student_uuid = enrollment.student_uuid AND current_enrollment.resolution_state = 'ACTIVE' WHERE risk.consecutive_absent_days >= $1 AND enrollment.deleted_at IS NULL GROUP BY risk.school_id ORDER BY student_count DESC, risk.school_id ASC",
+      "category": "count_filter_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "student_enrollment",
+        "risk_case"
+      ],
+      "grain": "one row per school",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "data_as_of_column": "student_risk_profiles.profile_calculated_at",
+      "parameters": [
+        {
+          "position": 1,
+          "name": "minimum_consecutive_absent_days",
+          "source": "question_value",
+          "type": "integer",
+          "value": 3
+        }
+      ],
+      "requested_result_limit": 100,
+      "retrieval_tags": [
+        "จำนวนนักเรียนปัจจุบันที่ขาดเรียนต่อเนื่องอย่างน้อย 3 วันแยกตามโรงเรียน",
+        "risk",
+        "current",
+        "consecutive",
+        "absence"
+      ]
+    },
+    {
+      "id": "risk_current_without_open_case_by_school",
+      "question": "จำนวนนักเรียนเสี่ยงปัจจุบันที่ยังไม่มีเคสเปิดแยกตามโรงเรียน",
+      "sql": "SELECT risk.school_id, COUNT(DISTINCT enrollment.person_uuid)::int AS student_count, MAX(risk.profile_calculated_at) AS data_as_of FROM student_risk_profiles risk JOIN student_term enrollment ON enrollment.student_uuid = risk.student_uuid JOIN student_current_enrollment_resolution current_enrollment ON current_enrollment.person_uuid = enrollment.person_uuid AND current_enrollment.selected_student_uuid = enrollment.student_uuid AND current_enrollment.resolution_state = 'ACTIVE' WHERE risk.risk_tier IN ('WATCH', 'HIGH') AND risk.open_case_count = 0 AND enrollment.deleted_at IS NULL GROUP BY risk.school_id ORDER BY student_count DESC, risk.school_id ASC",
+      "category": "count_filter_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "student_enrollment",
+        "risk_case"
+      ],
+      "grain": "one row per school",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "data_as_of_column": "student_risk_profiles.profile_calculated_at",
+      "parameters": [],
+      "requested_result_limit": 100,
+      "retrieval_tags": [
+        "จำนวนนักเรียนเสี่ยงปัจจุบันที่ยังไม่มีเคสเปิดแยกตามโรงเรียน",
+        "risk",
+        "current",
+        "without",
+        "open"
+      ]
+    },
+    {
+      "id": "risk_profile_freshness_by_school",
+      "question": "เวลาประมวลผลข้อมูลความเสี่ยงล่าสุดและเก่าสุดแยกตามโรงเรียน",
+      "sql": "SELECT risk.school_id, MIN(risk.profile_calculated_at) AS oldest_profile_calculated_at, MAX(risk.profile_calculated_at) AS newest_profile_calculated_at, COUNT(*)::int AS profile_count FROM student_risk_profiles risk GROUP BY risk.school_id ORDER BY newest_profile_calculated_at ASC, risk.school_id ASC",
+      "category": "freshness_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "risk_case"
+      ],
+      "grain": "one row per school",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "data_as_of_column": "student_risk_profiles.profile_calculated_at",
+      "parameters": [],
+      "requested_result_limit": 100,
+      "retrieval_tags": [
+        "เวลาประมวลผลข้อมูลความเสี่ยงล่าสุดและเก่าสุดแยกตามโรงเรียน",
+        "risk",
+        "profile",
+        "freshness",
+        "by"
+      ]
+    },
+    {
+      "id": "case_count_by_workflow_phase",
+      "question": "จำนวนเคสแยกตามระยะ workflow",
+      "sql": "SELECT case_row.workflow_phase_code, phase.label_th AS workflow_phase_label_th, COUNT(DISTINCT case_row.id)::int AS case_count FROM cases case_row JOIN case_workflow_phases phase ON phase.code = case_row.workflow_phase_code WHERE case_row.deleted_at IS NULL GROUP BY case_row.workflow_phase_code, phase.label_th, phase.sort_order ORDER BY phase.sort_order ASC",
+      "category": "count_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "risk_case"
+      ],
+      "grain": "one row per case workflow phase",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [],
+      "requested_result_limit": 20,
+      "retrieval_tags": [
+        "จำนวนเคสแยกตามระยะ workflow",
+        "case",
+        "count",
+        "by",
+        "workflow"
+      ]
+    },
+    {
+      "id": "case_resolved_count_by_completion_outcome",
+      "question": "จำนวนเคสที่เสร็จสิ้นแยกตามผลการจบเคส",
+      "sql": "SELECT case_row.completion_outcome_code, outcome.label_th AS completion_outcome_label_th, COUNT(DISTINCT case_row.id)::int AS case_count FROM cases case_row JOIN case_completion_outcomes outcome ON outcome.code = case_row.completion_outcome_code WHERE case_row.status = 'RESOLVED' AND case_row.deleted_at IS NULL GROUP BY case_row.completion_outcome_code, outcome.label_th, outcome.sort_order ORDER BY outcome.sort_order ASC",
+      "category": "count_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "risk_case"
+      ],
+      "grain": "one row per case completion outcome",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [],
+      "requested_result_limit": 20,
+      "retrieval_tags": [
+        "จำนวนเคสที่เสร็จสิ้นแยกตามผลการจบเคส",
+        "case",
+        "resolved",
+        "count",
+        "by"
+      ]
+    },
+    {
+      "id": "case_created_count_by_month",
+      "question": "จำนวนเคสที่สร้างรายเดือน ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+      "sql": "SELECT date_trunc('month', case_row.created_at AT TIME ZONE 'Asia/Bangkok')::date AS month_start, COUNT(DISTINCT case_row.id)::int AS case_count FROM cases case_row WHERE case_row.created_at >= $1::timestamptz AND case_row.created_at < $2::timestamptz AND case_row.deleted_at IS NULL GROUP BY month_start ORDER BY month_start ASC",
+      "category": "time_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "risk_case"
+      ],
+      "grain": "one row per Thai-local month",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [
+        {
+          "position": 1,
+          "name": "start_at",
+          "source": "question_value",
+          "type": "timestamptz",
+          "value": "2026-06-01T00:00:00+07:00"
+        },
+        {
+          "position": 2,
+          "name": "end_at_exclusive",
+          "source": "question_value",
+          "type": "timestamptz",
+          "value": "2026-09-01T00:00:00+07:00"
+        }
+      ],
+      "requested_result_limit": 100,
+      "retrieval_tags": [
+        "จำนวนเคสที่สร้างรายเดือน ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+        "case",
+        "created",
+        "count",
+        "by"
+      ]
+    },
+    {
+      "id": "case_open_count_by_school",
+      "question": "จำนวนเคสที่ยังไม่เสร็จสิ้นแยกตามโรงเรียน",
+      "sql": "SELECT case_row.school_id, COUNT(DISTINCT case_row.id)::int AS open_case_count FROM cases case_row WHERE case_row.status <> 'RESOLVED' AND case_row.deleted_at IS NULL GROUP BY case_row.school_id ORDER BY open_case_count DESC, case_row.school_id ASC",
+      "category": "count_filter_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "risk_case"
+      ],
+      "grain": "one row per school",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [],
+      "requested_result_limit": 100,
+      "retrieval_tags": [
+        "จำนวนเคสที่ยังไม่เสร็จสิ้นแยกตามโรงเรียน",
+        "case",
+        "open",
+        "count",
+        "by"
+      ]
+    },
+    {
+      "id": "case_review_count_by_action",
+      "question": "จำนวนการพิจารณาเคสแยกตามการดำเนินการ ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+      "sql": "SELECT review.review_action, action.label_th AS review_action_label_th, COUNT(DISTINCT review.id)::int AS review_count FROM case_reviews review JOIN case_review_actions action ON action.code = review.review_action WHERE review.reviewed_at >= $1::timestamptz AND review.reviewed_at < $2::timestamptz AND review.deleted_at IS NULL GROUP BY review.review_action, action.label_th, action.sort_order ORDER BY action.sort_order ASC",
+      "category": "count_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "risk_case"
+      ],
+      "grain": "one row per case review action",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [
+        {
+          "position": 1,
+          "name": "start_at",
+          "source": "question_value",
+          "type": "timestamptz",
+          "value": "2026-06-01T00:00:00+07:00"
+        },
+        {
+          "position": 2,
+          "name": "end_at_exclusive",
+          "source": "question_value",
+          "type": "timestamptz",
+          "value": "2026-09-01T00:00:00+07:00"
+        }
+      ],
+      "requested_result_limit": 20,
+      "retrieval_tags": [
+        "จำนวนการพิจารณาเคสแยกตามการดำเนินการ ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+        "case",
+        "review",
+        "count",
+        "by"
+      ]
+    },
+    {
+      "id": "case_referral_count_by_status",
+      "question": "จำนวนการส่งต่อหน่วยงานแยกตามสถานะ ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+      "sql": "SELECT referral.status_code, status.label_th AS referral_status_label_th, COUNT(DISTINCT referral.id)::int AS referral_count FROM case_referrals referral JOIN case_referral_statuses status ON status.code = referral.status_code WHERE referral.referred_at >= $1::timestamptz AND referral.referred_at < $2::timestamptz GROUP BY referral.status_code, status.label_th, status.sort_order ORDER BY status.sort_order ASC",
+      "category": "count_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "risk_case"
+      ],
+      "grain": "one row per case referral status",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [
+        {
+          "position": 1,
+          "name": "start_at",
+          "source": "question_value",
+          "type": "timestamptz",
+          "value": "2026-06-01T00:00:00+07:00"
+        },
+        {
+          "position": 2,
+          "name": "end_at_exclusive",
+          "source": "question_value",
+          "type": "timestamptz",
+          "value": "2026-09-01T00:00:00+07:00"
+        }
+      ],
+      "requested_result_limit": 20,
+      "retrieval_tags": [
+        "จำนวนการส่งต่อหน่วยงานแยกตามสถานะ ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+        "case",
+        "referral",
+        "count",
+        "by"
+      ]
+    },
+    {
+      "id": "case_without_review_count_by_school",
+      "question": "จำนวนเคสที่ยังไม่มีประวัติการพิจารณาแยกตามโรงเรียน",
+      "sql": "SELECT case_row.school_id, COUNT(DISTINCT case_row.id)::int AS case_count FROM cases case_row WHERE case_row.deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM case_reviews review WHERE review.case_id = case_row.id AND review.deleted_at IS NULL) GROUP BY case_row.school_id ORDER BY case_count DESC, case_row.school_id ASC",
+      "category": "not_exists_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "risk_case"
+      ],
+      "grain": "one row per school",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [],
+      "requested_result_limit": 100,
+      "retrieval_tags": [
+        "จำนวนเคสที่ยังไม่มีประวัติการพิจารณาแยกตามโรงเรียน",
+        "case",
+        "without",
+        "review",
+        "count"
+      ]
+    },
+    {
+      "id": "task_count_by_workflow_status",
+      "question": "จำนวนงานแยกตามสถานะ workflow",
+      "sql": "SELECT task.status AS task_status, status.label_th AS task_status_label_th, COUNT(DISTINCT task.id)::int AS task_count FROM tasks task JOIN task_workflow_statuses status ON status.code = task.status WHERE task.deleted_at IS NULL GROUP BY task.status, status.label_th, status.sort_order ORDER BY status.sort_order ASC",
+      "category": "count_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "task_assistance"
+      ],
+      "grain": "one row per task workflow status",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [],
+      "requested_result_limit": 20,
+      "retrieval_tags": [
+        "จำนวนงานแยกตามสถานะ workflow",
+        "task",
+        "count",
+        "by",
+        "workflow"
+      ]
+    },
+    {
+      "id": "task_count_by_type",
+      "question": "จำนวนงานแยกตามประเภท",
+      "sql": "SELECT task.task_type, type.label_th AS task_type_label_th, COUNT(DISTINCT task.id)::int AS task_count FROM tasks task JOIN task_types type ON type.code = task.task_type WHERE task.deleted_at IS NULL GROUP BY task.task_type, type.label_th, type.sort_order ORDER BY type.sort_order ASC",
+      "category": "count_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "task_assistance"
+      ],
+      "grain": "one row per task type",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [],
+      "requested_result_limit": 20,
+      "retrieval_tags": [
+        "จำนวนงานแยกตามประเภท",
+        "task",
+        "count",
+        "by",
+        "type"
+      ]
+    },
+    {
+      "id": "task_count_by_type_and_status",
+      "question": "จำนวนงานแยกตามประเภทและสถานะ",
+      "sql": "SELECT task.task_type, task.status AS task_status, COUNT(DISTINCT task.id)::int AS task_count FROM tasks task WHERE task.deleted_at IS NULL GROUP BY task.task_type, task.status ORDER BY task.task_type ASC, task.status ASC",
+      "category": "count_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "task_assistance"
+      ],
+      "grain": "one row per task type and workflow status",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [],
+      "requested_result_limit": 100,
+      "retrieval_tags": [
+        "จำนวนงานแยกตามประเภทและสถานะ",
+        "task",
+        "count",
+        "by",
+        "type"
+      ]
+    },
+    {
+      "id": "task_completion_ratio_by_type",
+      "question": "อัตรางานเสร็จสิ้นแยกตามประเภท",
+      "sql": "SELECT task.task_type, COUNT(DISTINCT task.id)::int AS task_count, COUNT(DISTINCT task.id) FILTER (WHERE task.status = 'COMPLETED')::int AS completed_task_count, ROUND(100.0 * COUNT(DISTINCT task.id) FILTER (WHERE task.status = 'COMPLETED') / NULLIF(COUNT(DISTINCT task.id), 0), 1) AS completion_rate_percent FROM tasks task WHERE task.deleted_at IS NULL GROUP BY task.task_type ORDER BY completion_rate_percent DESC NULLS LAST, task.task_type ASC",
+      "category": "ratio_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "task_assistance"
+      ],
+      "grain": "one row per task type",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [],
+      "requested_result_limit": 20,
+      "retrieval_tags": [
+        "อัตรางานเสร็จสิ้นแยกตามประเภท",
+        "task",
+        "completion",
+        "ratio",
+        "by"
+      ]
+    },
+    {
+      "id": "task_count_by_target_school",
+      "question": "จำนวนงานแยกตามโรงเรียนเป้าหมาย",
+      "sql": "SELECT school.id AS school_id, school.name AS school_name, COUNT(DISTINCT task.id)::int AS task_count FROM tasks task JOIN schools school ON school.id = task.target_school_id WHERE task.deleted_at IS NULL GROUP BY school.id, school.name ORDER BY task_count DESC, school.id ASC",
+      "category": "count_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "task_assistance"
+      ],
+      "grain": "one row per target school",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [],
+      "requested_result_limit": 100,
+      "retrieval_tags": [
+        "จำนวนงานแยกตามโรงเรียนเป้าหมาย",
+        "task",
+        "count",
+        "by",
+        "target"
+      ]
+    },
+    {
+      "id": "case_count_with_multiple_tasks_by_school",
+      "question": "จำนวนเคสที่มีงานมากกว่า 2 งานแยกตามโรงเรียน",
+      "sql": "WITH task_counts AS (SELECT case_row.school_id, case_row.id AS case_id, COUNT(DISTINCT task.id)::int AS task_count FROM cases case_row JOIN tasks task ON task.case_id = case_row.id AND task.deleted_at IS NULL WHERE case_row.deleted_at IS NULL GROUP BY case_row.school_id, case_row.id HAVING COUNT(DISTINCT task.id) > $1) SELECT school_id, COUNT(*)::int AS case_count FROM task_counts GROUP BY school_id ORDER BY case_count DESC, school_id ASC",
+      "category": "having_subquery",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "risk_case",
+        "task_assistance"
+      ],
+      "grain": "one row per school",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [
+        {
+          "position": 1,
+          "name": "minimum_task_count",
+          "source": "question_value",
+          "type": "integer",
+          "value": 2
+        }
+      ],
+      "requested_result_limit": 100,
+      "retrieval_tags": [
+        "จำนวนเคสที่มีงานมากกว่า 2 งานแยกตามโรงเรียน",
+        "case",
+        "count",
+        "with",
+        "multiple"
+      ]
+    },
+    {
+      "id": "assistance_measure_usage_count",
+      "question": "จำนวนการเลือกมาตรการช่วยเหลือแต่ละประเภท",
+      "sql": "SELECT measure.assistance_measure_code, option.label_th AS assistance_measure_label_th, COUNT(DISTINCT measure.task_id)::int AS task_count FROM task_assistance_measures measure JOIN assistance_measure_options option ON option.code = measure.assistance_measure_code JOIN tasks task ON task.id = measure.task_id WHERE task.deleted_at IS NULL GROUP BY measure.assistance_measure_code, option.label_th, option.sort_order ORDER BY task_count DESC, option.sort_order ASC",
+      "category": "count_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "task_assistance"
+      ],
+      "grain": "one row per assistance measure",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [],
+      "requested_result_limit": 50,
+      "retrieval_tags": [
+        "จำนวนการเลือกมาตรการช่วยเหลือแต่ละประเภท",
+        "assistance",
+        "measure",
+        "usage",
+        "count"
+      ]
+    },
+    {
+      "id": "assistance_measure_count_summary_by_school",
+      "question": "สรุปจำนวนมาตรการช่วยเหลือเฉลี่ยต่องานแยกตามโรงเรียน",
+      "sql": "WITH task_measure_counts AS (SELECT task.target_school_id AS school_id, task.id AS task_id, COUNT(measure.assistance_measure_code)::int AS measure_count FROM tasks task LEFT JOIN task_assistance_measures measure ON measure.task_id = task.id WHERE task.task_type = 'ASSIST' AND task.deleted_at IS NULL GROUP BY task.target_school_id, task.id) SELECT school_id, COUNT(*)::int AS assist_task_count, ROUND(AVG(measure_count), 1) AS average_measure_count, MAX(measure_count)::int AS maximum_measure_count FROM task_measure_counts GROUP BY school_id ORDER BY average_measure_count DESC NULLS LAST, school_id ASC",
+      "category": "summary_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "task_assistance"
+      ],
+      "grain": "one row per target school",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [],
+      "requested_result_limit": 100,
+      "retrieval_tags": [
+        "สรุปจำนวนมาตรการช่วยเหลือเฉลี่ยต่องานแยกตามโรงเรียน",
+        "assistance",
+        "measure",
+        "count",
+        "summary"
+      ]
+    },
+    {
+      "id": "task_submission_count_by_execution_outcome",
+      "question": "จำนวนผลการลงพื้นที่แยกตามผลสำเร็จ",
+      "sql": "SELECT submission.task_execution_outcome_code, outcome.label_th AS execution_outcome_label_th, COUNT(DISTINCT submission.id)::int AS submission_count FROM task_submissions submission JOIN task_execution_outcome_options outcome ON outcome.code = submission.task_execution_outcome_code WHERE submission.deleted_at IS NULL GROUP BY submission.task_execution_outcome_code, outcome.label_th, outcome.sort_order ORDER BY outcome.sort_order ASC",
+      "category": "count_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "task_assistance"
+      ],
+      "grain": "one row per task execution outcome",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [],
+      "requested_result_limit": 20,
+      "retrieval_tags": [
+        "จำนวนผลการลงพื้นที่แยกตามผลสำเร็จ",
+        "task",
+        "submission",
+        "count",
+        "by"
+      ]
+    },
+    {
+      "id": "task_submission_count_by_non_followup_reason",
+      "question": "จำนวนครั้งที่ติดตามไม่สำเร็จแยกตามเหตุผล",
+      "sql": "SELECT submission.non_follow_up_reason_code, reason.label_th AS non_follow_up_reason_label_th, COUNT(DISTINCT submission.id)::int AS submission_count FROM task_submissions submission JOIN non_follow_up_reason_options reason ON reason.code = submission.non_follow_up_reason_code WHERE submission.deleted_at IS NULL GROUP BY submission.non_follow_up_reason_code, reason.label_th, reason.sort_order ORDER BY submission_count DESC, reason.sort_order ASC",
+      "category": "count_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "task_assistance"
+      ],
+      "grain": "one row per non-follow-up reason",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [],
+      "requested_result_limit": 50,
+      "retrieval_tags": [
+        "จำนวนครั้งที่ติดตามไม่สำเร็จแยกตามเหตุผล",
+        "task",
+        "submission",
+        "count",
+        "by"
+      ]
+    },
+    {
+      "id": "task_submission_count_by_month",
+      "question": "จำนวนการส่งผลปฏิบัติงานรายเดือน ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+      "sql": "SELECT date_trunc('month', submission.submitted_at AT TIME ZONE 'Asia/Bangkok')::date AS month_start, COUNT(DISTINCT submission.id)::int AS submission_count FROM task_submissions submission WHERE submission.submitted_at >= $1::timestamptz AND submission.submitted_at < $2::timestamptz AND submission.deleted_at IS NULL GROUP BY month_start ORDER BY month_start ASC",
+      "category": "time_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "task_assistance"
+      ],
+      "grain": "one row per Thai-local month",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [
+        {
+          "position": 1,
+          "name": "start_at",
+          "source": "question_value",
+          "type": "timestamptz",
+          "value": "2026-06-01T00:00:00+07:00"
+        },
+        {
+          "position": 2,
+          "name": "end_at_exclusive",
+          "source": "question_value",
+          "type": "timestamptz",
+          "value": "2026-09-01T00:00:00+07:00"
+        }
+      ],
+      "requested_result_limit": 100,
+      "retrieval_tags": [
+        "จำนวนการส่งผลปฏิบัติงานรายเดือน ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+        "task",
+        "submission",
+        "count",
+        "by"
+      ]
+    },
+    {
+      "id": "case_without_completed_task_count_by_school",
+      "question": "จำนวนเคสที่ยังไม่มีงานเสร็จสิ้นแยกตามโรงเรียน",
+      "sql": "SELECT case_row.school_id, COUNT(DISTINCT case_row.id)::int AS case_count FROM cases case_row WHERE case_row.deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM tasks task WHERE task.case_id = case_row.id AND task.status = 'COMPLETED' AND task.deleted_at IS NULL) GROUP BY case_row.school_id ORDER BY case_count DESC, case_row.school_id ASC",
+      "category": "not_exists_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "risk_case",
+        "task_assistance"
+      ],
+      "grain": "one row per school",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [],
+      "requested_result_limit": 100,
+      "retrieval_tags": [
+        "จำนวนเคสที่ยังไม่มีงานเสร็จสิ้นแยกตามโรงเรียน",
+        "case",
+        "without",
+        "completed",
+        "task"
+      ]
+    },
+    {
+      "id": "task_created_count_by_week",
+      "question": "จำนวนงานที่สร้างรายสัปดาห์ ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+      "sql": "SELECT date_trunc('week', task.created_at AT TIME ZONE 'Asia/Bangkok')::date AS week_start, COUNT(DISTINCT task.id)::int AS task_count FROM tasks task WHERE task.created_at >= $1::timestamptz AND task.created_at < $2::timestamptz AND task.deleted_at IS NULL GROUP BY week_start ORDER BY week_start ASC",
+      "category": "time_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "task_assistance"
+      ],
+      "grain": "one row per Thai-local week",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [
+        {
+          "position": 1,
+          "name": "start_at",
+          "source": "question_value",
+          "type": "timestamptz",
+          "value": "2026-06-01T00:00:00+07:00"
+        },
+        {
+          "position": 2,
+          "name": "end_at_exclusive",
+          "source": "question_value",
+          "type": "timestamptz",
+          "value": "2026-09-01T00:00:00+07:00"
+        }
+      ],
+      "requested_result_limit": 100,
+      "retrieval_tags": [
+        "จำนวนงานที่สร้างรายสัปดาห์ ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+        "task",
+        "created",
+        "count",
+        "by"
+      ]
+    },
+    {
+      "id": "active_teacher_count_by_school",
+      "question": "จำนวนครูที่ปฏิบัติงานอยู่แยกตามโรงเรียน",
+      "sql": "SELECT membership.school_id, COUNT(DISTINCT membership.teacher_id)::int AS teacher_count FROM school_teacher_memberships membership JOIN teachers teacher ON teacher.id = membership.teacher_id JOIN schools school ON school.id = membership.school_id WHERE membership.membership_status = 'ACTIVE' AND membership.deleted_at IS NULL AND teacher.teacher_status = 'ACTIVE' AND teacher.deleted_at IS NULL AND school.school_status = 'ACTIVE' GROUP BY membership.school_id ORDER BY teacher_count DESC, membership.school_id ASC",
+      "category": "count_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "teacher_subject"
+      ],
+      "grain": "one row per school",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [],
+      "requested_result_limit": 100,
+      "retrieval_tags": [
+        "จำนวนครูที่ปฏิบัติงานอยู่แยกตามโรงเรียน",
+        "active",
+        "teacher",
+        "count",
+        "by"
+      ]
+    },
+    {
+      "id": "active_subject_count_by_school",
+      "question": "จำนวนวิชาที่โรงเรียนเปิดใช้งานแยกตามโรงเรียน",
+      "sql": "SELECT school_subject.school_id, COUNT(DISTINCT school_subject.subject_id)::int AS subject_count FROM school_subjects school_subject JOIN subjects subject ON subject.id = school_subject.subject_id WHERE school_subject.subject_status = 'ACTIVE' AND school_subject.deleted_at IS NULL AND subject.is_active IS TRUE AND subject.deleted_at IS NULL GROUP BY school_subject.school_id ORDER BY subject_count DESC, school_subject.school_id ASC",
+      "category": "count_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "teacher_subject"
+      ],
+      "grain": "one row per school",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [],
+      "requested_result_limit": 100,
+      "retrieval_tags": [
+        "จำนวนวิชาที่โรงเรียนเปิดใช้งานแยกตามโรงเรียน",
+        "active",
+        "subject",
+        "count",
+        "by"
+      ]
+    },
+    {
+      "id": "active_classroom_subject_count_by_school",
+      "question": "จำนวนวิชาที่เปิดสอนในห้องเรียนแยกตามโรงเรียนปัจจุบัน",
+      "sql": "SELECT classroom_subject.school_id, COUNT(DISTINCT classroom_subject.id)::int AS classroom_subject_count FROM classroom_subjects classroom_subject JOIN school_classrooms classroom ON classroom.id = classroom_subject.classroom_id AND classroom.school_id = classroom_subject.school_id JOIN school_terms school_term ON school_term.id = classroom.school_term_id WHERE classroom_subject.offering_status = 'ACTIVE' AND classroom_subject.deleted_at IS NULL AND classroom.classroom_status = 'ACTIVE' AND classroom.deleted_at IS NULL AND school_term.status = 'ACTIVE' AND school_term.deleted_at IS NULL GROUP BY classroom_subject.school_id ORDER BY classroom_subject_count DESC, classroom_subject.school_id ASC",
+      "category": "count_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "teacher_subject"
+      ],
+      "grain": "one row per school",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [],
+      "requested_result_limit": 100,
+      "retrieval_tags": [
+        "จำนวนวิชาที่เปิดสอนในห้องเรียนแยกตามโรงเรียนปัจจุบัน",
+        "active",
+        "classroom",
+        "subject",
+        "count"
+      ]
+    },
+    {
+      "id": "active_teacher_count_by_subject",
+      "question": "จำนวนครูผู้สอนแยกตามวิชาปัจจุบัน",
+      "sql": "SELECT subject.id AS subject_id, subject.code AS subject_code, subject.name_th AS subject_name_th, COUNT(DISTINCT membership.teacher_id)::int AS teacher_count FROM classroom_subject_teachers assignment JOIN school_teacher_memberships membership ON membership.id = assignment.teacher_membership_id AND membership.school_id = assignment.school_id JOIN teachers teacher ON teacher.id = membership.teacher_id JOIN classroom_subjects classroom_subject ON classroom_subject.id = assignment.classroom_subject_id AND classroom_subject.classroom_id = assignment.classroom_id AND classroom_subject.school_id = assignment.school_id JOIN school_classrooms classroom ON classroom.id = classroom_subject.classroom_id JOIN school_terms school_term ON school_term.id = classroom.school_term_id JOIN school_subjects school_subject ON school_subject.id = classroom_subject.school_subject_id JOIN subjects subject ON subject.id = school_subject.subject_id WHERE assignment.assignment_status = 'ACTIVE' AND assignment.deleted_at IS NULL AND membership.membership_status = 'ACTIVE' AND membership.deleted_at IS NULL AND teacher.teacher_status = 'ACTIVE' AND teacher.deleted_at IS NULL AND classroom_subject.offering_status = 'ACTIVE' AND classroom_subject.deleted_at IS NULL AND classroom.classroom_status = 'ACTIVE' AND classroom.deleted_at IS NULL AND school_term.status = 'ACTIVE' AND school_term.deleted_at IS NULL AND school_subject.subject_status = 'ACTIVE' AND school_subject.deleted_at IS NULL AND subject.is_active IS TRUE AND subject.deleted_at IS NULL GROUP BY subject.id, subject.code, subject.name_th ORDER BY teacher_count DESC, subject.id ASC",
+      "category": "multi_join_aggregation",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "teacher_subject"
+      ],
+      "grain": "one row per subject",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [],
+      "requested_result_limit": 200,
+      "retrieval_tags": [
+        "จำนวนครูผู้สอนแยกตามวิชาปัจจุบัน",
+        "active",
+        "teacher",
+        "count",
+        "by"
+      ]
+    },
+    {
+      "id": "active_classroom_count_by_subject",
+      "question": "จำนวนห้องเรียนที่เปิดสอนแยกตามวิชาปัจจุบัน",
+      "sql": "SELECT subject.id AS subject_id, subject.code AS subject_code, subject.name_th AS subject_name_th, COUNT(DISTINCT classroom_subject.classroom_id)::int AS classroom_count FROM classroom_subjects classroom_subject JOIN school_classrooms classroom ON classroom.id = classroom_subject.classroom_id AND classroom.school_id = classroom_subject.school_id JOIN school_terms school_term ON school_term.id = classroom.school_term_id JOIN school_subjects school_subject ON school_subject.id = classroom_subject.school_subject_id AND school_subject.school_id = classroom_subject.school_id JOIN subjects subject ON subject.id = school_subject.subject_id WHERE classroom_subject.offering_status = 'ACTIVE' AND classroom_subject.deleted_at IS NULL AND classroom.classroom_status = 'ACTIVE' AND classroom.deleted_at IS NULL AND school_term.status = 'ACTIVE' AND school_term.deleted_at IS NULL AND school_subject.subject_status = 'ACTIVE' AND school_subject.deleted_at IS NULL AND subject.is_active IS TRUE AND subject.deleted_at IS NULL GROUP BY subject.id, subject.code, subject.name_th ORDER BY classroom_count DESC, subject.id ASC",
+      "category": "multi_join_aggregation",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "teacher_subject"
+      ],
+      "grain": "one row per subject",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [],
+      "requested_result_limit": 200,
+      "retrieval_tags": [
+        "จำนวนห้องเรียนที่เปิดสอนแยกตามวิชาปัจจุบัน",
+        "active",
+        "classroom",
+        "count",
+        "by"
+      ]
+    },
+    {
+      "id": "active_classroom_subjects_without_teacher_by_school",
+      "question": "จำนวนวิชาในห้องเรียนที่ยังไม่มีครูผู้สอนแยกตามโรงเรียนปัจจุบัน",
+      "sql": "SELECT classroom_subject.school_id, COUNT(DISTINCT classroom_subject.id)::int AS unassigned_classroom_subject_count FROM classroom_subjects classroom_subject JOIN school_classrooms classroom ON classroom.id = classroom_subject.classroom_id AND classroom.school_id = classroom_subject.school_id JOIN school_terms school_term ON school_term.id = classroom.school_term_id WHERE classroom_subject.offering_status = 'ACTIVE' AND classroom_subject.deleted_at IS NULL AND classroom.classroom_status = 'ACTIVE' AND classroom.deleted_at IS NULL AND school_term.status = 'ACTIVE' AND school_term.deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM classroom_subject_teachers assignment WHERE assignment.classroom_subject_id = classroom_subject.id AND assignment.assignment_status = 'ACTIVE' AND assignment.deleted_at IS NULL) GROUP BY classroom_subject.school_id ORDER BY unassigned_classroom_subject_count DESC, classroom_subject.school_id ASC",
+      "category": "not_exists_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "teacher_subject"
+      ],
+      "grain": "one row per school",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [],
+      "requested_result_limit": 100,
+      "retrieval_tags": [
+        "จำนวนวิชาในห้องเรียนที่ยังไม่มีครูผู้สอนแยกตามโรงเรียนปัจจุบัน",
+        "active",
+        "classroom",
+        "subjects",
+        "without"
+      ]
+    },
+    {
+      "id": "active_classrooms_without_subject_teacher_by_school",
+      "question": "จำนวนห้องเรียนที่ยังไม่มีการมอบหมายครูประจำวิชาแยกตามโรงเรียนปัจจุบัน",
+      "sql": "SELECT classroom.school_id, COUNT(DISTINCT classroom.id)::int AS classroom_count FROM school_classrooms classroom JOIN school_terms school_term ON school_term.id = classroom.school_term_id WHERE classroom.classroom_status = 'ACTIVE' AND classroom.deleted_at IS NULL AND school_term.status = 'ACTIVE' AND school_term.deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM classroom_subject_teachers assignment WHERE assignment.classroom_id = classroom.id AND assignment.assignment_status = 'ACTIVE' AND assignment.deleted_at IS NULL) GROUP BY classroom.school_id ORDER BY classroom_count DESC, classroom.school_id ASC",
+      "category": "not_exists_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "teacher_subject"
+      ],
+      "grain": "one row per school",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [],
+      "requested_result_limit": 100,
+      "retrieval_tags": [
+        "จำนวนห้องเรียนที่ยังไม่มีการมอบหมายครูประจำวิชาแยกตามโรงเรียนปัจจุบัน",
+        "active",
+        "classrooms",
+        "without",
+        "subject"
+      ]
+    },
+    {
+      "id": "active_average_subjects_per_teacher_by_school",
+      "question": "จำนวนวิชาเฉลี่ยต่อครูผู้สอนแยกตามโรงเรียนปัจจุบัน",
+      "sql": "WITH teacher_loads AS (SELECT assignment.school_id, membership.teacher_id, COUNT(DISTINCT school_subject.subject_id)::int AS subject_count FROM classroom_subject_teachers assignment JOIN school_teacher_memberships membership ON membership.id = assignment.teacher_membership_id AND membership.school_id = assignment.school_id JOIN teachers teacher ON teacher.id = membership.teacher_id JOIN classroom_subjects classroom_subject ON classroom_subject.id = assignment.classroom_subject_id AND classroom_subject.classroom_id = assignment.classroom_id AND classroom_subject.school_id = assignment.school_id JOIN school_classrooms classroom ON classroom.id = classroom_subject.classroom_id JOIN school_terms school_term ON school_term.id = classroom.school_term_id JOIN school_subjects school_subject ON school_subject.id = classroom_subject.school_subject_id JOIN subjects subject ON subject.id = school_subject.subject_id WHERE assignment.assignment_status = 'ACTIVE' AND assignment.deleted_at IS NULL AND membership.membership_status = 'ACTIVE' AND membership.deleted_at IS NULL AND teacher.teacher_status = 'ACTIVE' AND teacher.deleted_at IS NULL AND classroom_subject.offering_status = 'ACTIVE' AND classroom_subject.deleted_at IS NULL AND classroom.classroom_status = 'ACTIVE' AND classroom.deleted_at IS NULL AND school_term.status = 'ACTIVE' AND school_term.deleted_at IS NULL AND school_subject.subject_status = 'ACTIVE' AND school_subject.deleted_at IS NULL AND subject.is_active IS TRUE AND subject.deleted_at IS NULL GROUP BY assignment.school_id, membership.teacher_id) SELECT school_id, COUNT(*)::int AS teacher_count, ROUND(AVG(subject_count), 1) AS average_subject_count, MAX(subject_count)::int AS maximum_subject_count FROM teacher_loads GROUP BY school_id ORDER BY average_subject_count DESC, school_id ASC",
+      "category": "summary_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "teacher_subject"
+      ],
+      "grain": "one row per school",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [],
+      "requested_result_limit": 100,
+      "retrieval_tags": [
+        "จำนวนวิชาเฉลี่ยต่อครูผู้สอนแยกตามโรงเรียนปัจจุบัน",
+        "active",
+        "average",
+        "subjects",
+        "per"
+      ]
+    },
+    {
+      "id": "active_cotaught_offering_count_by_school",
+      "question": "จำนวนวิชาในห้องเรียนที่มีครูร่วมสอนมากกว่า 1 คนแยกตามโรงเรียนปัจจุบัน",
+      "sql": "WITH cotaught_offerings AS (SELECT assignment.school_id, assignment.classroom_subject_id, COUNT(DISTINCT membership.teacher_id)::int AS teacher_count FROM classroom_subject_teachers assignment JOIN school_teacher_memberships membership ON membership.id = assignment.teacher_membership_id AND membership.school_id = assignment.school_id JOIN teachers teacher ON teacher.id = membership.teacher_id JOIN classroom_subjects classroom_subject ON classroom_subject.id = assignment.classroom_subject_id AND classroom_subject.offering_status = 'ACTIVE' AND classroom_subject.deleted_at IS NULL JOIN school_classrooms classroom ON classroom.id = classroom_subject.classroom_id AND classroom.deleted_at IS NULL AND classroom.classroom_status = 'ACTIVE' JOIN school_terms school_term ON school_term.id = classroom.school_term_id AND school_term.status = 'ACTIVE' AND school_term.deleted_at IS NULL WHERE assignment.assignment_status = 'ACTIVE' AND assignment.deleted_at IS NULL AND membership.membership_status = 'ACTIVE' AND membership.deleted_at IS NULL AND teacher.teacher_status = 'ACTIVE' AND teacher.deleted_at IS NULL GROUP BY assignment.school_id, assignment.classroom_subject_id HAVING COUNT(DISTINCT membership.teacher_id) > 1) SELECT school_id, COUNT(*)::int AS cotaught_offering_count FROM cotaught_offerings GROUP BY school_id ORDER BY cotaught_offering_count DESC, school_id ASC",
+      "category": "having_subquery",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "teacher_subject"
+      ],
+      "grain": "one row per school",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [],
+      "requested_result_limit": 100,
+      "retrieval_tags": [
+        "จำนวนวิชาในห้องเรียนที่มีครูร่วมสอนมากกว่า 1 คนแยกตามโรงเรียนปัจจุบัน",
+        "active",
+        "cotaught",
+        "offering",
+        "count"
+      ]
+    },
+    {
+      "id": "teacher_comment_count_by_concern_level",
+      "question": "จำนวนความเห็นครูแยกตามระดับความกังวล ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+      "sql": "SELECT comment.concern_level_code, level.label_th AS concern_level_label_th, COUNT(*)::int AS comment_count FROM classroom_student_comments comment JOIN classroom_student_comment_concern_levels level ON level.code = comment.concern_level_code WHERE comment.created_at >= $1::timestamptz AND comment.created_at < $2::timestamptz GROUP BY comment.concern_level_code, level.label_th, level.sort_order ORDER BY level.sort_order ASC",
+      "category": "count_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "teacher_comment_analytics"
+      ],
+      "grain": "one row per concern level",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [
+        {
+          "position": 1,
+          "name": "start_at",
+          "source": "question_value",
+          "type": "timestamptz",
+          "value": "2026-06-01T00:00:00+07:00"
+        },
+        {
+          "position": 2,
+          "name": "end_at_exclusive",
+          "source": "question_value",
+          "type": "timestamptz",
+          "value": "2026-09-01T00:00:00+07:00"
+        }
+      ],
+      "requested_result_limit": 20,
+      "retrieval_tags": [
+        "จำนวนความเห็นครูแยกตามระดับความกังวล ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+        "teacher",
+        "comment",
+        "count",
+        "by"
+      ]
+    },
+    {
+      "id": "teacher_comment_count_by_category",
+      "question": "จำนวนความเห็นครูแยกตามหมวดปัญหา ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+      "sql": "SELECT comment.problem_category_code, category.label_th AS problem_category_label_th, COUNT(*)::int AS comment_count FROM classroom_student_comments comment JOIN classroom_student_problem_categories category ON category.code = comment.problem_category_code WHERE comment.created_at >= $1::timestamptz AND comment.created_at < $2::timestamptz GROUP BY comment.problem_category_code, category.label_th, category.sort_order ORDER BY comment_count DESC, category.sort_order ASC",
+      "category": "count_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "teacher_comment_analytics"
+      ],
+      "grain": "one row per problem category",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [
+        {
+          "position": 1,
+          "name": "start_at",
+          "source": "question_value",
+          "type": "timestamptz",
+          "value": "2026-06-01T00:00:00+07:00"
+        },
+        {
+          "position": 2,
+          "name": "end_at_exclusive",
+          "source": "question_value",
+          "type": "timestamptz",
+          "value": "2026-09-01T00:00:00+07:00"
+        }
+      ],
+      "requested_result_limit": 50,
+      "retrieval_tags": [
+        "จำนวนความเห็นครูแยกตามหมวดปัญหา ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+        "teacher",
+        "comment",
+        "count",
+        "by"
+      ]
+    },
+    {
+      "id": "teacher_comment_monthly_count_by_concern_level",
+      "question": "แนวโน้มความเห็นครูรายเดือนแยกตามระดับความกังวล ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+      "sql": "SELECT date_trunc('month', comment.created_at AT TIME ZONE 'Asia/Bangkok')::date AS month_start, comment.concern_level_code, COUNT(*)::int AS comment_count FROM classroom_student_comments comment WHERE comment.created_at >= $1::timestamptz AND comment.created_at < $2::timestamptz GROUP BY month_start, comment.concern_level_code ORDER BY month_start ASC, comment.concern_level_code ASC",
+      "category": "time_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "teacher_comment_analytics"
+      ],
+      "grain": "one row per Thai-local month and concern level",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [
+        {
+          "position": 1,
+          "name": "start_at",
+          "source": "question_value",
+          "type": "timestamptz",
+          "value": "2026-06-01T00:00:00+07:00"
+        },
+        {
+          "position": 2,
+          "name": "end_at_exclusive",
+          "source": "question_value",
+          "type": "timestamptz",
+          "value": "2026-09-01T00:00:00+07:00"
+        }
+      ],
+      "requested_result_limit": 100,
+      "retrieval_tags": [
+        "แนวโน้มความเห็นครูรายเดือนแยกตามระดับความกังวล ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+        "teacher",
+        "comment",
+        "monthly",
+        "count"
+      ]
+    },
+    {
+      "id": "teacher_concern_comment_count_by_school",
+      "question": "จำนวนความเห็นครูระดับ CONCERN แยกตามโรงเรียน ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+      "sql": "SELECT classroom.school_id, COUNT(*)::int AS concern_comment_count FROM classroom_student_comments comment JOIN school_classrooms classroom ON classroom.id = comment.classroom_id WHERE comment.concern_level_code = 'CONCERN' AND comment.created_at >= $1::timestamptz AND comment.created_at < $2::timestamptz GROUP BY classroom.school_id ORDER BY concern_comment_count DESC, classroom.school_id ASC",
+      "category": "count_filter_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "teacher_comment_analytics"
+      ],
+      "grain": "one row per school",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [
+        {
+          "position": 1,
+          "name": "start_at",
+          "source": "question_value",
+          "type": "timestamptz",
+          "value": "2026-06-01T00:00:00+07:00"
+        },
+        {
+          "position": 2,
+          "name": "end_at_exclusive",
+          "source": "question_value",
+          "type": "timestamptz",
+          "value": "2026-09-01T00:00:00+07:00"
+        }
+      ],
+      "requested_result_limit": 100,
+      "retrieval_tags": [
+        "จำนวนความเห็นครูระดับ CONCERN แยกตามโรงเรียน ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+        "teacher",
+        "concern",
+        "comment",
+        "count"
+      ]
+    },
+    {
+      "id": "teacher_watch_or_concern_student_count_by_category",
+      "question": "จำนวนนักเรียนไม่ซ้ำที่มีความเห็นครูระดับ WATCH หรือ CONCERN แยกตามหมวดปัญหา",
+      "sql": "SELECT comment.problem_category_code, category.label_th AS problem_category_label_th, COUNT(DISTINCT comment.person_uuid)::int AS student_count FROM classroom_student_comments comment JOIN classroom_student_problem_categories category ON category.code = comment.problem_category_code WHERE comment.concern_level_code IN ('WATCH', 'CONCERN') GROUP BY comment.problem_category_code, category.label_th, category.sort_order ORDER BY student_count DESC, category.sort_order ASC",
+      "category": "count_distinct_groupby",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "teacher_comment_analytics"
+      ],
+      "grain": "one row per problem category",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [],
+      "requested_result_limit": 50,
+      "retrieval_tags": [
+        "จำนวนนักเรียนไม่ซ้ำที่มีความเห็นครูระดับ WATCH หรือ CONCERN แยกตามหมวดปัญหา",
+        "teacher",
+        "watch",
+        "or",
+        "concern"
+      ]
+    },
+    {
+      "id": "teacher_concern_classrooms_above_threshold",
+      "question": "ห้องเรียนที่มีความเห็นครูระดับ CONCERN มากกว่า 5 รายการ ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+      "sql": "SELECT classroom.school_id, classroom.id AS classroom_id, classroom.room_name, COUNT(*)::int AS concern_comment_count FROM classroom_student_comments comment JOIN school_classrooms classroom ON classroom.id = comment.classroom_id WHERE comment.concern_level_code = 'CONCERN' AND comment.created_at >= $1::timestamptz AND comment.created_at < $2::timestamptz GROUP BY classroom.school_id, classroom.id, classroom.room_name HAVING COUNT(*) > $3 ORDER BY concern_comment_count DESC, classroom.school_id ASC, classroom.id ASC",
+      "category": "having",
+      "dialect": "postgresql",
+      "schema_packs": [
+        "teacher_comment_analytics"
+      ],
+      "grain": "one row per classroom above threshold",
+      "pii_class": "NONE",
+      "result_policy": "aggregate_with_small_group_suppression",
+      "parameters": [
+        {
+          "position": 1,
+          "name": "start_at",
+          "source": "question_value",
+          "type": "timestamptz",
+          "value": "2026-06-01T00:00:00+07:00"
+        },
+        {
+          "position": 2,
+          "name": "end_at_exclusive",
+          "source": "question_value",
+          "type": "timestamptz",
+          "value": "2026-09-01T00:00:00+07:00"
+        },
+        {
+          "position": 3,
+          "name": "minimum_comment_count",
+          "source": "question_value",
+          "type": "integer",
+          "value": 5
+        }
+      ],
+      "requested_result_limit": 500,
+      "retrieval_tags": [
+        "ห้องเรียนที่มีความเห็นครูระดับ CONCERN มากกว่า 5 รายการ ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
+        "teacher",
+        "concern",
+        "classrooms",
+        "above"
+      ]
+    }
+  ]
+}

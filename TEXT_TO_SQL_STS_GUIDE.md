@@ -4,6 +4,7 @@
 > ขอบเขต: การแปลงคำถามภาษาไทย/อังกฤษเป็น **read-only analytical SQL**  
 > ไม่ใช่: implementation ที่ deploy แล้ว, การให้ LLM เขียนข้อมูล, การแทนที่ authorization ของ backend หรือการเปิดตารางทั้งหมดให้ LLM  
 > Production gate: ห้ามเปิด execution จนกว่าจะมี trusted scope enforcement, curated DB grants/views, PII input gate, deterministic validator และ automated security tests ตาม Definition of Done
+> RAG corpus: [`TEXT_TO_SQL_STS_RAG_EXAMPLES.json`](./TEXT_TO_SQL_STS_RAG_EXAMPLES.json) — retrieve เฉพาะ top-k ที่ผ่าน policy ห้ามแนบทั้งไฟล์เข้า prompt
 
 ## 1. ข้อสรุปที่แนะนำ
 
@@ -19,13 +20,14 @@
 
 1. ให้ backend ตรวจ write intent, prompt injection และ PII ในคำถาม **ก่อน** ส่งให้โมเดล
 2. ให้ trusted backend จำแนก domain และเลือกเฉพาะ schema pack/capability ที่เกี่ยวข้อง; model output ไม่มีสิทธิ์ขยาย pack หรือ scope
-3. ให้โมเดลทำ schema linking และสร้าง query plan แบบสั้นจาก curated safe schema เท่านั้น
-4. ให้โมเดลคืน SQL พร้อม metadata ที่ตรวจได้ ไม่คืนข้อความอิสระ
-5. parse SQL ด้วย PostgreSQL AST แล้ว derive table/column/PII/scope ใหม่จาก trusted registry; metadata จากโมเดลใช้เพื่อ audit เท่านั้น
-6. บังคับ scope, permission, PII policy, read-only role, trusted `search_path`, timeout, cost และ row/byte limit ที่ execution gateway
-7. ใช้ curated views/column grants ตัด secret/PII ที่ไม่อนุญาตตั้งแต่ DB boundary; อย่าให้ executor มี `SELECT` บน OLTP tables ทั้งชุด
-8. ใช้ `EXPLAIN (FORMAT JSON)` และ execution feedback เฉพาะใน sandbox ที่ไม่เปิดข้อมูลเกินสิทธิ์
-9. วัดผลด้วย result equivalence/execution accuracy, scope leakage และ semantic correctness ไม่วัด string match อย่างเดียว
+3. ให้ trusted retriever เลือกตัวอย่างจาก corpus แยกเฉพาะ PostgreSQL/STS pack/PII class ที่อนุญาต ค่าเริ่มต้น 3 และไม่เกิน 5 ตัวอย่าง; ห้ามแนบ corpus ทั้งไฟล์ใน prompt
+4. ให้โมเดลทำ schema linking และสร้าง query plan แบบสั้นจาก curated safe schema + retrieved examples เท่านั้น
+5. ให้โมเดลคืน SQL พร้อม metadata ที่ตรวจได้ ไม่คืนข้อความอิสระ
+6. parse SQL ด้วย PostgreSQL AST แล้ว derive table/column/PII/scope ใหม่จาก trusted registry; metadata จากโมเดล/RAG ใช้เพื่อ audit เท่านั้น
+7. บังคับ scope, permission, PII policy, read-only role, trusted `search_path`, timeout, cost และ row/byte limit ที่ execution gateway
+8. ใช้ curated views/column grants ตัด secret/PII ที่ไม่อนุญาตตั้งแต่ DB boundary; อย่าให้ executor มี `SELECT` บน OLTP tables ทั้งชุด
+9. ใช้ `EXPLAIN (FORMAT JSON)` และ execution feedback เฉพาะใน sandbox ที่ไม่เปิดข้อมูลเกินสิทธิ์
+10. วัดผลด้วย result equivalence/execution accuracy, scope leakage, retrieval quality และ semantic correctness ไม่วัด string match อย่างเดียว
 
 ## 2. หลักจากงานวิจัยที่นำมาใช้
 
@@ -982,7 +984,7 @@ Router เป็น optimization เท่านั้น `candidate_packs` แ�
 
 1. โหลด trusted actor/permission/normalized scope/config/registry จาก backend; scope ว่างหรือ registry-version mismatch ให้ deny/fail readiness
 2. ทำ pre-model write/PII/provider gate; deny ก่อน model call เมื่อ policy ไม่อนุญาต
-3. Trusted backend เลือก schema pack/capability และส่งเฉพาะ curated safe schema ให้ router/generator
+3. Trusted backend เลือก schema pack/capability, filter RAG corpus ด้วย dialect/pack/PII/registry version, retrieve top-k ภายใต้ token budget แล้วส่งเฉพาะ curated safe schema + examples ที่ผ่าน policy ให้ generator
 4. Validate JSON schema และ `decision`; reject unknown fields/type และ payload เกิน size cap
 5. ถ้า `clarify`/`deny` ต้องไม่มี SQL/parameters
 6. Parse SQL เป็น PostgreSQL AST
@@ -1065,259 +1067,25 @@ Projection ของ scoped relation ต้องสร้างจาก regist
 - connection string, schema privilege details หรือ stack trace
 - PostgreSQL catalog dump เกิน allowlist
 
-## 13. STS SQL examples
+## 13. RAG few-shot corpus แยกจาก prompt
 
-ตัวอย่างทั้งหมดเป็น semantic/final-query examples ไม่ใช่ SQL ที่นำไป execute ตรง ๆ ก่อนรัน gateway ต้อง rewrite เป็น scoped relations ตาม section 12.1, bind trusted scope/current-date parameters และ apply small-group/result policy เสมอ `LIMIT` ตัวสุดท้ายในตัวอย่างคือ server-owned outer limit ที่ gateway inject หลัง validation ไม่ใช่ค่าที่เชื่อจากโมเดล
+ตัวอย่าง SQL ถูกย้ายไปไว้ใน [`TEXT_TO_SQL_STS_RAG_EXAMPLES.json`](./TEXT_TO_SQL_STS_RAG_EXAMPLES.json) เพื่อไม่ให้ system prompt/context ยาวโดยไม่จำเป็น ไฟล์นี้เป็น corpus แบบ aggregate-safe สำหรับ retrieval เท่านั้น ไม่ใช่ SQL ที่นำไป execute ตรง ๆ
 
-### 13.1 จำนวนนักเรียนปัจจุบันแยกตามโรงเรียน
+Retrieval contract:
 
-```sql
-SELECT
-  school.id AS school_id,
-  school.name AS school_name,
-  COUNT(DISTINCT enrollment.person_uuid)::int AS student_count
-FROM student_term enrollment
-JOIN student_current_enrollment_resolution current_enrollment
-  ON current_enrollment.person_uuid = enrollment.person_uuid
- AND current_enrollment.selected_student_uuid = enrollment.student_uuid
- AND current_enrollment.resolution_state = 'ACTIVE'
-JOIN schools school
-  ON school.id = enrollment."SchoolID_Onec"
-WHERE enrollment.deleted_at IS NULL
-  AND school.school_status = 'ACTIVE'
-GROUP BY school.id, school.name
-ORDER BY student_count DESC, school.id ASC
-LIMIT $1;
-```
+1. pre-model gate sanitize คำถามและตัด request ที่ write/PII policy ไม่อนุญาตก่อนทำ embedding/retrieval; external embedding provider ถือเป็น model egress และต้องผ่าน provider/data-class policy เดียวกัน
+2. ตอน build index ต้อง parse SQL และ derive relation/pack/PII/parameter contract จาก trusted registry; metadata ใน JSON ต้องตรงกับค่าที่ derive ไม่เช่นนั้น reject corpus entry
+3. trusted backend เลือก allowed schema packs/capabilities ก่อน แล้ว filter **derived index metadata** ด้วย `dialect = postgresql`, pack intersection, PII policy และ registry compatibility
+4. similarity search ใช้ `question`, `retrieval_tags`, `category` และ `grain`; ห้าม embed raw PII หรือ SQL parameters จาก request
+5. retrieve ค่าเริ่มต้น 3 ตัวอย่างและไม่เกิน 5 ตัวอย่างภายใต้ token budget; deduplicate semantic pattern ก่อนประกอบ context
+6. ส่งเข้า generator เฉพาะ `question`, `sql`, `parameters`, `category` และ `grain` ของตัวอย่างที่ผ่าน filter ไม่ส่ง corpus ทั้งไฟล์
+7. `schema_packs`, `pii_class`, `result_policy`, `data_as_of_column` และ `requested_result_limit` ใน corpus เป็น metadata สำหรับ ingestion/audit เท่านั้น ต้อง verify/derive ใหม่และไม่ใช่สิทธิ์ที่ตัวอย่างหรือโมเดลใช้ขยาย scope/capability; `pii_class = NONE` ของ corpus default หมายถึงผล aggregate หลังผ่าน small-group policy แล้ว
+8. SQL ใน corpus อยู่ที่ semantic pre-gateway stage: ไม่มี actor scope และไม่มี outer `LIMIT`; gateway ยังต้อง parse AST, rewrite scope, remap parameters, inject hard limit และทำ validation pipeline section 12 ทุกครั้ง
+9. corpus ต้องมาจาก version-controlled curated file เท่านั้น ห้าม auto-ingest SQL/user feedback เข้า production index โดยไม่ review เพื่อป้องกัน retrieval poisoning
+10. index/cache key ต้องรวม corpus version + registry/migration compatibility version; version mismatch ให้ rebuild index หรือปิด retrieval ไม่ใช้ embedding เก่าปน schema ใหม่
+11. ถ้า retrieval confidence ต่ำหรือไม่มี example ที่ผ่าน policy ให้ generate จาก schema pack แบบ zero-shot/clarify ห้ามดึงตัวอย่างข้าม pack หรือ PII class เพื่อให้ครบจำนวน
 
-### 13.2 จำนวนนักเรียนเสี่ยงปัจจุบันแยกตามระดับความเสี่ยง
-
-```sql
-SELECT
-  risk.risk_tier,
-  COUNT(DISTINCT enrollment.person_uuid)::int AS student_count
-FROM student_risk_profiles risk
-JOIN student_term enrollment
-  ON enrollment.student_uuid = risk.student_uuid
-JOIN student_current_enrollment_resolution current_enrollment
-  ON current_enrollment.person_uuid = enrollment.person_uuid
- AND current_enrollment.selected_student_uuid = enrollment.student_uuid
- AND current_enrollment.resolution_state = 'ACTIVE'
-WHERE enrollment.deleted_at IS NULL
-GROUP BY risk.risk_tier
-ORDER BY
-  CASE risk.risk_tier WHEN 'HIGH' THEN 1 WHEN 'WATCH' THEN 2 ELSE 3 END,
-  risk.risk_tier
-LIMIT $1;
-```
-
-### 13.3 อัตราการมาเรียนรายโรงเรียนในปีการศึกษา/ภาคเรียน
-
-```sql
-SELECT
-  school.id AS school_id,
-  school.name AS school_name,
-  ROUND(
-    100.0 * COUNT(*) FILTER (WHERE day."AttendanceStatus" IN (1, 3))
-    / NULLIF(COUNT(*) FILTER (WHERE day."AttendanceStatus" <> 4), 0),
-    1
-  ) AS attendance_rate_percent
-FROM attendance_day day
-JOIN student_term enrollment
-  ON enrollment.student_uuid = day.student_uuid
-JOIN schools school
-  ON school.id = enrollment."SchoolID_Onec"
-WHERE day."AcademicYear_Onec" = $1
-  AND day."Semester_Onec" = $2
-  AND enrollment.deleted_at IS NULL
-GROUP BY school.id, school.name
-ORDER BY attendance_rate_percent DESC NULLS LAST, school.id ASC
-LIMIT $3;
-```
-
-เหตุผลที่ไม่ใช้ `AVG(student_risk_profiles.attendance_rate_percent)`: นักเรียนแต่ละคนอาจมี measured-day denominator ไม่เท่ากัน
-
-### 13.4 ห้องที่มีนักเรียน HIGH มากกว่าค่าที่กำหนด
-
-```sql
-SELECT
-  classroom.id AS classroom_id,
-  classroom.room_name,
-  grade.label AS grade_label,
-  COUNT(DISTINCT enrollment.person_uuid)::int AS high_risk_student_count
-FROM student_risk_profiles risk
-JOIN student_term enrollment
-  ON enrollment.student_uuid = risk.student_uuid
-JOIN student_current_enrollment_resolution current_enrollment
-  ON current_enrollment.person_uuid = enrollment.person_uuid
- AND current_enrollment.selected_student_uuid = enrollment.student_uuid
- AND current_enrollment.resolution_state = 'ACTIVE'
-JOIN school_classrooms classroom
-  ON classroom.id = enrollment.classroom_id
- AND classroom.school_id = enrollment."SchoolID_Onec"
-JOIN grade_levels grade
-  ON grade.id = classroom.grade_level_id
-WHERE risk.risk_tier = 'HIGH'
-  AND enrollment.deleted_at IS NULL
-  AND classroom.deleted_at IS NULL
-  AND classroom.classroom_status = 'ACTIVE'
-GROUP BY classroom.id, classroom.room_name, grade.id, grade.label
-HAVING COUNT(DISTINCT enrollment.person_uuid) > $1
-ORDER BY high_risk_student_count DESC, classroom.id ASC
-LIMIT $2;
-```
-
-### 13.5 จำนวนเคสที่ยังไม่มีงานแยกตามโรงเรียน
-
-```sql
-SELECT
-  case_row.school_id,
-  COUNT(DISTINCT case_row.id)::int AS case_count
-FROM cases case_row
-WHERE case_row.deleted_at IS NULL
-  AND NOT EXISTS (
-    SELECT 1
-    FROM tasks task
-    WHERE task.case_id = case_row.id
-      AND task.deleted_at IS NULL
-  )
-GROUP BY case_row.school_id
-ORDER BY case_count DESC, case_row.school_id ASC
-LIMIT $1;
-```
-
-ตัวอย่าง default เป็น aggregate และไม่คืน stable case ID การขอรายการ `case_id`/status/timestamp รายเคสเป็น `PSEUDONYMOUS` row-level intent ต้องมี capability แยกและยังต้องผ่าน small-group/result policy
-
-### 13.6 จำนวนเคสตาม workflow status
-
-```sql
-SELECT
-  case_row.status AS case_status,
-  status.label_th AS case_status_label_th,
-  COUNT(DISTINCT case_row.id)::int AS case_count
-FROM cases case_row
-JOIN case_workflow_statuses status
-  ON status.code = case_row.status
-WHERE case_row.deleted_at IS NULL
-GROUP BY case_row.status, status.label_th, status.sort_order
-ORDER BY status.sort_order ASC, case_row.status ASC
-LIMIT $1;
-```
-
-### 13.7 งาน VISIT และ ASSIST แยกตามเดือนที่สร้าง
-
-```sql
-SELECT
-  date_trunc('month', task.created_at AT TIME ZONE 'Asia/Bangkok')::date AS month_start,
-  task.task_type,
-  COUNT(DISTINCT task.id)::int AS task_count
-FROM tasks task
-WHERE task.deleted_at IS NULL
-  AND task.task_type IN ('VISIT', 'ASSIST')
-  AND task.created_at >= $1::timestamptz
-  AND task.created_at < $2::timestamptz
-GROUP BY month_start, task.task_type
-ORDER BY month_start ASC, task.task_type ASC
-LIMIT $3;
-```
-
-### 13.8 ครูที่สอนหลายวิชาที่สุดในแต่ละโรงเรียน
-
-```sql
-WITH teacher_subject_counts AS (
-  SELECT
-    membership.school_id,
-    teacher.id AS teacher_id,
-    concat_ws(' ', teacher.first_name, teacher.last_name) AS teacher_name,
-    COUNT(DISTINCT school_subject.subject_id)::int AS subject_count
-  FROM classroom_subject_teachers assignment
-  JOIN school_teacher_memberships membership
-    ON membership.id = assignment.teacher_membership_id
-   AND membership.school_id = assignment.school_id
-  JOIN schools school
-    ON school.id = membership.school_id
-  JOIN teachers teacher
-    ON teacher.id = membership.teacher_id
-  JOIN classroom_subjects classroom_subject
-    ON classroom_subject.id = assignment.classroom_subject_id
-   AND classroom_subject.classroom_id = assignment.classroom_id
-   AND classroom_subject.school_id = assignment.school_id
-  JOIN school_classrooms classroom
-    ON classroom.id = classroom_subject.classroom_id
-   AND classroom.school_id = classroom_subject.school_id
-  JOIN school_terms school_term
-    ON school_term.id = classroom.school_term_id
-   AND school_term.school_id = classroom.school_id
-  JOIN school_subjects school_subject
-    ON school_subject.id = classroom_subject.school_subject_id
-   AND school_subject.school_id = classroom_subject.school_id
-  JOIN subjects subject
-    ON subject.id = school_subject.subject_id
-  WHERE assignment.deleted_at IS NULL
-    AND assignment.assignment_status = 'ACTIVE'
-    AND classroom_subject.deleted_at IS NULL
-    AND classroom_subject.offering_status = 'ACTIVE'
-    AND classroom.deleted_at IS NULL
-    AND classroom.classroom_status = 'ACTIVE'
-    AND school_term.status = 'ACTIVE'
-    AND school_subject.deleted_at IS NULL
-    AND school_subject.subject_status = 'ACTIVE'
-    AND subject.deleted_at IS NULL
-    AND subject.is_active = TRUE
-    AND membership.deleted_at IS NULL
-    AND membership.membership_status = 'ACTIVE'
-    AND teacher.deleted_at IS NULL
-    AND teacher.teacher_status = 'ACTIVE'
-    AND school.school_status = 'ACTIVE'
-  GROUP BY membership.school_id, teacher.id, teacher.first_name, teacher.last_name
-),
-ranked AS (
-  SELECT
-    teacher_subject_counts.school_id,
-    teacher_subject_counts.teacher_id,
-    teacher_subject_counts.teacher_name,
-    teacher_subject_counts.subject_count,
-    ROW_NUMBER() OVER (
-      PARTITION BY school_id
-      ORDER BY subject_count DESC, teacher_id ASC
-    ) AS rank_in_school
-  FROM teacher_subject_counts
-)
-SELECT school_id, teacher_id, teacher_name, subject_count
-FROM ranked
-WHERE rank_in_school <= $1
-ORDER BY school_id ASC, rank_in_school ASC
-LIMIT $2;
-```
-
-ทั้ง `teacher_id` และชื่อครูในตัวอย่างนี้เป็น row-level identity ต้องเปิดเฉพาะ capability ที่อนุญาต ถ้าไม่มีให้ใช้ query aggregate ระดับโรงเรียนที่ไม่คืน teacher identity ห้ามคืน `teacher_id` เป็น fallback แทนชื่อ
-
-### 13.9 สัดส่วนความเห็นครูระดับ CONCERN ตามหมวด
-
-```sql
-SELECT
-  comment.problem_category_code,
-  category.label_th AS problem_category_label_th,
-  COUNT(*) FILTER (WHERE comment.concern_level_code = 'CONCERN')::int AS concern_count,
-  COUNT(*)::int AS comment_count,
-  ROUND(
-    100.0 * COUNT(*) FILTER (WHERE comment.concern_level_code = 'CONCERN')
-    / NULLIF(COUNT(*), 0),
-    1
-  ) AS concern_percent
-FROM classroom_student_comments comment
-JOIN classroom_student_problem_categories category
-  ON category.code = comment.problem_category_code
-JOIN school_classrooms classroom
-  ON classroom.id = comment.classroom_id
-WHERE comment.created_at >= $1::timestamptz
-  AND comment.created_at < $2::timestamptz
-GROUP BY comment.problem_category_code, category.label_th, category.sort_order
-ORDER BY concern_percent DESC NULLS LAST, category.sort_order ASC
-LIMIT $3;
-```
-
-ไม่ select `problem_description`
+ไฟล์ version `2.0` มี 86 examples ที่ review ตาม schema จริง แบ่ง primary coverage เป็น student/enrollment 14, attendance 22, risk/case 18, task/assistance 15, teacher/subject 10 และ teacher-comment analytics 7 ตัวอย่าง ครอบคลุม count/group, distinct count, ratio, average/summary, `HAVING`, per-group top-N, `NOT EXISTS`, time grouping, data freshness และ multi-hop aggregation โดยไม่คืนข้อมูลระบุตัวบุคคล จำนวน corpus ไม่ใช่จำนวนที่ส่งเข้า prompt: retriever ยังเลือกเฉพาะ top-k ค่าเริ่มต้น 3 และสูงสุด 5 ตัวอย่างตามข้อ 5 เท่านั้น การอัปเกรดจาก corpus `1.x` เป็น `2.0` ต้อง rebuild index/cache ตามข้อ 10 ก่อนเปิด retrieval ส่วน row-level examples ต้องแยกเป็น corpus อีกชุดและเปิดผ่าน exact capability เท่านั้น ไม่เติมลง corpus default นี้
 
 ## 14. Performance rules
 
@@ -1364,6 +1132,7 @@ LIMIT $3;
 - authenticated capability/scope fixture
 - expected decision: query/clarify/deny
 - expected pre-model behavior และ provider mock ต้องถูกเรียกหรือไม่
+- expected allowed/retrieved RAG example categories/IDs, top-k และ corpus version; case ที่ควร zero-shot ต้องได้ 0 examples
 - expected tables/joins/grain
 - expected trusted scope rewrite/final scoped relation set
 - gold SQL หรือ result invariant
@@ -1379,6 +1148,7 @@ LIMIT $3;
 | Scope leakage | `0` |
 | Unauthorized PII selection | `0` |
 | Unauthorized PII sent to model | `0` |
+| RAG policy violation | `0` ตัวอย่างที่ผิด dialect/pack/PII/capability/version หลุดเข้า generator context |
 | Write/DDL execution | `0` |
 | Decision accuracy | วัด query/clarify/deny แยกกัน |
 | Execution success | query ที่ควรรันต้อง parse/bind/run ได้ |
@@ -1387,6 +1157,7 @@ LIMIT $3;
 | Status/time semantic accuracy | attendance/current enrollment/academic year ถูกต้อง |
 | Valid refusal/clarification | ไม่เดา metric ที่ schema ไม่รองรับ |
 | Efficiency | p50/p95 latency, estimated/actual rows, timeout rate |
+| Retrieval quality | recall@k/MRR ของ semantic pattern, wrong-pack rate และ p95 retrieved-context tokens |
 | Stability | ผล deterministic ภายใต้ seed/model version เดียวกัน |
 
 Exact SQL string match เป็น metric รอง เพราะ SQL คนละรูปสามารถให้ผลถูกเหมือนกันได้
@@ -1404,6 +1175,9 @@ Exact SQL string match เป็น metric รอง เพราะ SQL คน�
 - `SELECT ... INTO TEMP`, recursive CTE, high `OFFSET`, `FETCH ... WITH TIES`, `FOR KEY SHARE`, `set_config`, `pg_sleep`, advisory lock และ user-defined function ชื่อชน built-in
 - `UNION`/subquery/lateral branch หนึ่งถูก scope แต่อีก branch ไม่ถูก scope
 - model คืน pack/PII/type/limit metadata เพื่อพยายามขยาย trusted context
+- corpus entry ปลอม metadata เป็น `NONE` แต่ SQL select PII/secret, entry ผิด dialect/pack และ entry ที่ registry version ไม่ตรง
+- user feedback/คำถามพยายามฝัง instruction ให้ถูกบันทึกเป็น example หรือทำ retrieval poisoning
+- similarity ต่ำแต่ retriever ฝืนเติม top-k ด้วยตัวอย่างข้าม pack/PII class
 - query ที่ join ข้าม school ด้วย ID อย่างเดียว
 - `room_ids = ['2']` แต่ `classroom_id = 2` เป็นคนละห้องกับ `legacy_room_number = 2`
 - own-only ใน student/risk domain และ own-only case/task ที่ไม่มี actor ID
@@ -1417,11 +1191,12 @@ Exact SQL string match เป็น metric รอง เพราะ SQL คน�
 
 ### 15.4 Release gate
 
-ก่อนเปลี่ยน prompt/model/schema registry ต้องรันอย่างน้อย:
+ก่อนเปลี่ยน prompt/model/schema registry/RAG corpus ต้องรันอย่างน้อย:
 
 ```bash
 cd sts-backend
 pnpm test -- text-to-sql
+pnpm test -- text-to-sql-rag
 pnpm test
 pnpm build
 pnpm lint
@@ -1442,7 +1217,8 @@ Implementation ต้องเพิ่ม `pnpm smoke:text-to-sql` ที่ใ
 4. ยืนยัน security invariants (`scope leakage`, unauthorized PII/model egress, write/DDL) ผ่าน 100%; ห้ามเฉลี่ยรวมกับ accuracy metric
 5. compare semantic accuracy และ p50/p95 latency/cost/timeout กับ baseline ตามขนาดข้อมูล production-like
 6. review failures แบบ domain ไม่แก้ด้วย few-shot ที่เฉพาะเจาะจงจน overfit
-7. version prompt + registry + model/provider + suppression policy + migration hash พร้อมกัน และทดสอบ rollback version
+7. validate corpus JSON/schema/unique examples, PostgreSQL AST, parameter contract, aggregate-only PII derivation และห้าม MySQL/SQLite token/function ก่อน build index
+8. version prompt + RAG corpus/index + embedding model + registry + generator model/provider + suppression policy + migration hash พร้อมกัน และทดสอบ rollback version
 
 ## 16. Rollout plan
 
@@ -1463,6 +1239,7 @@ Implementation ต้องเพิ่ม `pnpm smoke:text-to-sql` ที่ใ
 - aggregate-only และ Packs A–C ก่อน: enrollment, attendance, risk/case
 - pre-model write/injection/PII gate; provider mock ต้องพิสูจน์ว่า request ที่ deny ไม่ออกนอกระบบ
 - server-selected packs, versioned registry และ curated safe projections
+- aggregate-safe RAG corpus/index แยกจาก prompt พร้อม pack/PII/version filter และ top-k token budget
 - deterministic PostgreSQL AST validation + server-owned scope rewrite ทุก branch
 - executor role จริงที่ไม่มี broad OLTP grants, `BEGIN READ ONLY`, trusted `search_path`/timezone, timeout และ result cap
 - clarification/deny flow, small-group policy และ `data_as_of` สำหรับ snapshot
@@ -1511,6 +1288,8 @@ Implementation ต้องเพิ่ม `pnpm smoke:text-to-sql` ที่ใ
 - canonical school/area/grade/legacy-room scope ทำงานทุก CTE/subquery/lateral/set-operation branch; ทุก dimension ใช้ `AND`, empty/corrupt scope fail closed และ room-ID collision test ผ่าน
 - `own_only` ทำตาม domain policy โดย bind actor identifier จาก authenticated context; unsupported domain/identifier ไม่ครบถูก deny
 - pre-model write/injection/PII gate ทำงานก่อน provider call; provider policy และ small-group suppression เป็น typed owner-approved config โดย config ขาดแล้ว fail closed
+- RAG corpus อยู่ไฟล์แยก, มี stable unique IDs/version, ผ่าน JSON schema + PostgreSQL AST + parameter validation และ default corpus derive ได้ `pii_class = NONE` ทุก example
+- retriever filter dialect/pack/PII/capability/registry version ก่อน similarity search, ส่งไม่เกิน 5 examples ภายใต้ token budget และ fallback zero-shot/clarify เมื่อไม่มี example ที่ปลอดภัย; poisoning/version-mismatch tests ผ่าน
 - stable person/student/teacher/case/task IDs ถูกจัดเป็น `PSEUDONYMOUS`; direct/sensitive identity และ raw note ไม่มี identity fallback และออกได้เฉพาะ exact capability
 - structured output ผ่าน JSON schema; SQL parameterized ด้วย closed types/contiguous placeholders และ server เป็นผู้ bind scope/entity/current Thai date
 - PostgreSQL AST validator reject write/DDL, recursive/nested modifying CTE, `SELECT INTO`, locking clauses, model-controlled `OFFSET`/`WITH TIES`, multi-statement, system catalog, reserved alias และ function/operator/cast/type signature ที่ไม่ allowlist
@@ -1519,8 +1298,8 @@ Implementation ต้องเพิ่ม `pnpm smoke:text-to-sql` ที่ใ
 - dedicated bounded pool บังคับ timeout, rate/concurrency, row/byte/group cap; cancel/error rollback และ readiness/kill switch ถูกทดสอบ
 - output schema/cardinality validation, small-group suppression และ snapshot `data_as_of` ทำงานก่อน serialize/cache
 - golden execution tests ครอบคลุม Thai paraphrases, clarification และ critical STS domains; scope/PII/write/AST/provider-not-called invariants ผ่าน 100%
-- `pnpm test -- text-to-sql`, full backend test/build/lint, migration parity/show เมื่อเกี่ยวข้อง และ `pnpm smoke:text-to-sql` ผ่านใน staging-like environment
-- telemetry ไม่ log raw prompt/parameter/result ที่มี PII/secrets; prompt + registry + model/provider + policy + migration hash version/rollback เป็นชุดและมี rollback drill
+- `pnpm test -- text-to-sql`, `pnpm test -- text-to-sql-rag`, full backend test/build/lint, migration parity/show เมื่อเกี่ยวข้อง และ `pnpm smoke:text-to-sql` ผ่านใน staging-like environment
+- telemetry ไม่ log raw prompt/parameter/result ที่มี PII/secrets; prompt + RAG corpus/index/embedding model + registry + generator model/provider + policy + migration hash version/rollback เป็นชุดและมี rollback drill
 
 ---
 
@@ -1541,7 +1320,7 @@ receipt/customer_name/total_price/product_category/payment_method/month/year
 ## Appendix B: ข้อจำกัดของเอกสารฉบับนี้
 
 - mapping ในเอกสารตรวจเทียบกับ source, migrations และ query patterns ใน workspace ณ วันที่ระบุ แต่ไม่ใช่ runtime proof ของฐานแต่ละ environment; implementation ต้อง generate/verify registry จาก applied PostgreSQL catalog และ migration history ของ environment นั้น
-- เอกสารรอบนี้ไม่ได้เพิ่ม endpoint, parser, provider integration, DB role, migration, RLS/view, test หรือ smoke script จึงยังไม่ควรตีความว่า feature deploy ได้แล้ว
+- เอกสารรอบนี้เพิ่มเฉพาะ curated RAG JSON corpus แต่ยังไม่ได้เพิ่ม embedding/index/retriever, endpoint, parser, provider integration, DB role, migration, RLS/view, test หรือ smoke script จึงยังไม่ควรตีความว่า feature deploy ได้แล้ว
 - provider/data-retention policy, exact capability matrix และ small-group threshold/action เป็น owner/PDPA decisions และเป็น production blockers ตาม Phase 0 ไม่ใช่ค่าที่ทีมพัฒนาควรเดา
 - ยังไม่ได้อนุมัติ dependency ใหม่; SQL parser/provider SDK ทุกตัวต้องผ่าน dependency/security/license review และบันทึก version/pinning ก่อนใช้
 - persisted `room_ids` มี usage ไม่สม่ำเสมอในระบบปัจจุบัน เอกสารกำหนด canonical Text-to-SQL resolver เพื่อหยุดการเดา แต่การเปลี่ยน behavior/shared permission model ของระบบอื่นอยู่นอกขอบเขตและต้อง review แยก

@@ -96,3 +96,9 @@ skills-lock.json
 report_unpacked/
 
 idea*
+
+# Local-only material handed over for reference (contains real STS secrets)
+prompt hardcode_example and setup deploy and/
+graphify-out/
+ai.md
+.impeccable.md
