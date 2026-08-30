@@ -62,10 +62,10 @@ def main():
 
     lines = ["# STS Text-to-SQL — model comparison", ""]
 
-    lines += ["## Model comparison (best config: rag=5, retry=2)", "",
+    lines += ["## Model comparison (best config: rag=3, retry=2)", "",
               "| Model | runs | EX | EX relaxed | first-try | grain | held-out | paraphrase | novel | p50 s | p95 s |",
               "|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|"]
-    best = [r for r in rows if r["rag"] == "5" and r["retry"] == "2"]
+    best = [r for r in rows if r["rag"] == "3" and r["retry"] == "2"]
     for a in agg(best, ["model"]):
         lines.append("| {model} | {runs} | {ex} | {exr} | {first} | {grain} | {ho} | {pa} | {no} | {p50:.1f} | {p95:.1f} |".format(
             model=a["model"], runs=a["runs"], ex=pct(a["ex"], a["ex_sd"]), exr=pct(a["exr"], a["exr_sd"]),

@@ -24,8 +24,8 @@ MODELS = [
     # "openrouter/qwen/qwen3-235b-a22b-2507",
 ]
 
-ABLATION = list(itertools.product([0, 3, 5, 7], [0, 2]))   # (rag_top_k, max_retries)
-BEST_CONFIG = (5, 2)
+ABLATION = list(itertools.product([0, 3], [0, 2]))   # (rag_top_k, max_retries)
+BEST_CONFIG = (3, 2)
 REPEATS = 5
 
 DB_URL = os.getenv("DATABASE_URL",

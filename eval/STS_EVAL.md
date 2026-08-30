@@ -39,8 +39,8 @@ Slugs live at the top of `eval/sweep_sts.py` — verify against openrouter.ai/mo
 
 | Model | via | role | status |
 |---|---|---|---|
-| gpt-4o-mini | OpenAI | anchor — full RAG×retry ablation | active |
-| z-ai/glm-5.2:free | OpenRouter | free-tier viability | active |
+| gpt-4o-mini | OpenAI | anchor — RAG{0,3}×retry{0,2} ablation | active |
+| z-ai/glm-5.2:free | OpenRouter | free-tier viability | commented out — needs OPENROUTER_API_KEY |
 | deepseek/deepseek-v4-flash | OpenRouter | open-weight, code-strong | commented out — needs OpenRouter credit |
 | qwen/qwen3-235b-a22b-2507 | OpenRouter | large open MoE | commented out — needs OpenRouter credit |
 
@@ -52,7 +52,7 @@ Slugs live at the top of `eval/sweep_sts.py` — verify against openrouter.ai/mo
 # one config
 python eval/run_eval_sts.py --model openai/gpt-4o-mini --rag-top-k 5 --max-retries 2
 
-# full matrix (anchor: 8 configs × 5 repeats; others: best-config × 5). Resumable.
+# matrix (anchor: 4 configs × 5 repeats; others: best-config × 5). Resumable.
 python eval/sweep_sts.py
 
 # aggregate → eval/sts/COMPARISON.md
