@@ -27,19 +27,30 @@ def get_database_schema(engine: Engine) -> Dict[str, Any]:
     tables_schema = {}
     all_foreign_keys = []
 
-    table_names = inspector.get_table_names()
+    # Views matter for STS: student_current_enrollment_resolution, attendance_day,
+    # attendance_effective_records, ... are the sanctioned query surfaces.
+    try:
+        view_names = set(inspector.get_view_names())
+    except Exception:
+        view_names = set()
+    table_names = list(inspector.get_table_names()) + sorted(view_names)
     for table in table_names:
         columns = []
         try:
             # Get column info
             cols_info = inspector.get_columns(table)
 
-            # Get primary keys
-            pk_info = inspector.get_pk_constraint(table)
-            pk_cols = set(pk_info.get("constrained_columns", []))
+            # Get primary keys (views have none)
+            try:
+                pk_cols = set(inspector.get_pk_constraint(table).get("constrained_columns", []))
+            except Exception:
+                pk_cols = set()
 
-            # Get foreign keys
-            fk_info = inspector.get_foreign_keys(table)
+            # Get foreign keys (views have none)
+            try:
+                fk_info = inspector.get_foreign_keys(table)
+            except Exception:
+                fk_info = []
             fk_lookup = {}  # {src_col: "referred_table.referred_col"}
             for fk in fk_info:
                 for src_col, ref_col in zip(

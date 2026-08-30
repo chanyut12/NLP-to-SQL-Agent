@@ -85,14 +85,13 @@ class SchemaRAG:
     Uses ChromaDB for semantic search of relevant tables/columns.
     """
     
-    COLLECTION_NAME = "schema_metadata_v1"
-    
     def __init__(
         self,
         model_name: str = None,
         persist_directory: Optional[str] = "schema_rag_db",
         embedder: Optional[SentenceTransformer] = None,
-        embedding_cache: Optional[Dict[str, list]] = None
+        embedding_cache: Optional[Dict[str, list]] = None,
+        profile: str = "default",
     ):
         """
         Initialize the Schema RAG store.
@@ -106,6 +105,7 @@ class SchemaRAG:
         from core.config import settings
         self.model_name = model_name or settings.EMBEDDING_MODEL
         self.persist_directory = persist_directory
+        self.collection_name = f"schema_metadata_{profile}"
         self._embedder = embedder
         self._embedding_cache = embedding_cache if embedding_cache is not None else {}
         self._client = None
@@ -142,7 +142,7 @@ class SchemaRAG:
                 self._client = chromadb.Client()
             
             self._collection = self._client.get_or_create_collection(
-                name=self.COLLECTION_NAME,
+                name=self.collection_name,
                 metadata={"description": "Database schema for semantic retrieval"}
             )
         return self._collection
@@ -383,13 +383,15 @@ class SchemaRAG:
 def create_schema_rag(
     persist_directory: Optional[str] = "schema_rag_db",
     embedder: Optional[SentenceTransformer] = None,
-    embedding_cache: Optional[Dict[str, list]] = None
+    embedding_cache: Optional[Dict[str, list]] = None,
+    profile: str = "default",
 ) -> SchemaRAG:
     """Create and return a SchemaRAG instance."""
     return SchemaRAG(
         persist_directory=persist_directory,
         embedder=embedder,
-        embedding_cache=embedding_cache
+        embedding_cache=embedding_cache,
+        profile=profile,
     )
 
 

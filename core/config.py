@@ -9,6 +9,8 @@ class Settings:
     DATABASE_URL = os.getenv("DATABASE_URL", "")
     # Shared secret required in the X-API-Key header. Empty = auth disabled (dev).
     API_KEY = os.getenv("API_KEY", "")
+    # Domain profile: profiles/<name>/{hints.md,examples.json}
+    DOMAIN_PROFILE = os.getenv("DOMAIN_PROFILE", "sts")
 
     # Model Configuration
     MODEL_PROVIDER = os.getenv("MODEL_PROVIDER", "openai").lower()

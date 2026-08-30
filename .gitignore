@@ -98,7 +98,7 @@ report_unpacked/
 idea*
 
 # Local-only material handed over for reference (contains real STS secrets)
-prompt hardcode_example and setup deploy and/
+prompt hardcode_example*
 graphify-out/
 ai.md
 .impeccable.md

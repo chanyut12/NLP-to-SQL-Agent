@@ -22,19 +22,23 @@ from core.config import settings
 logger = logging.getLogger(__name__)
 
 
+def _norm_dialect(d: Optional[str]) -> str:
+    d = (d or "").lower()
+    return "postgresql" if d in ("postgres", "postgresql") else d
+
+
 class ExampleStore:
     """
     Vector store for Thai-to-SQL examples using ChromaDB (Persistent).
     Retrieves semantically similar examples for few-shot prompting.
     """
     
-    COLLECTION_NAME = "thai_sql_examples_v2"
-    
     def __init__(
         self,
         examples_path: str = "thai_sql_examples.json",
         model_name: str = None,
-        persist_directory: Optional[str] = "rag_db"
+        persist_directory: Optional[str] = "rag_db",
+        profile: str = "default",
     ):
         """
         Initialize the example store.
@@ -42,6 +46,8 @@ class ExampleStore:
         self.examples_path = examples_path
         self.model_name = model_name or settings.EMBEDDING_MODEL
         self.persist_directory = persist_directory
+        # One collection per domain profile so a profile switch never mixes corpora.
+        self.collection_name = f"thai_sql_examples_{profile}"
 
         # Eagerly load embedding model at startup (not on first query)
         logger.info("Loading embedding model: %s", self.model_name)
@@ -67,7 +73,7 @@ class ExampleStore:
     def _init_collection(self):
         """Initialize or load the vector collection."""
         self.collection = self.client.get_or_create_collection(
-            name=self.COLLECTION_NAME,
+            name=self.collection_name,
             metadata={"description": "Thai to SQL examples for few-shot learning"}
         )
         
@@ -105,16 +111,18 @@ class ExampleStore:
             category = ex.get("category", "general")
             dialect = ex.get("dialect", "sqlite")
             difficulty = ex.get("difficulty", "medium")
-            
+            tags = ex.get("retrieval_tags", [])
+
             ex_id = generate_stable_id(question, sql)
-            
+
             if ex_id in existing_ids:
                 continue
-            
-            # E5 models require 'passage: ' prefix for documents being indexed
-            text_to_embed = f"passage: {question}"
-            embedding = self.embedder.encode(text_to_embed).tolist()
-            
+
+            # E5 models require 'passage: ' prefix for documents being indexed.
+            # Curated retrieval_tags (Thai synonyms) are appended so paraphrases hit.
+            passage = question if not tags else f"{question} | {' '.join(tags)}"
+            embedding = self.embedder.encode(f"passage: {passage}").tolist()
+
             new_ids.append(ex_id)
             new_embeddings.append(embedding)
             new_documents.append(sql)
@@ -122,7 +130,7 @@ class ExampleStore:
                 "question": question,
                 "category": category,
                 "dialect": dialect,
-                "difficulty": difficulty
+                "difficulty": difficulty,
             })
         
         # Batch upsert only new items
@@ -208,7 +216,7 @@ class ExampleStore:
                     "_source_dialect": source_dialect,
                 }
 
-                if dialect and source_dialect.lower() == dialect.lower():
+                if dialect and _norm_dialect(source_dialect) == _norm_dialect(dialect):
                     dialect_matches.append(entry)
                 else:
                     other_matches.append(entry)
@@ -223,7 +231,7 @@ class ExampleStore:
         if auto_transpile and dialect:
             for ex in examples:
                 source_dialect = ex.pop("_source_dialect", None)
-                if source_dialect and source_dialect.lower() != dialect.lower():
+                if source_dialect and _norm_dialect(source_dialect) != _norm_dialect(dialect):
                     try:
                         from core.utils.dialect_transpiler import DialectTranspiler
 
@@ -336,9 +344,10 @@ class ExampleStore:
 
 def create_example_store(
     examples_path: str = "thai_sql_examples.json",
-    persist_directory: Optional[str] = "rag_db"
+    persist_directory: Optional[str] = "rag_db",
+    profile: str = "default",
 ) -> ExampleStore:
-    return ExampleStore(examples_path, persist_directory=persist_directory)
+    return ExampleStore(examples_path, persist_directory=persist_directory, profile=profile)
 
 if __name__ == "__main__":
     # Test
