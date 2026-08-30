@@ -15,69 +15,11 @@ from sqlalchemy import Engine, inspect
 
 from core.utils.common import generate_stable_id
 from core.utils.embedding import load_sentence_transformer
+from core.profiles import load_schema_mappings
 
 
 logger = logging.getLogger(__name__)
 
-
-# =============================================================================
-# Thai-English Mapping Dictionary
-# =============================================================================
-
-THAI_SCHEMA_MAPPINGS: Dict[str, List[str]] = {
-    # Sales & Revenue
-    "ยอดขาย": ["total_price", "priceEach", "quantityOrdered", "sales", "amount", "price"],
-    "ยอด": ["total", "sum", "amount", "price"],
-    "ราคา": ["price", "priceEach", "buyPrice", "MSRP", "amount"],
-    "รายได้": ["revenue", "sales", "income", "total"],
-    
-    # Customers
-    "ลูกค้า": ["customers", "customerName", "customerNumber", "customer"],
-    "คนซื้อ": ["customers", "customerName", "buyer"],
-    "ผู้ซื้อ": ["customers", "customerName", "buyer"],
-    
-    # Products
-    "สินค้า": ["products", "productName", "productCode", "productLine", "product"],
-    "ผลิตภัณฑ์": ["products", "productName", "productLine"],
-    "หมวดหมู่": ["productLine", "category", "productlines"],
-    "ประเภท": ["productLine", "category", "type", "productlines"],
-    
-    # Orders
-    "ออเดอร์": ["orders", "orderNumber", "orderDate", "order"],
-    "คำสั่งซื้อ": ["orders", "orderNumber", "order"],
-    "สั่งซื้อ": ["orders", "orderNumber", "orderDate"],
-    "ใบสั่งซื้อ": ["orders", "orderNumber"],
-    "รายละเอียดออเดอร์": ["orderdetails", "orderNumber", "quantityOrdered"],
-    
-    # Employees
-    "พนักงาน": ["employees", "employeeNumber", "firstName", "lastName", "employee"],
-    "เซลส์": ["employees", "salesRepEmployeeNumber", "sales"],
-    "พนักงานขาย": ["employees", "salesRepEmployeeNumber"],
-    
-    # Payments
-    "ชำระเงิน": ["payments", "paymentDate", "amount", "payment"],
-    "จ่ายเงิน": ["payments", "amount", "payment"],
-    "การชำระ": ["payments", "paymentDate"],
-    
-    # Office
-    "สาขา": ["offices", "officeCode", "city", "country"],
-    "สำนักงาน": ["offices", "officeCode"],
-    
-    # Time
-    "ปี": ["year", "orderDate", "paymentDate"],
-    "เดือน": ["month", "orderDate", "paymentDate"],
-    "วันที่": ["date", "orderDate", "paymentDate", "requiredDate", "shippedDate"],
-    
-    # Aggregation keywords
-    "รวม": ["SUM", "total", "amount"],
-    "เฉลี่ย": ["AVG", "average"],
-    "นับ": ["COUNT", "total"],
-    "จำนวน": ["COUNT", "quantity", "quantityOrdered", "quantityInStock"],
-    "มากที่สุด": ["MAX", "DESC", "top"],
-    "สูงสุด": ["MAX", "DESC", "top"],
-    "น้อยที่สุด": ["MIN", "ASC", "bottom"],
-    "ต่ำสุด": ["MIN", "ASC", "bottom"],
-}
 
 
 class SchemaRAG:
@@ -108,6 +50,8 @@ class SchemaRAG:
         self.model_name = model_name or settings.EMBEDDING_MODEL
         self.persist_directory = persist_directory
         self.collection_name = f"schema_metadata_{profile}"
+        # Thai-term -> table/column name fragments, per domain profile.
+        self.thai_mappings = load_schema_mappings(profile)
         self._embedder = embedder
         self._embedding_cache = embedding_cache if embedding_cache is not None else {}
         self._embedding_cache_lock = embedding_lock or threading.Lock()
@@ -162,7 +106,7 @@ class SchemaRAG:
         table_lower = table_name.lower()
         cols_lower = [c.lower() for c in columns]
         
-        for thai_word, english_terms in THAI_SCHEMA_MAPPINGS.items():
+        for thai_word, english_terms in self.thai_mappings.items():
             for eng_term in english_terms:
                 eng_lower = eng_term.lower()
                 # Check if mapping matches table name
@@ -327,7 +271,7 @@ class SchemaRAG:
         mapped_tables: Set[str] = set()
         question_lower = question.lower()
         
-        for thai_word, english_terms in THAI_SCHEMA_MAPPINGS.items():
+        for thai_word, english_terms in self.thai_mappings.items():
             if thai_word in question:
                 for term in english_terms:
                     term_lower = term.lower()
@@ -443,10 +387,9 @@ def expand_tables_with_relationships(
 # =============================================================================
 
 if __name__ == "__main__":
-    # Test Thai mapping
-    rag = create_schema_rag()
-    
-    # Test without DB
-    print("Thai Mapping Test:")
-    for thai_word in ["ลูกค้า", "ยอดขาย", "สินค้า", "ออเดอร์"]:
-        print(f"  {thai_word} → {THAI_SCHEMA_MAPPINGS.get(thai_word, [])}")
+    # Test Thai mapping for a given profile
+    import sys
+    rag = create_schema_rag(profile=sys.argv[1] if len(sys.argv) > 1 else "sts")
+    print(f"Thai mappings ({len(rag.thai_mappings)}):")
+    for thai_word, terms in list(rag.thai_mappings.items())[:8]:
+        print(f"  {thai_word} → {terms}")

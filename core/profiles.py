@@ -5,6 +5,7 @@ the Thai-term hints injected into the prompt and the few-shot Example set. It is
 selected by ``settings.DOMAIN_PROFILE`` and lives under ``profiles/<name>/``.
 """
 
+import json
 import os
 import logging
 
@@ -31,3 +32,14 @@ def load_hints(profile: str) -> str:
         return ""
     with open(path, "r", encoding="utf-8") as f:
         return f.read().strip()
+
+
+def load_schema_mappings(profile: str) -> dict:
+    """Thai-term -> [table/column name fragments] for schema retrieval.
+    Empty dict if the profile has no schema_mappings.json (retrieval falls back
+    to pure semantic search)."""
+    path = os.path.join(profile_dir(profile), "schema_mappings.json")
+    if not os.path.exists(path):
+        return {}
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)

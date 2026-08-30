@@ -14,6 +14,9 @@ to execute and return ≥1 row on the dev database.
 
 Regenerate: `python scripts/build_sts_profile.py && python scripts/build_sts_benchmark.py`
 
+After changing the profile or `profiles/sts/schema_mappings.json`, wipe the
+vector stores so they rebuild: `rm -rf rag_db schema_rag_db`
+
 ## Metrics (`run_eval_sts.py`)
 
 Result-set equivalence against the gold SQL (order-insensitive, floats rounded).

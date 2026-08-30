@@ -23,6 +23,12 @@ class TestProfileLoader(unittest.TestCase):
         p = profiles.examples_path("sts")
         self.assertTrue(p.endswith(os.path.join("profiles", "sts", "examples.json")))
 
+    def test_schema_mappings(self):
+        m = profiles.load_schema_mappings("sts")
+        self.assertIn("นักเรียน", m)
+        self.assertIn("student_term", m["นักเรียน"])
+        self.assertEqual(profiles.load_schema_mappings("does-not-exist"), {})
+
 
 class TestShippedProfiles(unittest.TestCase):
     def _load(self, name):
