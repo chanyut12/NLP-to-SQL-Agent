@@ -53,5 +53,10 @@ class TestConnectShim(unittest.TestCase):
         self.assertEqual(r.json()["status"], "success")
 
 
+class TestAdminRefreshSchema(unittest.TestCase):
+    def test_refresh_schema_needs_key(self):
+        self.assertEqual(client.post("/api/admin/refresh-schema").status_code, 401)
+
+
 if __name__ == "__main__":
     unittest.main()

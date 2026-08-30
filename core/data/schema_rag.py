@@ -183,9 +183,15 @@ class SchemaRAG:
             engine: SQLAlchemy engine
             force_reindex: If True, re-index even if already indexed
         """
+        from core.domain.schema_utils import is_denylisted
+
         inspector = inspect(engine)
-        table_names = inspector.get_table_names()
-        
+        table_names = [t for t in inspector.get_table_names() if not is_denylisted(t)]
+        try:
+            table_names += [v for v in inspector.get_view_names() if not is_denylisted(v)]
+        except Exception:
+            pass
+
         # Check if already indexed
         collection = self._get_collection()
         if not force_reindex and collection.count() > 0:

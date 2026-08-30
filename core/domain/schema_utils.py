@@ -11,6 +11,23 @@ import re
 if TYPE_CHECKING:
     from core.schema_rag import SchemaRAG
 
+# Objects that are never useful for analytical Text-to-SQL: migration/backfill
+# snapshots, reconcile scratch tables, and identity/audit/config stores.
+_DENYLIST_RE = re.compile(
+    r"(backup|backfill|_bak\b|reconcile|remediation|demo_provenance|_seed_|"
+    r"standardization|migration_20\d{2})",
+    re.IGNORECASE,
+)
+_DENYLIST_EXACT = {
+    "araid_identity_records", "araid_profiles", "audit_log", "system_settings",
+    "schema_migrations", "_prisma_migrations",
+}
+
+
+def is_denylisted(name: str) -> bool:
+    return name in _DENYLIST_EXACT or bool(_DENYLIST_RE.search(name))
+
+
 def get_database_schema(engine: Engine) -> Dict[str, Any]:
     """
     Retrieve structured schema from the database INCLUDING foreign key relationships.
@@ -33,7 +50,10 @@ def get_database_schema(engine: Engine) -> Dict[str, Any]:
         view_names = set(inspector.get_view_names())
     except Exception:
         view_names = set()
-    table_names = list(inspector.get_table_names()) + sorted(view_names)
+    table_names = [
+        t for t in list(inspector.get_table_names()) + sorted(view_names)
+        if not is_denylisted(t)
+    ]
     for table in table_names:
         columns = []
         try:
@@ -82,7 +102,7 @@ def get_database_schema(engine: Engine) -> Dict[str, Any]:
         "foreign_keys": all_foreign_keys,
     }
 
-def format_schema_for_prompt(schema_data: Dict[str, Any], max_tables: int = 10) -> str:
+def format_schema_for_prompt(schema_data: Dict[str, Any], max_tables: Optional[int] = None) -> str:
     """
     Format schema into a string compatible with the prompt.
     Supports both new format (with FK info) and legacy format (flat dict).
@@ -104,7 +124,9 @@ def format_schema_for_prompt(schema_data: Dict[str, Any], max_tables: int = 10) 
         fks = []
 
     lines = []
-    table_names = list(tables.keys())[:max_tables]
+    table_names = list(tables.keys())
+    if max_tables is not None:
+        table_names = table_names[:max_tables]
 
     for table in table_names:
         lines.append(f"Table: {table}")

@@ -1,3 +1,4 @@
+import time
 import pandas as pd
 import asyncio
 from langchain_community.utilities import SQLDatabase
@@ -34,6 +35,7 @@ class NLPEngine:
         self._viz_service: VizService = None
         self._current_engine: Engine = None  # Track for schema indexing
         self._schema_cache: dict = None  # Cache for database schema
+        self._schema_cache_ts: float = 0.0  # When _schema_cache was fetched
         self._schema_text_cache: str = None  # Cache for formatted schema text
         self._join_hints_cache: str = None   # Cache for join hints
         self._all_tables_cache: list = None  # Cache for table list
@@ -109,6 +111,19 @@ class NLPEngine:
             enable_intelligent=settings.ENABLE_INTELLIGENT_VIZ
         )
 
+    def refresh_schema(self) -> None:
+        """Drop every schema cache so the next query re-introspects the datasource.
+        Call after a migration on the datasource."""
+        self._schema_cache = None
+        self._schema_cache_ts = 0.0
+        self._schema_text_cache = None
+        self._join_hints_cache = None
+        self._all_tables_cache = None
+        self._full_schema_text_cache = None
+        self._current_engine = None
+        self._schema_rag = None
+        logger.info("Schema caches cleared; next query will re-introspect.")
+
     def _create_prompt_template(self) -> PromptTemplate:
         template = """You are an expert SQL analyst specialized in Thai language understanding.
 Given an input question (possibly in Thai), create a syntactically correct, read-only SQL query for the target database dialect.
@@ -174,32 +189,36 @@ SQL:"""
         # Check if engine changed for caching purposes
         engine_changed = (self._current_engine != engine)
         
-        # Get raw schema (with caching)
-        if not engine_changed and self._schema_cache is not None:
+        # Get raw schema (cached, with a TTL so DDL on the datasource is picked up)
+        cache_fresh = (
+            self._schema_cache is not None
+            and not engine_changed
+            and (time.time() - self._schema_cache_ts) < settings.SCHEMA_CACHE_TTL_SECONDS
+        )
+        schema_refetched = not cache_fresh
+        if cache_fresh:
             raw_schema = self._schema_cache
         else:
-            # Cache miss or engine changed - fetch and cache
             raw_schema = await asyncio.to_thread(get_database_schema, engine)
             self._schema_cache = raw_schema
+            self._schema_cache_ts = time.time()
             self._current_engine = engine
-            # Invalidate derived caches when engine changes
+            # Invalidate derived caches
             self._schema_text_cache = None
             self._join_hints_cache = None
             self._all_tables_cache = None
             self._full_schema_text_cache = None
-        
-        # Initialize Schema RAG if needed (for local LLM)
-        if settings.MODEL_PROVIDER == "ollama" and self._schema_rag is None:
-            shared_embedder = self._example_store.embedder
-            shared_cache = self._example_store._embedding_cache
+
+        # Schema RAG powers the "pruned" strategy for every provider.
+        pruned = settings.SCHEMA_STRATEGY == "pruned"
+        if pruned and self._schema_rag is None:
             self._schema_rag = create_schema_rag(
-                embedder=shared_embedder,
-                embedding_cache=shared_cache,
+                embedder=self._example_store.embedder,
+                embedding_cache=self._example_store._embedding_cache,
                 profile=settings.DOMAIN_PROFILE,
             )
-        
-        # Index schema if engine changed
-        if settings.MODEL_PROVIDER == "ollama" and engine_changed:
+        if pruned and schema_refetched:
+            # index_schema_from_db self-skips when the table set is unchanged
             await asyncio.to_thread(self._schema_rag.index_schema_from_db, engine)
         
         # Pre-compute and cache schema-derived data (once per engine)
@@ -207,8 +226,8 @@ SQL:"""
             tables_dict = raw_schema.get("tables", raw_schema) if isinstance(raw_schema, dict) and "tables" in raw_schema else raw_schema
             self._all_tables_cache = list(tables_dict.keys())
         
-        # Cache formatted schema text for Cloud LLM (same every query for same engine)
-        if settings.MODEL_PROVIDER != "ollama" and self._schema_text_cache is None:
+        # Cache the full formatted schema (used by the "full" strategy and by retries)
+        if self._schema_text_cache is None:
             schema_text = format_schema_for_prompt(raw_schema)
             join_hints = get_join_hints(self._all_tables_cache, raw_schema)
             if join_hints:
@@ -230,28 +249,25 @@ SQL:"""
             )
         
         async def get_schema_text():
-            """Async task: Get filtered schema (for local LLM) or cached full schema."""
-            if settings.MODEL_PROVIDER == "ollama":
-                # Use smart filtering (semantic + Thai mapping) — per-query (depends on question)
-                filtered_schema = await asyncio.to_thread(
-                    smart_filter_schema,
-                    raw_schema,
-                    question,
-                    self._schema_rag,
-                    self._llm,
-                    settings.SCHEMA_TOP_K
-                )
-
-                schema_text = format_schema_for_prompt(filtered_schema)
-
-                tables_dict = filtered_schema.get("tables", filtered_schema) if isinstance(filtered_schema, dict) and "tables" in filtered_schema else filtered_schema
-                join_hints = get_join_hints(list(tables_dict.keys()), filtered_schema)
-                if join_hints:
-                    schema_text += f"\n\n{join_hints}"
-                return schema_text
-            else:
-                # Cloud LLM: return cached full schema (already computed above)
+            """Per-query pruned schema, or the cached full schema."""
+            if not pruned:
                 return self._schema_text_cache
+
+            # Semantic + Thai-mapping filter to the tables this question needs.
+            filtered_schema = await asyncio.to_thread(
+                smart_filter_schema,
+                raw_schema,
+                question,
+                self._schema_rag,
+                self._llm,
+                settings.SCHEMA_TOP_K,
+            )
+            schema_text = format_schema_for_prompt(filtered_schema)
+            tables_dict = filtered_schema.get("tables", filtered_schema) if isinstance(filtered_schema, dict) and "tables" in filtered_schema else filtered_schema
+            join_hints = get_join_hints(list(tables_dict.keys()), filtered_schema)
+            if join_hints:
+                schema_text += f"\n\n{join_hints}"
+            return schema_text
         
         # Run both tasks in parallel
         (dynamic_examples, rag_count), schema_text = await asyncio.gather(

@@ -294,3 +294,10 @@ async def delete_favorite(
     if not success:
         raise HTTPException(status_code=404, detail="Favorite not found")
     return {"status": "success"}
+
+
+@router.post("/admin/refresh-schema")
+async def refresh_schema(engine: NLPEngine = Depends(get_nlp_engine)):
+    """Drop the cached datasource schema. Call after a migration on the datasource."""
+    engine.refresh_schema()
+    return {"status": "ok"}

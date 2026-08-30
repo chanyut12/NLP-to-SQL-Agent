@@ -43,7 +43,12 @@ class Settings:
     # ===========================================================================
     # Schema RAG Configuration (การดึง Schema ที่เกี่ยวข้อง)
     # ===========================================================================
-    SCHEMA_TOP_K = 5               # จำนวนตารางที่จะดึงมาให้ LLM พิจารณา (สำหรับ Ollama local model)
+    # Schema handling for the generation prompt.
+    #   pruned = semantic top-K relevant tables + FK neighbours (default)
+    #   full   = every table that survives the denylist
+    SCHEMA_STRATEGY = os.getenv("SCHEMA_STRATEGY", "pruned").lower()
+    SCHEMA_TOP_K = int(os.getenv("SCHEMA_TOP_K", "25"))   # relevant tables in pruned mode
+    SCHEMA_CACHE_TTL_SECONDS = int(os.getenv("SCHEMA_CACHE_TTL_SECONDS", "3600"))
     
     # ===========================================================================
     # Embedding Model (โมเดลสำหรับ Semantic Search)
