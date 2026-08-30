@@ -8,9 +8,9 @@ from api.schemas import (
 )
 from api.dependencies import get_state_manager, get_nlp_engine, GlobalStateManager
 from core.services.engine import NLPEngine
+from core.domain.schema_utils import get_database_schema
 from core.utils.sql_metrics import parse_sql_metrics
 from core.config import settings
-from sqlalchemy import inspect
 import uuid
 import json
 import csv
@@ -131,7 +131,11 @@ async def query_data(
         raise HTTPException(status_code=503, detail="Datasource unavailable")
 
     request_id = str(uuid.uuid4())
-    dialect = request.dialect or "postgres"
+    # The datasource is fixed at deploy time; its own dialect is authoritative,
+    # not whatever the client sent.
+    dialect = {"postgresql": "postgres"}.get(
+        state.db_engine.dialect.name, state.db_engine.dialect.name
+    )
     start_time = time.time()
 
     try:
@@ -160,11 +164,10 @@ async def query_data(
     if retry_count > 0 and not error:
         status_str += f" (Retry {retry_count})"
     provider = settings.MODEL_PROVIDER
-    model_name = (
-        settings.OPENAI_MODEL if provider == "openai"
-        else settings.GOOGLE_MODEL if provider == "google"
-        else settings.OLLAMA_MODEL
-    )
+    model_name = {
+        "openai": settings.OPENAI_MODEL, "google": settings.GOOGLE_MODEL,
+        "openrouter": settings.OPENROUTER_MODEL, "zhipu": settings.ZHIPU_MODEL,
+    }.get(provider, settings.OLLAMA_MODEL)
     metrics = parse_sql_metrics(sql or "", dialect=dialect)
     await asyncio.to_thread(
         log_query_to_file,
@@ -197,16 +200,16 @@ async def query_data(
 @router.get("/schema", response_model=SchemaResponse)
 async def get_schema(state: GlobalStateManager = Depends(get_state_manager)):
     if not state.db_engine:
-        raise HTTPException(status_code=400, detail="Database not connected")
-    
+        raise HTTPException(status_code=503, detail="Datasource unavailable")
     try:
-        inspector = inspect(state.db_engine)
-        tables = []
-        for table_name in inspector.get_table_names():
-            columns = []
-            for col in inspector.get_columns(table_name):
-                columns.append(ColumnInfo(name=col['name'], type=str(col['type'])))
-            tables.append(TableInfo(name=table_name, columns=columns))
+        # Same view: denylisted junk/PII objects hidden, views included.
+        raw = await asyncio.to_thread(get_database_schema, state.db_engine)
+        tables = [
+            TableInfo(name=name, columns=[
+                ColumnInfo(name=c["name"], type=str(c["type"])) for c in cols
+            ])
+            for name, cols in raw["tables"].items()
+        ]
         return SchemaResponse(tables=tables)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

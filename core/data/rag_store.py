@@ -8,6 +8,7 @@ with persistence, dialect filtering, and metadata support.
 import json
 import os
 import asyncio
+import threading
 from typing import List, Dict, Optional, Any
 import logging
 import chromadb
@@ -60,8 +61,10 @@ class ExampleStore:
         else:
             self.client = chromadb.Client(Settings(anonymized_telemetry=False))
         
-        # Embedding cache: (text,) -> embedding list  (avoids re-encoding same question)
+        # Embedding cache: text -> embedding list. Shared with SchemaRAG and read
+        # from parallel to_thread workers, so guard every access with the lock.
         self._embedding_cache: Dict[str, list] = {}
+        self._embedding_cache_lock = threading.Lock()
 
         # Load or create collection
         self._init_collection()
@@ -146,14 +149,16 @@ class ExampleStore:
             logger.info("RAG store is up to date. No new examples to sync.")
 
     def _cached_encode(self, text: str) -> list:
-        if text in self._embedding_cache:
-            return self._embedding_cache[text]
+        with self._embedding_cache_lock:
+            hit = self._embedding_cache.get(text)
+        if hit is not None:
+            return hit
         emb = self.embedder.encode(text).tolist()
-        self._embedding_cache[text] = emb
-        if len(self._embedding_cache) > 500:
-            keys = list(self._embedding_cache.keys())
-            for k in keys[:200]:
-                del self._embedding_cache[k]
+        with self._embedding_cache_lock:
+            self._embedding_cache[text] = emb
+            if len(self._embedding_cache) > 500:
+                for k in list(self._embedding_cache.keys())[:200]:
+                    self._embedding_cache.pop(k, None)
         return emb
 
     def get_similar_examples(

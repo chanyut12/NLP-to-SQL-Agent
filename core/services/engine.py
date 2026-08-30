@@ -40,6 +40,8 @@ class NLPEngine:
         self._join_hints_cache: str = None   # Cache for join hints
         self._all_tables_cache: list = None  # Cache for table list
         self._full_schema_text_cache: str = None  # Cache for full schema (retry path)
+        self._schema_reindex: bool = False  # set by refresh_schema(), consumed under the lock
+        self._schema_lock = asyncio.Lock()  # serialize schema fetch / RAG (re)index
         self._initialize_resources()
 
     def _initialize_resources(self):
@@ -112,17 +114,12 @@ class NLPEngine:
         )
 
     def refresh_schema(self) -> None:
-        """Drop every schema cache so the next query re-introspects the datasource.
-        Call after a migration on the datasource."""
-        self._schema_cache = None
+        """Ask the next query to re-introspect the datasource and re-index the
+        schema RAG. Safe to call while queries are in flight — the actual work
+        happens under the schema lock, not here."""
         self._schema_cache_ts = 0.0
-        self._schema_text_cache = None
-        self._join_hints_cache = None
-        self._all_tables_cache = None
-        self._full_schema_text_cache = None
-        self._current_engine = None
-        self._schema_rag = None
-        logger.info("Schema caches cleared; next query will re-introspect.")
+        self._schema_reindex = True
+        logger.info("Schema marked stale; next query will re-introspect and re-index.")
 
     def _create_prompt_template(self) -> PromptTemplate:
         template = """You are an expert SQL analyst specialized in Thai language understanding.
@@ -186,45 +183,48 @@ SQL:"""
         if max_retries is None:
             max_retries = settings.MAX_RETRIES
         
-        # Check if engine changed for caching purposes
-        engine_changed = (self._current_engine != engine)
-        
-        # Get raw schema (cached, with a TTL so DDL on the datasource is picked up)
-        cache_fresh = (
-            self._schema_cache is not None
-            and not engine_changed
-            and (time.time() - self._schema_cache_ts) < settings.SCHEMA_CACHE_TTL_SECONDS
-        )
-        schema_refetched = not cache_fresh
-        if cache_fresh:
-            raw_schema = self._schema_cache
-        else:
-            raw_schema = await asyncio.to_thread(get_database_schema, engine)
-            self._schema_cache = raw_schema
-            self._schema_cache_ts = time.time()
-            self._current_engine = engine
-            # Invalidate derived caches
-            self._schema_text_cache = None
-            self._join_hints_cache = None
-            self._all_tables_cache = None
-            self._full_schema_text_cache = None
-
-        # Schema RAG powers the "pruned" strategy for every provider.
         pruned = settings.SCHEMA_STRATEGY == "pruned"
-        if pruned and self._schema_rag is None:
-            self._schema_rag = create_schema_rag(
-                embedder=self._example_store.embedder,
-                embedding_cache=self._example_store._embedding_cache,
-                profile=settings.DOMAIN_PROFILE,
+
+        # Schema fetch + RAG (re)index run under one lock so concurrent queries
+        # (and a concurrent /admin/refresh-schema) never double-index or race a
+        # half-built _schema_rag.
+        async with self._schema_lock:
+            engine_changed = (self._current_engine != engine)
+            cache_fresh = (
+                self._schema_cache is not None
+                and not engine_changed
+                and (time.time() - self._schema_cache_ts) < settings.SCHEMA_CACHE_TTL_SECONDS
             )
-        if pruned and schema_refetched:
-            # index_schema_from_db self-skips when the table set is unchanged
-            await asyncio.to_thread(self._schema_rag.index_schema_from_db, engine)
-        
-        # Pre-compute and cache schema-derived data (once per engine)
-        if self._all_tables_cache is None:
-            tables_dict = raw_schema.get("tables", raw_schema) if isinstance(raw_schema, dict) and "tables" in raw_schema else raw_schema
-            self._all_tables_cache = list(tables_dict.keys())
+            schema_refetched = not cache_fresh
+            if cache_fresh:
+                raw_schema = self._schema_cache
+            else:
+                raw_schema = await asyncio.to_thread(get_database_schema, engine)
+                self._schema_cache = raw_schema
+                self._schema_cache_ts = time.time()
+                self._current_engine = engine
+                self._schema_text_cache = None
+                self._join_hints_cache = None
+                self._all_tables_cache = None
+                self._full_schema_text_cache = None
+
+            if pruned and self._schema_rag is None:
+                self._schema_rag = create_schema_rag(
+                    embedder=self._example_store.embedder,
+                    embedding_cache=self._example_store._embedding_cache,
+                    embedding_lock=self._example_store._embedding_cache_lock,
+                    profile=settings.DOMAIN_PROFILE,
+                )
+            if pruned and (schema_refetched or self._schema_reindex):
+                await asyncio.to_thread(
+                    self._schema_rag.index_schema_from_db, engine,
+                    force_reindex=self._schema_reindex,
+                )
+                self._schema_reindex = False
+
+            if self._all_tables_cache is None:
+                tables_dict = raw_schema.get("tables", raw_schema) if isinstance(raw_schema, dict) and "tables" in raw_schema else raw_schema
+                self._all_tables_cache = list(tables_dict.keys())
         
         # Cache the full formatted schema (used by the "full" strategy and by retries)
         if self._schema_text_cache is None:
@@ -335,17 +335,14 @@ SQL:"""
                         full_schema_text = format_schema_for_prompt(raw_schema)
                         self._full_schema_text_cache = full_schema_text
 
-                    # Check if it's a "table not found" error
-                    is_table_error = any(phrase in error_msg.lower() for phrase in [
-                        "no such table", "table not found", "doesn't exist",
-                        "unknown table", "relation.*does not exist"
-                    ])
-
-                    # Check if it's a "column not found" error
-                    is_column_error = any(phrase in error_msg.lower() for phrase in [
-                        "unknown column", "no such column", "column not found",
-                        "ambiguous column"
-                    ])
+                    msg = error_msg.lower()
+                    # PostgreSQL: 'column "x" does not exist' / 'relation "x" does not exist'
+                    is_column_error = any(p in msg for p in [
+                        "unknown column", "no such column", "column not found", "ambiguous column",
+                    ]) or ("column" in msg and "does not exist" in msg)
+                    is_table_error = any(p in msg for p in [
+                        "no such table", "table not found", "doesn't exist", "unknown table",
+                    ]) or ("relation" in msg and "does not exist" in msg)
 
                     # ทั้ง table error และ column error ให้ส่ง full schema + FK info
                     if is_table_error or is_column_error:

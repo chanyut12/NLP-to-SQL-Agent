@@ -58,5 +58,15 @@ class TestAdminRefreshSchema(unittest.TestCase):
         self.assertEqual(client.post("/api/admin/refresh-schema").status_code, 401)
 
 
+class TestSchemaEndpoint(unittest.TestCase):
+    def test_schema_needs_key(self):
+        self.assertEqual(client.get("/api/schema").status_code, 401)
+
+    def test_schema_503_without_datasource(self):
+        # DATABASE_URL is unset for this test module
+        r = client.get("/api/schema", headers={"X-API-Key": "test-secret"})
+        self.assertEqual(r.status_code, 503)
+
+
 if __name__ == "__main__":
     unittest.main()

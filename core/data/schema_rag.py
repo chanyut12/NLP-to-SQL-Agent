@@ -6,6 +6,7 @@ with Thai-English mapping support for improved Local LLM accuracy.
 """
 
 import asyncio
+import threading
 from typing import List, Dict, Optional, Any, Set
 import logging
 from sentence_transformers import SentenceTransformer
@@ -91,6 +92,7 @@ class SchemaRAG:
         persist_directory: Optional[str] = "schema_rag_db",
         embedder: Optional[SentenceTransformer] = None,
         embedding_cache: Optional[Dict[str, list]] = None,
+        embedding_lock: Optional[threading.Lock] = None,
         profile: str = "default",
     ):
         """
@@ -108,6 +110,7 @@ class SchemaRAG:
         self.collection_name = f"schema_metadata_{profile}"
         self._embedder = embedder
         self._embedding_cache = embedding_cache if embedding_cache is not None else {}
+        self._embedding_cache_lock = embedding_lock or threading.Lock()
         self._client = None
         self._collection = None
         self._indexed_tables: Set[str] = set()
@@ -120,15 +123,16 @@ class SchemaRAG:
         return self._embedder
 
     def _cached_encode(self, text: str) -> list:
-        embedder = self._get_embedder()
-        if text in self._embedding_cache:
-            return self._embedding_cache[text]
-        emb = embedder.encode(text).tolist()
-        self._embedding_cache[text] = emb
-        if len(self._embedding_cache) > 500:
-            keys = list(self._embedding_cache.keys())
-            for k in keys[:200]:
-                del self._embedding_cache[k]
+        with self._embedding_cache_lock:
+            hit = self._embedding_cache.get(text)
+        if hit is not None:
+            return hit
+        emb = self._get_embedder().encode(text).tolist()
+        with self._embedding_cache_lock:
+            self._embedding_cache[text] = emb
+            if len(self._embedding_cache) > 500:
+                for k in list(self._embedding_cache.keys())[:200]:
+                    self._embedding_cache.pop(k, None)
         return emb
     
     def _get_collection(self):
@@ -390,6 +394,7 @@ def create_schema_rag(
     persist_directory: Optional[str] = "schema_rag_db",
     embedder: Optional[SentenceTransformer] = None,
     embedding_cache: Optional[Dict[str, list]] = None,
+    embedding_lock: Optional[threading.Lock] = None,
     profile: str = "default",
 ) -> SchemaRAG:
     """Create and return a SchemaRAG instance."""
@@ -397,6 +402,7 @@ def create_schema_rag(
         persist_directory=persist_directory,
         embedder=embedder,
         embedding_cache=embedding_cache,
+        embedding_lock=embedding_lock,
         profile=profile,
     )
 

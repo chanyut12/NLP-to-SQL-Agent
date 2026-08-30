@@ -9,7 +9,7 @@ const isLocal = ["localhost", "127.0.0.1", "0.0.0.0"].includes(window.location.h
 /** @type {string} Backend API base URL */
 export const API_URL = isLocal
     ? "http://localhost:8000/api"
-    : "https://<RAILWAY_BACKEND_DOMAIN>/api"; // TODO: replace with real Railway backend URL once provisioned
+    : "/api"; // served same-origin by the FastAPI app
 
 /**
  * Chart color palette for multi-series charts

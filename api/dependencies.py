@@ -1,4 +1,5 @@
 import logging
+import secrets
 import threading
 from typing import Optional
 
@@ -69,5 +70,5 @@ def require_api_key(x_api_key: str = Header(default="")) -> None:
     No-op when ``API_KEY`` is unset, so local dev and the bundled demo UI work
     without a key.
     """
-    if settings.API_KEY and x_api_key != settings.API_KEY:
+    if settings.API_KEY and not secrets.compare_digest(x_api_key.encode(), settings.API_KEY.encode()):
         raise HTTPException(status_code=401, detail="invalid or missing API key")
