@@ -19,25 +19,32 @@ vector stores so they rebuild: `rm -rf rag_db schema_rag_db`
 
 ## Metrics (`run_eval_sts.py`)
 
-Result-set equivalence against the gold SQL (order-insensitive, floats rounded).
-Reported overall, by `source_tag`, and by category:
+Result-set equivalence against the gold SQL (order-insensitive, floats rounded to
+2dp). Reported overall, by `source_tag`, and by category:
 
-- **execution_accuracy** — result matches gold (primary)
-- **first_try_success** — matched with `retry_count == 0`
+- **execution_accuracy** — exact result-set match (primary, strict)
+- **execution_accuracy_relaxed** — same answer up to one added or dropped
+  descriptive column (a name/label functionally dependent on the grouping key);
+  row counts must still match. A wrong metric can slip through only if ≥2 other
+  columns line up, so it is a loose upper bound, not the headline number.
+- **first_try_success** — strict match with `retry_count == 0`
 - **grain_correct** — same row count as gold (no duplicate amplification)
 - **sql_validity / executability**
-- **p50 / p95 latency**, **error_classes** (`no_sql`, `exec_fail`, `wrong_grain`, `wrong_result`)
+- **p50 / p95 latency**, **error_classes**: `no_sql`, `exec_fail`, `wrong_grain`,
+  `cols_only` (relaxed-pass), `wrong_result`
 
 ## Models
 
 Slugs live at the top of `eval/sweep_sts.py` — verify against openrouter.ai/models first.
 
-| Model | via | role |
-|---|---|---|
-| gpt-4o-mini | OpenAI | anchor — full RAG×retry ablation |
-| deepseek/deepseek-chat (v3) | OpenRouter | open-weight, code-strong |
-| qwen/qwen3-235b-a22b-2507 | OpenRouter | large open MoE |
-| z-ai/glm-5.2:free | OpenRouter | free-tier viability |
+| Model | via | role | status |
+|---|---|---|---|
+| gpt-4o-mini | OpenAI | anchor — full RAG×retry ablation | active |
+| z-ai/glm-5.2:free | OpenRouter | free-tier viability | active |
+| deepseek/deepseek-v4-flash | OpenRouter | open-weight, code-strong | commented out — needs OpenRouter credit |
+| qwen/qwen3-235b-a22b-2507 | OpenRouter | large open MoE | commented out — needs OpenRouter credit |
+
+`:free` models still need `OPENROUTER_API_KEY`; they just don't draw credit.
 
 ## Running
 

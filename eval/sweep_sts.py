@@ -18,9 +18,10 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ANCHOR_MODEL = "openai/gpt-4o-mini"
 MODELS = [
     ANCHOR_MODEL,
-    "openrouter/deepseek/deepseek-chat",
-    "openrouter/qwen/qwen3-235b-a22b-2507",
-    "openrouter/z-ai/glm-5.2:free",
+    # Enable once OPENROUTER_API_KEY is set / the account has credit:
+    # "openrouter/z-ai/glm-5.2:free",
+    # "openrouter/deepseek/deepseek-v4-flash",
+    # "openrouter/qwen/qwen3-235b-a22b-2507",
 ]
 
 ABLATION = list(itertools.product([0, 3, 5, 7], [0, 2]))   # (rag_top_k, max_retries)

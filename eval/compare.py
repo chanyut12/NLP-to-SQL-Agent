@@ -22,7 +22,8 @@ def load(d):
         o = r["overall"]
         rows.append({
             "model": r["model"], "rag": rag, "retry": retry, "run": run,
-            "ex": o["execution_accuracy"], "first": o["first_try_success"],
+            "ex": o["execution_accuracy"], "exr": o.get("execution_accuracy_relaxed", o["execution_accuracy"]),
+            "first": o["first_try_success"],
             "grain": o["grain_correct"], "p50": o["p50_latency"], "p95": o["p95_latency"],
             "held_out": r["by_source_tag"]["held_out"]["execution_accuracy"],
             "paraphrase": r["by_source_tag"]["paraphrase"]["execution_accuracy"],
@@ -40,7 +41,7 @@ def agg(rows, keys):
     for gk, g in sorted(groups.items()):
         rec = dict(zip(keys, gk))
         rec["runs"] = len(g)
-        for metric in ("ex", "first", "grain", "held_out", "paraphrase", "novel", "p50", "p95"):
+        for metric in ("ex", "exr", "first", "grain", "held_out", "paraphrase", "novel", "p50", "p95"):
             vals = [x[metric] for x in g]
             rec[metric] = statistics.mean(vals)
             rec[metric + "_sd"] = statistics.pstdev(vals) if len(vals) > 1 else 0.0
@@ -62,12 +63,12 @@ def main():
     lines = ["# STS Text-to-SQL — model comparison", ""]
 
     lines += ["## Model comparison (best config: rag=5, retry=2)", "",
-              "| Model | runs | EX | first-try | grain | held-out | paraphrase | novel | p50 s | p95 s |",
-              "|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|"]
+              "| Model | runs | EX | EX relaxed | first-try | grain | held-out | paraphrase | novel | p50 s | p95 s |",
+              "|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|"]
     best = [r for r in rows if r["rag"] == "5" and r["retry"] == "2"]
     for a in agg(best, ["model"]):
-        lines.append("| {model} | {runs} | {ex} | {first} | {grain} | {ho} | {pa} | {no} | {p50:.1f} | {p95:.1f} |".format(
-            model=a["model"], runs=a["runs"], ex=pct(a["ex"], a["ex_sd"]),
+        lines.append("| {model} | {runs} | {ex} | {exr} | {first} | {grain} | {ho} | {pa} | {no} | {p50:.1f} | {p95:.1f} |".format(
+            model=a["model"], runs=a["runs"], ex=pct(a["ex"], a["ex_sd"]), exr=pct(a["exr"], a["exr_sd"]),
             first=pct(a["first"], a["first_sd"]), grain=pct(a["grain"], a["grain_sd"]),
             ho=pct(a["held_out"], a["held_out_sd"]), pa=pct(a["paraphrase"], a["paraphrase_sd"]),
             no=pct(a["novel"], a["novel_sd"]), p50=a["p50"], p95=a["p95"]))

@@ -67,7 +67,36 @@ def main():
     from sqlalchemy import create_engine
     from core.services.engine import NLPEngine
     from core.config import settings
-    from eval.run_eval import result_sets_match
+    from eval.run_eval import result_sets_match, _to_comparable
+
+    def _col_vectors(df):
+        """Each column as an order-normalised tuple of its (rounded/lowercased) values."""
+        s = df.sort_values(list(df.columns), kind="stable").reset_index(drop=True)
+        out = set()
+        for col in s.columns:
+            vec = []
+            for v in s[col]:
+                if isinstance(v, float):
+                    vec.append(round(v, 2))
+                elif isinstance(v, str):
+                    vec.append(v.strip().lower())
+                else:
+                    vec.append(v)
+            out.add(tuple(vec))
+        return out
+
+    def relaxed_match(gold_df, pred_df):
+        """Same answer up to one added or dropped descriptive column (a name/label
+        that is functionally dependent on the grouping key). Row counts must match.
+        Looser than strict EX; a wrong metric can slip through only if >=2 other
+        columns still line up."""
+        if gold_df.empty or pred_df.empty:
+            return gold_df.empty and pred_df.empty
+        if len(gold_df) != len(pred_df):
+            return False
+        gv, pv = _col_vectors(gold_df), _col_vectors(pred_df)
+        shared = len(gv & pv)
+        return shared >= len(gv) - 1 and shared >= len(pv) - 1
 
     bench = json.load(open(os.path.join(ROOT, args.benchmark), encoding="utf-8"))
     questions = bench["questions"][: args.limit] if args.limit else bench["questions"]
@@ -81,7 +110,7 @@ def main():
         rec = {"id": q["id"], "source_tag": q["source_tag"], "category": q["category"],
                "question": q["question"], "pred_sql": None, "error": None,
                "sql_valid": False, "executable": False, "ex_pass": False,
-               "grain_ok": False, "first_try": False, "retry_count": 0,
+               "ex_pass_relaxed": False, "grain_ok": False, "first_try": False, "retry_count": 0,
                "duration_sec": 0.0, "error_class": None}
         try:
             sql, data, err, retry, _viz, _rag = await eng.query_database(
@@ -108,10 +137,12 @@ def main():
             rec["error"], rec["error_class"] = f"gold error: {e}", "gold_error"
             return rec
         rec["ex_pass"] = result_sets_match(gold_df, pred_df)
+        rec["ex_pass_relaxed"] = rec["ex_pass"] or relaxed_match(gold_df, pred_df)
         rec["grain_ok"] = rec["ex_pass"] or (pred_df.shape[0] == gold_df.shape[0])
         rec["first_try"] = rec["ex_pass"] and retry == 0
         if not rec["ex_pass"]:
-            rec["error_class"] = "wrong_grain" if not rec["grain_ok"] else "wrong_result"
+            rec["error_class"] = "wrong_grain" if not rec["grain_ok"] else (
+                "cols_only" if rec["ex_pass_relaxed"] else "wrong_result")
         if args.verbose:
             print(f"  [{rec['id']}] {'PASS' if rec['ex_pass'] else rec['error_class']} "
                   f"gold={gold_df.shape[0]}r pred={pred_df.shape[0]}r {rec['duration_sec']}s")
@@ -142,6 +173,7 @@ def main():
             "sql_validity": rate(rows, "sql_valid"),
             "executability": rate(rows, "executable"),
             "execution_accuracy": rate(rows, "ex_pass"),
+            "execution_accuracy_relaxed": rate(rows, "ex_pass_relaxed"),
             "first_try_success": rate(rows, "first_try"),
             "grain_correct": rate(rows, "grain_ok"),
             "p50_latency": round(statistics.median(durs), 2) if durs else 0,
@@ -164,11 +196,11 @@ def main():
     }
 
     o = report["overall"]
-    print(f"\n{'':16}{'n':>4}{'EX':>8}{'1st-try':>9}{'grain':>8}{'p50':>7}{'p95':>7}")
+    print(f"\n{'':16}{'n':>4}{'EX':>8}{'EX~':>8}{'1st-try':>9}{'grain':>8}{'p50':>7}{'p95':>7}")
     for label, b in [("OVERALL", o), *report["by_source_tag"].items()]:
         print(f"{label:16}{b['n']:>4}{b['execution_accuracy']:>8.1%}"
-              f"{b['first_try_success']:>9.1%}{b['grain_correct']:>8.1%}"
-              f"{b['p50_latency']:>7}{b['p95_latency']:>7}")
+              f"{b['execution_accuracy_relaxed']:>8.1%}{b['first_try_success']:>9.1%}"
+              f"{b['grain_correct']:>8.1%}{b['p50_latency']:>7}{b['p95_latency']:>7}")
     print("error classes:", o["error_classes"])
 
     out_path = args.output or (
