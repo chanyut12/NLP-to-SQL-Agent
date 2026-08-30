@@ -63,7 +63,8 @@ class NLPEngine:
             self._llm = ChatOpenAI(
                 model=settings.OPENAI_MODEL,
                 temperature=0,
-                api_key=settings.OPENAI_API_KEY
+                api_key=settings.OPENAI_API_KEY,
+                max_retries=settings.LLM_MAX_RETRIES,
             )
         elif settings.MODEL_PROVIDER == "google":
             from langchain_google_genai import ChatGoogleGenerativeAI
@@ -74,7 +75,8 @@ class NLPEngine:
                 model=settings.GOOGLE_MODEL,
                 temperature=0,
                 google_api_key=settings.GOOGLE_API_KEY,
-                convert_system_message_to_human=True
+                convert_system_message_to_human=True,
+                max_retries=settings.LLM_MAX_RETRIES,
             )
         elif settings.MODEL_PROVIDER == "zhipu":
             from langchain_openai import ChatOpenAI
@@ -85,6 +87,7 @@ class NLPEngine:
                 temperature=0,
                 api_key=settings.ZHIPU_API_KEY,
                 base_url="https://api.z.ai/api/coding/paas/v4",
+                max_retries=settings.LLM_MAX_RETRIES,
             )
         elif settings.MODEL_PROVIDER == "openrouter":
             from langchain_openai import ChatOpenAI
@@ -95,6 +98,7 @@ class NLPEngine:
                 temperature=0,
                 api_key=settings.OPENROUTER_API_KEY,
                 base_url="https://openrouter.ai/api/v1",
+                max_retries=settings.LLM_MAX_RETRIES,
             )
         else:
             from langchain_ollama import ChatOllama

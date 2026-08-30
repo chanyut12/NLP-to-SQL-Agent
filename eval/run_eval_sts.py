@@ -48,7 +48,7 @@ def main():
     ap.add_argument("--schema-strategy", default=None, choices=["pruned", "full"])
     ap.add_argument("--output", default=None)
     ap.add_argument("--limit", type=int, default=None, help="only the first N questions (smoke)")
-    ap.add_argument("--concurrency", type=int, default=8, help="questions answered in parallel")
+    ap.add_argument("--concurrency", type=int, default=3, help="questions answered in parallel")
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args()
 
