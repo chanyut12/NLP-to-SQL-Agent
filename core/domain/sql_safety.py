@@ -135,8 +135,9 @@ def validate_and_sanitize_sql(
     if not isinstance(root, (exp.Select, exp.Union, exp.Intersect, exp.Except)):
         raise SQLSafetyError("Only read-only SELECT queries are allowed.")
 
-    # Optional allowlist of tables
-    tables = _extract_tables(stmt)
+    # Optional allowlist of tables. CTE names are query-local, not real tables.
+    cte_names = {c.alias_or_name.lower() for c in stmt.find_all(exp.CTE) if c.alias_or_name}
+    tables = tuple(t for t in _extract_tables(stmt) if t.lower() not in cte_names)
     if allowed_tables is not None:
         allowed_set = {t.lower() for t in allowed_tables}
         for t in tables:

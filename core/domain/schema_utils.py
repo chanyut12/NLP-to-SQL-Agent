@@ -11,6 +11,14 @@ import re
 if TYPE_CHECKING:
     from core.schema_rag import SchemaRAG
 
+_SIMPLE_IDENT = re.compile(r"^[a-z_][a-z0-9_]*$")
+
+
+def quote_ident(name: str) -> str:
+    """Double-quote an identifier that PostgreSQL would otherwise fold to
+    lower-case (mixed case, e.g. "SchoolID_Onec", "AttendanceStatus")."""
+    return name if _SIMPLE_IDENT.match(name) else f'"{name}"'
+
 # Objects that are never useful for analytical Text-to-SQL: migration/backfill
 # snapshots, reconcile scratch tables, and identity/audit/config stores.
 _DENYLIST_RE = re.compile(
@@ -136,8 +144,9 @@ def format_schema_for_prompt(schema_data: Dict[str, Any], max_tables: Optional[i
             if col.get("pk"):
                 suffix += " [PK]"
             if col.get("fk"):
-                suffix += f" [FK -> {col['fk']}]"
-            lines.append(f"  - {col['name']} ({col['type']}){suffix}")
+                ref_t, _, ref_c = col["fk"].partition(".")
+                suffix += f" [FK -> {ref_t}.{quote_ident(ref_c)}]" if ref_c else f" [FK -> {col['fk']}]"
+            lines.append(f"  - {quote_ident(col['name'])} ({col['type']}){suffix}")
         lines.append("")  # Empty line between tables
 
     # Consolidated FK section — เฉพาะ FK ที่เกี่ยวกับ tables ที่แสดง
@@ -150,8 +159,8 @@ def format_schema_for_prompt(schema_data: Dict[str, Any], max_tables: Optional[i
         lines.append("Foreign Key Relationships:")
         for fk in relevant_fks:
             lines.append(
-                f"  - {fk['from_table']}.{fk['from_column']} -> "
-                f"{fk['to_table']}.{fk['to_column']}"
+                f"  - {fk['from_table']}.{quote_ident(fk['from_column'])} -> "
+                f"{fk['to_table']}.{quote_ident(fk['to_column'])}"
             )
         lines.append("")
 

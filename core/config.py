@@ -38,7 +38,7 @@ class Settings:
     # RAG Configuration (การดึงตัวอย่าง SQL ที่ใกล้เคียง)
     # ===========================================================================
     RAG_DISTANCE_THRESHOLD = 10.0  # ค่า threshold สำหรับกรอง example ที่ไกลเกินไป (ยิ่งต่ำยิ่งเข้มงวด, ลดจาก 15.0 เพื่อลด latency)
-    RAG_TOP_K = 3                  # จำนวนตัวอย่าง SQL ที่จะดึงมาช่วย LLM (Few-shot examples)
+    RAG_TOP_K = int(os.getenv("RAG_TOP_K", "3"))  # จำนวนตัวอย่าง SQL few-shot (0 = ปิด RAG)
     
     # ===========================================================================
     # Schema RAG Configuration (การดึง Schema ที่เกี่ยวข้อง)
@@ -62,7 +62,7 @@ class Settings:
     # SQL Execution Configuration (การรัน SQL)
     # ===========================================================================
     MAX_SQL_LIMIT = 500            # จำนวนแถวสูงสุดที่อนุญาตให้ query ได้ (ป้องกัน DoS)
-    MAX_RETRIES = 2                # จำนวนครั้งที่จะ retry เมื่อ SQL ผิดพลาด (Self-correction)
+    MAX_RETRIES = int(os.getenv("MAX_RETRIES", "2"))  # self-correction retries (0 = ปิด)
     
     # ===========================================================================
     # App Configuration (การตั้งค่าแอปพลิเคชัน)

@@ -14,6 +14,9 @@ The full scope-enforcement / PII gateway in the guide is out of scope here
 - Safe division / percent: `ROUND(100.0 * num / NULLIF(den, 0), 1)` — never integer division.
 - Half-open ranges on `timestamptz`: `col >= start AND col < end`.
 - Never use `YEAR()`, `MONTH()`, `DATEDIFF()`, `IFNULL()`, `strftime()`, `julianday()`.
+- Column names with uppercase letters must be double-quoted exactly as shown in the
+  schema — `enrollment."SchoolID_Onec"`, `day."AttendanceStatus"`, `"AcademicYear_Onec"`.
+  An unquoted `SchoolID_Onec` is folded to `schoolid_onec` and fails.
 
 ### STS core semantics
 - **"นักเรียน" / "นักเรียนปัจจุบัน"** = the single active current enrollment. Join
