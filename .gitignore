@@ -94,3 +94,5 @@ skills-lock.json
 # Office temp files & extracted artifacts
 ~$*
 report_unpacked/
+
+idea*

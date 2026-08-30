@@ -36,6 +36,7 @@ class NLPEngine:
         self._schema_text_cache: str = None  # Cache for formatted schema text
         self._join_hints_cache: str = None   # Cache for join hints
         self._all_tables_cache: list = None  # Cache for table list
+        self._full_schema_text_cache: str = None  # Cache for full schema (retry path)
         self._initialize_resources()
 
     def _initialize_resources(self):
@@ -222,11 +223,16 @@ SQL:"""
             self._schema_text_cache = None
             self._join_hints_cache = None
             self._all_tables_cache = None
+            self._full_schema_text_cache = None
         
         # Initialize Schema RAG if needed (for local LLM)
         if settings.MODEL_PROVIDER == "ollama" and self._schema_rag is None:
             shared_embedder = self._example_store.embedder
-            self._schema_rag = create_schema_rag(embedder=shared_embedder)
+            shared_cache = self._example_store._embedding_cache
+            self._schema_rag = create_schema_rag(
+                embedder=shared_embedder,
+                embedding_cache=shared_cache
+            )
         
         # Index schema if engine changed
         if settings.MODEL_PROVIDER == "ollama" and engine_changed:
@@ -314,7 +320,7 @@ SQL:"""
         all_tables = self._all_tables_cache
 
         # Lazy: full_schema_text only computed if a retry actually needs it
-        full_schema_text = None
+        full_schema_text = self._full_schema_text_cache if self._full_schema_text_cache else None
 
         for attempt in range(max_retries + 1):
             try:
@@ -347,6 +353,7 @@ SQL:"""
                     # Lazy compute full schema text (only on first retry)
                     if full_schema_text is None:
                         full_schema_text = format_schema_for_prompt(raw_schema)
+                        self._full_schema_text_cache = full_schema_text
 
                     # Check if it's a "table not found" error
                     is_table_error = any(phrase in error_msg.lower() for phrase in [

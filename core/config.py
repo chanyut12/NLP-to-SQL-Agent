@@ -55,4 +55,9 @@ class Settings:
     LOG_FILE_JSONL = "query_logs.jsonl"
     LOG_FILE_CSV = "query_logs.csv"
 
+    # ===========================================================================
+    # CORS Configuration (Frontend Origins)
+    # ===========================================================================
+    CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*")
+
 settings = Settings()

@@ -91,7 +91,8 @@ class SchemaRAG:
         self,
         model_name: str = None,
         persist_directory: Optional[str] = "schema_rag_db",
-        embedder: Optional[SentenceTransformer] = None
+        embedder: Optional[SentenceTransformer] = None,
+        embedding_cache: Optional[Dict[str, list]] = None
     ):
         """
         Initialize the Schema RAG store.
@@ -100,11 +101,13 @@ class SchemaRAG:
             model_name: Sentence transformer model for embeddings
             persist_directory: Directory to persist ChromaDB
             embedder: Optional shared SentenceTransformer instance
+            embedding_cache: Optional shared embedding cache dict
         """
         from core.config import settings
         self.model_name = model_name or settings.EMBEDDING_MODEL
         self.persist_directory = persist_directory
         self._embedder = embedder
+        self._embedding_cache = embedding_cache if embedding_cache is not None else {}
         self._client = None
         self._collection = None
         self._indexed_tables: Set[str] = set()
@@ -115,6 +118,18 @@ class SchemaRAG:
             logger.info("Loading schema embedding model: %s", self.model_name)
             self._embedder = load_sentence_transformer(self.model_name)
         return self._embedder
+
+    def _cached_encode(self, text: str) -> list:
+        embedder = self._get_embedder()
+        if text in self._embedding_cache:
+            return self._embedding_cache[text]
+        emb = embedder.encode(text).tolist()
+        self._embedding_cache[text] = emb
+        if len(self._embedding_cache) > 500:
+            keys = list(self._embedding_cache.keys())
+            for k in keys[:200]:
+                del self._embedding_cache[k]
+        return emb
     
     def _get_collection(self):
         """Get or create the ChromaDB collection."""
@@ -258,10 +273,8 @@ class SchemaRAG:
             logger.warning("Schema not indexed. Returning all tables.")
             return list(self._indexed_tables)
         
-        embedder = self._get_embedder()
-        # E5 models require 'query: ' prefix for search queries
         text_to_embed = f"query: {question}"
-        query_embedding = embedder.encode(text_to_embed).tolist()
+        query_embedding = self._cached_encode(text_to_embed)
         
         results = collection.query(
             query_embeddings=[query_embedding],
@@ -369,10 +382,15 @@ class SchemaRAG:
 
 def create_schema_rag(
     persist_directory: Optional[str] = "schema_rag_db",
-    embedder: Optional[SentenceTransformer] = None
+    embedder: Optional[SentenceTransformer] = None,
+    embedding_cache: Optional[Dict[str, list]] = None
 ) -> SchemaRAG:
     """Create and return a SchemaRAG instance."""
-    return SchemaRAG(persist_directory=persist_directory, embedder=embedder)
+    return SchemaRAG(
+        persist_directory=persist_directory,
+        embedder=embedder,
+        embedding_cache=embedding_cache
+    )
 
 
 # =============================================================================

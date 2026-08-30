@@ -1,42 +1,63 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="th">
 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light dark">
     <title>Thai NLP to SQL Agent</title>
+    <script>
+        // Apply saved theme before first paint to avoid a light/dark flash
+        (function () {
+            var theme = localStorage.getItem('theme');
+            if (theme === 'dark') document.documentElement.dataset.theme = 'dark';
+        })();
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link
-        href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=Inter:wght@300;400;500;600;700&display=swap"
+        href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=Anuphan:wght@400;500;600;700&display=swap"
         rel="stylesheet">
     <link rel="stylesheet" href="css/style.css">
     <!-- Highlight.js for Syntax Highlighting -->
     <link rel="stylesheet"
-        href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/sql.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+        href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css"
+        integrity="sha384-oaMLBGEzBOJx3UHwac0cVndtX5fxGQIfnAeFZ35RTgqPcYlbprH9o9PUV/F8Le07" crossorigin="anonymous">
+    <script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"
+        integrity="sha384-F/bZzf7p3Joyp5psL90p/p89AZJsndkSoGwRpXcZhleCWhd8SnRuoYo4d0yirjJp" crossorigin="anonymous"></script>
+    <script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/sql.min.js"
+        integrity="sha384-8q00eP+tyV9451aJYD5ML3ftuHKsGnDcezp7EXMEclDg1fZVSoj8O+3VyJTkXmWp" crossorigin="anonymous"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1"
+        integrity="sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ" crossorigin="anonymous"></script>
 </head>
 
 <body>
     <div class="sidebar" id="sidebar">
         <div class="sidebar-header">
             <div class="brand">🤖 NLP2SQL</div>
-            <button class="toggle-sidebar-btn" id="toggle-sidebar-btn" data-action="toggleSidebar" title="Hide Sidebar (Ctrl+B)">
-                <span class="toggle-icon">✕</span>
-            </button>
+            <div class="header-actions">
+                <button class="theme-toggle-btn" id="theme-toggle-btn" data-action="toggleTheme" title="Toggle light/dark theme">
+                    <span class="theme-icon" id="theme-icon">🌙</span>
+                </button>
+                <button class="toggle-sidebar-btn" id="toggle-sidebar-btn" data-action="toggleSidebar" title="Hide Sidebar (Ctrl+B)">
+                    <span class="toggle-icon">✕</span>
+                </button>
+            </div>
         </div>
 
-        <div class="tabs">
-            <div class="tab active" data-action="switchTab" data-tab="connection">🔌 Connect</div>
-            <div class="tab" data-action="switchTab" data-tab="schema">🗄️ Schema</div>
-            <div class="tab" data-action="switchTab" data-tab="history">📜 History</div>
-            <div class="tab" data-action="switchTab" data-tab="favorites">⭐ Favs</div>
+        <div class="tabs" role="tablist" aria-label="Sidebar sections">
+            <button type="button" class="tab active" data-action="switchTab" data-tab="connection"
+                role="tab" aria-selected="true" aria-controls="tab-connection" id="tab-btn-connection" tabindex="0">🔌 Connect</button>
+            <button type="button" class="tab" data-action="switchTab" data-tab="schema"
+                role="tab" aria-selected="false" aria-controls="tab-schema" id="tab-btn-schema" tabindex="-1">🗄️ Schema</button>
+            <button type="button" class="tab" data-action="switchTab" data-tab="history"
+                role="tab" aria-selected="false" aria-controls="tab-history" id="tab-btn-history" tabindex="-1">📜 History</button>
+            <button type="button" class="tab" data-action="switchTab" data-tab="favorites"
+                role="tab" aria-selected="false" aria-controls="tab-favorites" id="tab-btn-favorites" tabindex="-1">⭐ Favs</button>
         </div>
 
         <!-- Tab Content: Connection -->
-        <div id="tab-connection" class="tab-content active">
+        <div id="tab-connection" class="tab-content active" role="tabpanel" aria-labelledby="tab-btn-connection">
             <div class="control-group">
                 <label>Database Type</label>
                 <select id="db-type">
@@ -52,6 +73,7 @@
             </div>
 
             <div id="sql-config" class="control-group" style="display: none;">
+                <p class="field-hint">ไม่แน่ใจว่าต้องกรอกอะไร? สอบถามข้อมูลนี้จากทีมไอทีหรือผู้ดูแลฐานข้อมูลของคุณ</p>
                 <label>Host</label>
                 <input type="text" id="db-host" value="localhost">
                 <label>Port</label>
@@ -69,23 +91,23 @@
         </div>
 
         <!-- Tab Content: Schema -->
-        <div id="tab-schema" class="tab-content">
+        <div id="tab-schema" class="tab-content" role="tabpanel" aria-labelledby="tab-btn-schema">
             <div id="schema-container">
-                <p style="color: #94a3b8; font-size: 0.9em; text-align: center; margin-top: 20px;">
+                <p class="empty-state">
                     Please connect to a database to view schema.
                 </p>
             </div>
         </div>
 
         <!-- Tab Content: History -->
-        <div id="tab-history" class="tab-content">
+        <div id="tab-history" class="tab-content" role="tabpanel" aria-labelledby="tab-btn-history">
             <div id="history-container">
                 <!-- History Items -->
             </div>
         </div>
 
         <!-- Tab Content: Favorites -->
-        <div id="tab-favorites" class="tab-content">
+        <div id="tab-favorites" class="tab-content" role="tabpanel" aria-labelledby="tab-btn-favorites">
             <div id="favorites-container">
                 <!-- Favorite Items -->
             </div>
@@ -102,7 +124,12 @@
             <!-- Messages will appear here -->
             <div class="message bot-message">
                 สวัสดีครับ! ผมคือ AI Assistant ที่ช่วยคุณเขียน SQL Query ภาษาไทย<br>
-                กรุณาเชื่อมต่อ Database ด้านซ้ายก่อนเริ่มใช้งานนะครับ
+                กรุณาเชื่อมต่อ Database ด้านซ้ายก่อนเริ่มใช้งานนะครับ พอเชื่อมต่อแล้ว ลองถามได้แบบนี้:
+                <div class="example-chips">
+                    <button type="button" class="example-chip" data-action="loadSQL" data-question="ยอดขายเดือนนี้เท่าไหร่">ยอดขายเดือนนี้เท่าไหร่</button>
+                    <button type="button" class="example-chip" data-action="loadSQL" data-question="ลูกค้า 5 อันดับแรกที่ซื้อเยอะที่สุด">ลูกค้า 5 อันดับแรกที่ซื้อเยอะที่สุด</button>
+                    <button type="button" class="example-chip" data-action="loadSQL" data-question="จำนวนออเดอร์ในแต่ละเดือน">จำนวนออเดอร์ในแต่ละเดือน</button>
+                </div>
             </div>
         </div>
 
@@ -132,9 +159,25 @@
             </div>
             <textarea id="feedback-text-input"
                 placeholder="พิมพ์ feedback ของคุณ... (เช่น SQL ผิด, ต้องการ JOIN อีกตาราง, etc.)" rows="4"></textarea>
+            <p id="feedback-error" class="text-danger" style="display: none; font-size: var(--text-sm); margin-top: 8px;"></p>
             <div class="modal-actions">
                 <button class="secondary-btn" data-action="closeFeedbackModal">Cancel</button>
                 <button class="primary-btn" data-action="submitFeedbackWithText">Submit 💬</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Confirm Modal (replaces native confirm()) -->
+    <div id="confirm-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="confirm-modal-title">ยืนยันการทำรายการ</h3>
+                <button class="close-btn" data-action="closeConfirmModal">&times;</button>
+            </div>
+            <p id="confirm-modal-message"></p>
+            <div class="modal-actions">
+                <button class="secondary-btn" data-action="closeConfirmModal">ยกเลิก</button>
+                <button class="primary-btn" data-action="confirmModalAccept">ยืนยัน</button>
             </div>
         </div>
     </div>

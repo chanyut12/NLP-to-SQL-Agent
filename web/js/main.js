@@ -12,7 +12,7 @@ import {
     getVizConfig, getVizData, getChartId,
     setVizState, clearVizState
 } from './modules/state.js';
-import { sanitize } from './modules/utils.js';
+import { sanitize, formatError } from './modules/utils.js';
 import { connectDatabase, sendQuery, saveFavorite, deleteFavoriteById } from './modules/api.js';
 import {
     initUI, switchTab, appendMessage, appendLoading, removeLoading,
@@ -32,6 +32,7 @@ let chartSelector = null;
 let sidebar = null;
 let openSidebarBtn = null;
 let sidebarBackdrop = null;
+let themeIcon = null;
 
 const MOBILE_QUERY = '(max-width: 767px)';
 const isMobileViewport = () => window.matchMedia(MOBILE_QUERY).matches;
@@ -49,6 +50,7 @@ function init() {
     sidebar = document.getElementById('sidebar');
     openSidebarBtn = document.getElementById('open-sidebar-btn');
     sidebarBackdrop = document.getElementById('sidebar-backdrop');
+    themeIcon = document.getElementById('theme-icon');
 
     // Initialize UI module
     initUI();
@@ -58,6 +60,9 @@ function init() {
 
     // Restore sidebar state from localStorage
     restoreSidebarState();
+
+    // Sync theme toggle icon with the theme applied pre-paint (see index.html inline script)
+    restoreThemeState();
 }
 
 /**
@@ -65,6 +70,7 @@ function init() {
  */
 function setupEventListeners() {
     // Database type selector
+    const DEFAULT_PORTS = { MySQL: '3306', PostgreSQL: '5432' };
     dbTypeSelect.addEventListener('change', (e) => {
         const type = e.target.value;
         const sqliteConfig = document.getElementById('sqlite-config');
@@ -76,6 +82,14 @@ function setupEventListeners() {
         } else {
             sqliteConfig.style.display = 'none';
             sqlConfig.style.display = 'flex';
+
+            // Refresh the port to this dialect's default, unless the user
+            // already typed something other than one of the known defaults.
+            const portInput = document.getElementById('db-port');
+            const knownDefaults = Object.values(DEFAULT_PORTS);
+            if (!portInput.value || knownDefaults.includes(portInput.value)) {
+                portInput.value = DEFAULT_PORTS[type] || '';
+            }
         }
     });
 
@@ -119,9 +133,34 @@ function setupEventListeners() {
     // Global click event delegation for all data-action elements
     document.addEventListener('click', handleAction);
 
+    // Arrow-key navigation between sidebar tabs (ARIA tablist pattern)
+    document.querySelector('.tabs').addEventListener('keydown', handleTabKeydown);
+
     // Keep responsive layout in sync across viewport changes
     window.addEventListener('resize', handleResize);
     window.addEventListener('orientationchange', handleResize);
+}
+
+/**
+ * Move focus (and switch to) the next/previous tab on arrow keys, per the
+ * ARIA APG tablist keyboard pattern.
+ * @param {KeyboardEvent} e
+ */
+function handleTabKeydown(e) {
+    const tabs = Array.from(document.querySelectorAll('.tab'));
+    const currentIndex = tabs.indexOf(document.activeElement);
+    if (currentIndex === -1) return;
+
+    let newIndex;
+    if (e.key === 'ArrowRight') newIndex = (currentIndex + 1) % tabs.length;
+    else if (e.key === 'ArrowLeft') newIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+    else if (e.key === 'Home') newIndex = 0;
+    else if (e.key === 'End') newIndex = tabs.length - 1;
+    else return;
+
+    e.preventDefault();
+    tabs[newIndex].focus();
+    switchTab(tabs[newIndex].dataset.tab);
 }
 
 /**
@@ -138,6 +177,15 @@ function handleAction(e) {
     switch (action) {
         case 'toggleSidebar':
             toggleSidebar();
+            break;
+        case 'toggleTheme':
+            toggleTheme();
+            break;
+        case 'closeConfirmModal':
+            closeConfirmModal();
+            break;
+        case 'confirmModalAccept':
+            confirmModalAccept();
             break;
         case 'switchTab':
             switchTab(target.dataset.tab);
@@ -207,23 +255,47 @@ async function saveFavoriteFromHistory(logId, question, sql, dialect) {
         await saveFavorite(question, sql, dialect, logId);
         switchTab('favorites');
     } catch (err) {
-        alert("Failed to save favorite: " + err.message);
+        appendMessage(formatError("บันทึกรายการโปรดไม่สำเร็จ กรุณาลองใหม่อีกครั้ง", err), false);
     }
 }
 
 /**
- * Delete a favorite query
+ * Delete a favorite query (after user confirms via the in-app confirm modal).
  * @param {string} favId - Favorite ID
  */
-async function deleteFavorite(favId) {
-    if (!confirm("Remove this favorite?")) return;
+function deleteFavorite(favId) {
+    showConfirmModal("ต้องการลบรายการโปรดนี้หรือไม่? การลบไม่สามารถย้อนกลับได้", async () => {
+        try {
+            await deleteFavoriteById(favId);
+            fetchFavorites();
+        } catch (err) {
+            appendMessage(formatError("ลบรายการโปรดไม่สำเร็จ กรุณาลองใหม่อีกครั้ง", err), false);
+        }
+    });
+}
 
-    try {
-        await deleteFavoriteById(favId);
-        fetchFavorites();
-    } catch (err) {
-        alert("Failed to delete: " + err.message);
-    }
+/**
+ * Show the generic confirm modal (replaces native confirm()) and stash the
+ * action to run if the user accepts.
+ * @param {string} message - Confirmation prompt text
+ * @param {() => void} onConfirm - Callback to run if the user confirms
+ */
+let pendingConfirmAction = null;
+function showConfirmModal(message, onConfirm) {
+    document.getElementById('confirm-modal-message').textContent = message;
+    pendingConfirmAction = onConfirm;
+    document.getElementById('confirm-modal').style.display = 'flex';
+}
+
+function closeConfirmModal() {
+    document.getElementById('confirm-modal').style.display = 'none';
+    pendingConfirmAction = null;
+}
+
+function confirmModalAccept() {
+    const action = pendingConfirmAction;
+    closeConfirmModal();
+    if (action) action();
 }
 
 /**
@@ -243,6 +315,30 @@ function applySidebarCollapsed(collapsed) {
             sidebarBackdrop?.classList.remove('active');
         }
     }
+}
+
+/**
+ * Sync the theme toggle icon with the theme already applied pre-paint
+ * (see the inline script in index.html that reads localStorage before first render).
+ */
+function restoreThemeState() {
+    const isDark = document.documentElement.dataset.theme === 'dark';
+    themeIcon.textContent = isDark ? '☀️' : '🌙';
+}
+
+/**
+ * Toggle between light and dark theme, persisting the choice.
+ */
+function toggleTheme() {
+    const isDark = document.documentElement.dataset.theme === 'dark';
+    if (isDark) {
+        delete document.documentElement.dataset.theme;
+        localStorage.setItem('theme', 'light');
+    } else {
+        document.documentElement.dataset.theme = 'dark';
+        localStorage.setItem('theme', 'dark');
+    }
+    themeIcon.textContent = isDark ? '🌙' : '☀️';
 }
 
 /**
@@ -317,7 +413,7 @@ async function connectDB() {
         // Auto fetch schema
         fetchSchema();
     } catch (e) {
-        appendMessage(`❌ Connection failed: ${e.message}`, false);
+        appendMessage(formatError("เชื่อมต่อฐานข้อมูลไม่สำเร็จ กรุณาตรวจสอบ Host, Port, Username และ Password อีกครั้ง", e), false);
         statusBadge.className = "status-badge disconnected";
         statusBadge.textContent = "Error";
     } finally {
@@ -370,7 +466,7 @@ async function sendMessage() {
             }
 
             if (data.retry_count > 0) {
-                html += `<br><small style="color: #fbbf24">Self-corrected after ${data.retry_count} retries</small>`;
+                html += `<br><small class="text-warning">Self-corrected after ${data.retry_count} retries</small>`;
             }
 
             // Visualization
@@ -402,7 +498,7 @@ async function sendMessage() {
 
     } catch (e) {
         removeLoading();
-        appendMessage(`❌ Network Error: ${e.message}`, false);
+        appendMessage(formatError("ไม่สามารถติดต่อเซิร์ฟเวอร์ได้ กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ตแล้วลองใหม่อีกครั้ง", e), false);
     }
 }
 

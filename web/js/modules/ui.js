@@ -31,8 +31,12 @@ export function switchTab(tabId) {
     setCurrentTab(tabId);
 
     // Update Tab UI
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    document.querySelector(`.tab[data-tab="${tabId}"]`).classList.add('active');
+    document.querySelectorAll('.tab').forEach(t => {
+        const isActive = t.dataset.tab === tabId;
+        t.classList.toggle('active', isActive);
+        t.setAttribute('aria-selected', String(isActive));
+        t.tabIndex = isActive ? 0 : -1;
+    });
 
     // Update Content UI
     document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
@@ -124,7 +128,7 @@ export async function fetchSchema() {
         const data = await fetchSchemaData();
 
         if (!data.tables || data.tables.length === 0) {
-            schemaContainer.innerHTML = '<p style="text-align: center; color: #64748b;">No tables found</p>';
+            schemaContainer.innerHTML = '<p class="empty-state">No tables found</p>';
             return;
         }
 
@@ -156,7 +160,7 @@ export async function fetchHistory() {
         const data = await fetchHistoryData();
 
         if (!data.history || data.history.length === 0) {
-            historyContainer.innerHTML = '<p style="text-align: center; color: #64748b; margin-top: 20px;">No history yet</p>';
+            historyContainer.innerHTML = '<p class="empty-state">No history yet</p>';
             return;
         }
 
@@ -169,18 +173,18 @@ export async function fetchHistory() {
             <div class="history-item" data-action="loadSQL" data-question="${sanitize(item.question)}" data-sql="${sanitize(item.sql)}">
                 <div class="item-header">
                     <span>${formatTimestamp(item.timestamp)}</span>
-                    <span style="color: ${item.status.includes('Success') ? '#22c55e' : '#ef4444'}">${item.status}</span>
+                    <span class="${item.status.includes('Success') ? 'text-success' : 'text-danger'}">${item.status}</span>
                 </div>
                 <div class="item-question">${sanitize(item.question)}</div>
                 <div class="item-sql">${sanitize(item.sql)}</div>
                 ${hasFeedbackText ? `<div class="feedback-comment" title="User Feedback">💬 ${sanitize(item.feedback_text)}</div>` : ''}
                 <div class="actions">
-                    <button class="icon-btn" data-action="sendFeedback" data-log-id="${item.log_id}" data-type="positive"
-                        style="${isPos ? 'color: #22c55e; font-weight: bold;' : ''}" title="Good Response">
+                    <button class="icon-btn ${isPos ? 'is-active-positive' : ''}" data-action="sendFeedback" data-log-id="${item.log_id}" data-type="positive"
+                        title="Good Response">
                         👍
                     </button>
-                    <button class="icon-btn" data-action="sendFeedback" data-log-id="${item.log_id}" data-type="negative"
-                        style="${isNeg ? 'color: #ef4444; font-weight: bold;' : ''}" title="Bad Response">
+                    <button class="icon-btn ${isNeg ? 'is-active-negative' : ''}" data-action="sendFeedback" data-log-id="${item.log_id}" data-type="negative"
+                        title="Bad Response">
                         👎
                     </button>
                     <button class="icon-btn" data-action="showFeedbackModal" data-log-id="${item.log_id}" title="Add Comment">
@@ -211,7 +215,7 @@ export async function fetchFavorites() {
         const data = await fetchFavoritesData();
 
         if (!data.favorites || data.favorites.length === 0) {
-            favoritesContainer.innerHTML = '<p style="text-align: center; color: #64748b; margin-top: 20px;">No favorites yet</p>';
+            favoritesContainer.innerHTML = '<p class="empty-state">No favorites yet</p>';
             return;
         }
 

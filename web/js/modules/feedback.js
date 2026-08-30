@@ -17,8 +17,21 @@ export function showFeedbackModal(logId) {
     const modal = document.getElementById('feedback-modal');
     const textarea = document.getElementById('feedback-text-input');
     textarea.value = '';
+    hideFeedbackError();
     modal.style.display = 'flex';
     textarea.focus();
+}
+
+function showFeedbackError(message) {
+    const errorEl = document.getElementById('feedback-error');
+    errorEl.textContent = message;
+    errorEl.style.display = 'block';
+}
+
+function hideFeedbackError() {
+    const errorEl = document.getElementById('feedback-error');
+    errorEl.style.display = 'none';
+    errorEl.textContent = '';
 }
 
 /**
@@ -48,7 +61,7 @@ export async function submitFeedbackWithText() {
         fetchHistory(); // Refresh to show new comment
     } catch (e) {
         console.error("Feedback error", e);
-        alert("Failed to save feedback");
+        showFeedbackError("บันทึก Feedback ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง");
     }
 }
 

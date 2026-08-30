@@ -210,14 +210,18 @@ nlp_sql_project/
 ├── core/                     # Core Business Logic
 │   ├── services/            # Application Use Cases
 │   │   ├── engine.py        # NLPEngine (main orchestrator)
-│   │   └── query_history.py
+│   │   ├── favorite_service.py # Favorite queries management
+│   │   ├── history_service.py  # History log management
+│   │   └── query_history.py # Legacy query history
 │   ├── domain/              # Business Rules
-│   │   ├── schema_utils.py
-│   │   └── sql_safety.py
+│   │   ├── history_models.py# Data models for history
+│   │   ├── schema_pruning.py# Pruning large database schemas
+│   │   ├── schema_utils.py  # Database schema fetching
+│   │   └── sql_safety.py    # Read-only enforcement
 │   ├── data/                # Data Infrastructure
-│   │   ├── database.py
-│   │   ├── rag_store.py
-│   │   └── schema_rag.py
+│   │   ├── database.py      # Connection logic
+│   │   ├── rag_store.py     # Few-shot RAG retrieval
+│   │   └── schema_rag.py    # Schema RAG retrieval
 │   ├── viz/                 # Visualization
 │   │   └── viz_recommender.py  # VizService
 │   ├── utils/               # Shared Utilities
@@ -238,16 +242,18 @@ nlp_sql_project/
 │           ├── ui.js        # DOM manipulation
 │           └── utils.js     # Utility functions
 │
-├── scripts/                  # Utilities
-│   ├── setup_db.py          # สร้าง sample database
-│   └── convert_mysql_to_sqlite.py
+├── scripts/                  # Utilities (setup_db, git tools, migration)
+├── tests/                    # Unit tests
+├── eval/                     # Evaluation metrics and code
+├── docs/                     # Documentation (Specs, Guides, Roadmap)
+├── rag_db/                   # Local vector store for examples
+├── schema_rag_db/            # Local vector store for schemas
 │
-├── thai_sql_examples.json    # RAG training data
-├── requirements.txt          # Python dependencies
-└── docs/                     # Documentation
-    ├── PRODUCT_SPEC.md      # Developer guide
-    ├── MODEL_SETUP.md       # LLM configuration
-    └── TUNING_GUIDE.md      # Performance optimization
+├── pyproject.toml            # Python dependencies (uv)
+├── docker-compose.yml        # Docker configuration
+├── setup.sh / setup.bat      # Environment setup scripts
+├── start_server.sh           # Backend start scripts
+└── thai_sql_examples.json    # RAG training data
 ```
 
 ---

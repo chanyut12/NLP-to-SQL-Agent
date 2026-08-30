@@ -3,8 +3,13 @@
  * Contains API URL and application constants
  */
 
+/** @type {boolean} Whether the frontend is running on localhost */
+const isLocal = ["localhost", "127.0.0.1", "0.0.0.0"].includes(window.location.hostname);
+
 /** @type {string} Backend API base URL */
-export const API_URL = "http://localhost:8000/api";
+export const API_URL = isLocal
+    ? "http://localhost:8000/api"
+    : "https://<RAILWAY_BACKEND_DOMAIN>/api"; // TODO: replace with real Railway backend URL once provisioned
 
 /**
  * Chart color palette for multi-series charts

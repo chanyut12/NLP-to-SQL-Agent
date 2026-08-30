@@ -35,6 +35,11 @@ export function renderChart(canvasId, config, data) {
     const ctx = canvas.getContext('2d');
     const isPie = config.chart_type === 'pie';
 
+    // Read theme tokens so axis/legend text and gridlines track the active light/dark theme
+    const rootStyles = getComputedStyle(document.documentElement);
+    const axisTextColor = rootStyles.getPropertyValue('--color-text-muted').trim();
+    const gridColor = rootStyles.getPropertyValue('--color-border').trim();
+
     let datasets = [];
     let labels = [];
 
@@ -74,8 +79,8 @@ export function renderChart(canvasId, config, data) {
         labels = data.map(row => row[config.x_col]);
         const values = data.map(row => row[config.y_col]);
 
-        const bgColors = isPie ? PIE_COLORS : 'rgba(96, 165, 250, 0.5)';
-        const borderColors = isPie ? PIE_COLORS : '#60a5fa';
+        const bgColors = isPie ? PIE_COLORS : CHART_COLORS[0].bg;
+        const borderColors = isPie ? PIE_COLORS : CHART_COLORS[0].border;
 
         datasets.push({
             label: config.y_col,
@@ -107,7 +112,7 @@ export function renderChart(canvasId, config, data) {
             plugins: {
                 legend: {
                     position: isPie ? 'right' : 'top',
-                    labels: { color: '#94a3b8' }
+                    labels: { color: axisTextColor }
                 },
                 tooltip: {
                     callbacks: {
@@ -134,12 +139,12 @@ export function renderChart(canvasId, config, data) {
             },
             scales: config.chart_type !== 'pie' ? {
                 x: {
-                    ticks: { color: '#94a3b8' },
-                    grid: { color: 'rgba(255, 255, 255, 0.05)' }
+                    ticks: { color: axisTextColor },
+                    grid: { color: gridColor }
                 },
                 y: {
-                    ticks: { color: '#94a3b8' },
-                    grid: { color: 'rgba(255, 255, 255, 0.05)' }
+                    ticks: { color: axisTextColor },
+                    grid: { color: gridColor }
                 }
             } : {}
         }

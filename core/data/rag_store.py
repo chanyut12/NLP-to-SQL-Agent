@@ -54,6 +54,9 @@ class ExampleStore:
         else:
             self.client = chromadb.Client(Settings(anonymized_telemetry=False))
         
+        # Embedding cache: (text,) -> embedding list  (avoids re-encoding same question)
+        self._embedding_cache: Dict[str, list] = {}
+
         # Load or create collection
         self._init_collection()
     
@@ -134,6 +137,17 @@ class ExampleStore:
         else:
             logger.info("RAG store is up to date. No new examples to sync.")
 
+    def _cached_encode(self, text: str) -> list:
+        if text in self._embedding_cache:
+            return self._embedding_cache[text]
+        emb = self.embedder.encode(text).tolist()
+        self._embedding_cache[text] = emb
+        if len(self._embedding_cache) > 500:
+            keys = list(self._embedding_cache.keys())
+            for k in keys[:200]:
+                del self._embedding_cache[k]
+        return emb
+
     def get_similar_examples(
         self,
         query: str,
@@ -158,42 +172,25 @@ class ExampleStore:
         if top_k <= 0:
             return []
 
-        # E5 models require 'query: ' prefix for search queries
         text_to_embed = f"query: {query}"
-        query_embedding = self.embedder.encode(text_to_embed).tolist()
+        query_embedding = self._cached_encode(text_to_embed)
 
-        # Try to get examples with dialect filter first
-        # ถ้าระบุ dialect จะ filter เฉพาะ examples ที่ตรงกับ dialect นั้น
-        where_filter = {"dialect": dialect} if dialect else None
+        # Strategy: fetch 2x results WITHOUT dialect filter, then prioritize
+        # dialect-matching ones. This avoids a double-query.
+        fetch_k = top_k * 2 if dialect else top_k
 
         results = self.collection.query(
             query_embeddings=[query_embedding],
-            n_results=top_k,
-            where=where_filter,
+            n_results=fetch_k,
             include=["documents", "metadatas", "distances"]
         )
 
-        # Fallback: If no results found with dialect filter, try without filter
-        if dialect and (not results['documents'] or not results['documents'][0] or len(results['documents'][0]) < top_k):
-            logger.warning(
-                "RAG: Only %s examples found for dialect '%s'. Fetching more without filter.",
-                len(results['documents'][0]) if results['documents'] and results['documents'][0] else 0,
-                dialect,
-            )
-            results_fallback = self.collection.query(
-                query_embeddings=[query_embedding],
-                n_results=top_k,
-                where=None,  # No filter
-                include=["documents", "metadatas", "distances"]
-            )
-            # Merge results (prefer dialect-matching ones)
-            if results_fallback['documents'] and results_fallback['documents'][0]:
-                results = results_fallback
-
         examples = []
         if results and results['documents'] and results['documents'][0]:
+            dialect_matches = []
+            other_matches = []
+
             for i in range(len(results['documents'][0])):
-                # Filter by distance if threshold is set
                 distance = results['distances'][0][i]
                 if threshold is not None and distance > threshold:
                     continue
@@ -203,12 +200,33 @@ class ExampleStore:
                 question = metadata.get('question', '')
                 source_dialect = metadata.get("dialect", "sqlite")
 
-                # Auto-transpile SQL to target dialect if needed
-                if auto_transpile and dialect and source_dialect.lower() != dialect.lower():
+                entry = {
+                    "question": question,
+                    "sql": sql,
+                    "dialect": dialect if auto_transpile else source_dialect,
+                    "distance": distance,
+                    "_source_dialect": source_dialect,
+                }
+
+                if dialect and source_dialect.lower() == dialect.lower():
+                    dialect_matches.append(entry)
+                else:
+                    other_matches.append(entry)
+
+            # Prioritize dialect-matching, fill remaining with others
+            examples = dialect_matches[:top_k]
+            remaining = top_k - len(examples)
+            if remaining > 0:
+                examples.extend(other_matches[:remaining])
+
+        # Auto-transpile non-matching dialects
+        if auto_transpile and dialect:
+            for ex in examples:
+                source_dialect = ex.pop("_source_dialect", None)
+                if source_dialect and source_dialect.lower() != dialect.lower():
                     try:
                         from core.utils.dialect_transpiler import DialectTranspiler
 
-                        # Map dialect names
                         dialect_map = {
                             "sqlite": "SQLite",
                             "mysql": "MySQL",
@@ -219,27 +237,15 @@ class ExampleStore:
                         target = dialect_map.get(dialect.lower(), dialect)
 
                         transpiled_sql = DialectTranspiler.transpile(
-                            sql, source, target, pretty=True
+                            ex["sql"], source, target, pretty=True
                         )
                         if transpiled_sql:
-                            sql = transpiled_sql
-                            logger.info("RAG: Transpiled example from %s to %s", source, target)
+                            ex["sql"] = transpiled_sql
                     except Exception as e:
-                        # If transpilation fails, use original SQL (LLM will handle it)
                         logger.warning(
                             "RAG: Transpilation failed (%s -> %s): %s",
-                            source_dialect,
-                            dialect,
-                            e,
+                            source_dialect, dialect, e,
                         )
-                        pass
-
-                examples.append({
-                    "question": question,
-                    "sql": sql,
-                    "dialect": dialect if auto_transpile else source_dialect,
-                    "distance": distance
-                })
 
         return examples
     

@@ -23,3 +23,15 @@ export function sanitize(text) {
 export function formatTimestamp(timestamp) {
     return new Date(timestamp).toLocaleString();
 }
+
+/**
+ * Build a user-facing error message: a plain-language Thai explanation with
+ * a suggested next step, followed by the raw technical detail as smaller
+ * muted text (kept for debugging/support, not hidden — just de-emphasized).
+ * @param {string} friendlyMessage - Plain-language explanation + next step
+ * @param {Error} err - The caught error
+ * @returns {string} HTML string safe to pass to appendMessage
+ */
+export function formatError(friendlyMessage, err) {
+    return `❌ ${friendlyMessage}<br><small class="text-muted">${sanitize(err.message)}</small>`;
+}

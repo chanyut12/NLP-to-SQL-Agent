@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from api.dependencies import state_manager
 from api.routes import router
+from core.config import settings
 from core.utils.embedding import configure_third_party_logging
 
 logger = logging.getLogger(__name__)
@@ -43,9 +44,14 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Thai NLP-to-SQL API", version="1.0.0", lifespan=lifespan)
 
 # Enable CORS for frontend
+allow_origins = (
+    ["*"]
+    if settings.CORS_ORIGINS == "*"
+    else [origin.strip() for origin in settings.CORS_ORIGINS.split(",")]
+)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for dev
+    allow_origins=allow_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
