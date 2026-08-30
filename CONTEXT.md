@@ -73,11 +73,17 @@ and rebuilt whenever the Example set or the Datasource schema changes.
 A fixed list of Thai questions paired with a gold SQL and a category, held per Domain
 profile, that an Evaluation run replays to score the service. The gold SQL defines the
 expected result, not the expected SQL text — two different queries that return the
-same rows both pass.
+same rows both pass. Kept strictly disjoint from the Example set so retrieval cannot
+hand the model its own answer. Each question is tagged with how it was sourced:
+`held_out` (pulled out of the corpus and removed from retrieval), `paraphrase`
+(reworded / typo'd / code-switched variant of a question still in the corpus), or
+`novel` (a metric/grain combination the corpus does not contain).
 
 ### Evaluation run
-An offline batch that answers every Golden-set question and reports, overall and per
-category: how often SQL was produced, how often it executed, how often the result
-matched the gold result, how often that happened on the first try with no
-self-correction, the latency distribution, and a breakdown of failure kinds. Separate
-from the Log store, which records live traffic.
+An offline batch that answers every Golden-set question and reports, broken down by
+source tag and by category: how often SQL was produced, how often it executed, how
+often the result matched the gold result, how often that happened on the first try
+with no self-correction, whether the row grain was right (no duplicate
+amplification), the latency distribution, and a breakdown of failure kinds. Separate
+from the Log store, which records live traffic. Clarify / deny / adversarial cases
+are not scored while the service always emits SQL — that is Tier-2 work.
