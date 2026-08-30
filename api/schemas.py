@@ -1,24 +1,9 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
-
-class DatabaseConfig(BaseModel):
-    db_type: str = Field(..., description="SQLite, MySQL, or PostgreSQL")
-    host: Optional[str] = "localhost"
-    port: Optional[str] = None
-    user: Optional[str] = None
-    password: Optional[str] = None
-    database: str = Field(..., description="Database name or file path")
-
-class ConnectRequest(BaseModel):
-    config: DatabaseConfig
-
-class ConnectResponse(BaseModel):
-    status: str
-    message: str
 
 class QueryRequest(BaseModel):
     question: str
-    dialect: str = "sqlite"
+    dialect: str = "postgres"
     preferred_chart_type: Optional[str] = None  # User selected chart type from dropdown
 
 # Visualization Model
@@ -29,18 +14,28 @@ class VizConfig(BaseModel):
     series_col: Optional[str] = None  # NEW: Column for multi-series grouping
     options: List[str]
 
-class QueryResponse(BaseModel):
-    sql: str
-    data: Optional[List[Dict[str, Any]]] = None
-    error: Optional[str] = None
-    retry_count: int = 0
-    log_id: Optional[str] = None
-    visualization: Optional[VizConfig] = None # Added viz config
-
 # Schema Models
 class ColumnInfo(BaseModel):
     name: str
     type: str
+
+class QueryError(BaseModel):
+    code: str  # LLM_FAILED | SQL_INVALID | EXEC_FAILED
+    message: str
+
+class QueryResponse(BaseModel):
+    status: str  # "ok" | "error"
+    request_id: str
+    question: str
+    sql: Optional[str] = None
+    columns: List[ColumnInfo] = []
+    rows: Optional[List[Dict[str, Any]]] = None
+    row_count: int = 0
+    truncated: bool = False
+    visualization: Optional[VizConfig] = None
+    retry_count: int = 0
+    elapsed_ms: int = 0
+    error: Optional[QueryError] = None
 
 class TableInfo(BaseModel):
     name: str

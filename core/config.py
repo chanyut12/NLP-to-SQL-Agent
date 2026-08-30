@@ -1,8 +1,17 @@
 import os
 
 class Settings:
+    # ===========================================================================
+    # Datasource & Service (microservice deployment)
+    # ===========================================================================
+    # Single read-only PostgreSQL connection, fixed at deploy time.
+    # e.g. postgresql+psycopg2://user:pass@host:5432/sts
+    DATABASE_URL = os.getenv("DATABASE_URL", "")
+    # Shared secret required in the X-API-Key header. Empty = auth disabled (dev).
+    API_KEY = os.getenv("API_KEY", "")
+
     # Model Configuration
-    MODEL_PROVIDER = os.getenv("MODEL_PROVIDER", "ollama").lower()
+    MODEL_PROVIDER = os.getenv("MODEL_PROVIDER", "openai").lower()
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
     OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
     

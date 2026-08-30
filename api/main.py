@@ -4,9 +4,9 @@ load_dotenv()
 import asyncio
 import logging
 from contextlib import asynccontextmanager, suppress
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from api.dependencies import state_manager
+from api.dependencies import require_api_key, state_manager
 from api.routes import router
 from core.config import settings
 from core.utils.embedding import configure_third_party_logging
@@ -57,7 +57,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(router, prefix="/api")
+@app.get("/api/health")
+async def health_check():
+    return {"status": "ok", "datasource": state_manager.db_engine is not None}
+
+
+app.include_router(router, prefix="/api", dependencies=[Depends(require_api_key)])
 
 # Mount Frontend (Must be after API routes)
 from fastapi.staticfiles import StaticFiles

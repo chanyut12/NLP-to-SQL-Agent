@@ -1,51 +1,46 @@
-from core.services.engine import NLPEngine
-from core.data.database import ConnectionManager
-from core.services.query_history import QueryHistoryManager
-from sqlalchemy.engine import Engine
-from typing import Optional
-import json
-import os
+import logging
 import threading
+from typing import Optional
 
-_SESSION_FILE = ".last_connection.json"
+from fastapi import Header, HTTPException
+from sqlalchemy import create_engine
+from sqlalchemy.engine import Engine
+
+from core.services.engine import NLPEngine
+from core.services.query_history import QueryHistoryManager
+from core.config import settings
+
+logger = logging.getLogger(__name__)
+
 
 class GlobalStateManager:
+    """Process-wide singletons.
+
+    The datasource connection is fixed at startup from ``DATABASE_URL`` and never
+    mutated at runtime — there is no ``/connect`` flow and no session file.
+    """
+
     def __init__(self):
-        # Lazy-init NLPEngine to avoid heavy model loading during module import/startup.
+        # Lazy-init NLPEngine to avoid heavy model loading during module import.
         self.nlp_engine: Optional[NLPEngine] = None
         self._nlp_engine_lock = threading.Lock()
         self.history_manager = QueryHistoryManager()
-        self.db_engine: Optional[Engine] = None
-        self.db_config: dict = {}
-        self._try_restore_connection()
+        self.db_engine: Optional[Engine] = self._build_db_engine()
 
-    def _try_restore_connection(self):
-        """Restore last DB connection after server reload."""
-        if not os.path.exists(_SESSION_FILE):
-            return
+    @staticmethod
+    def _build_db_engine() -> Optional[Engine]:
+        if not settings.DATABASE_URL:
+            logger.warning("DATABASE_URL is not set; /query and /schema will return 503.")
+            return None
         try:
-            with open(_SESSION_FILE, "r") as f:
-                saved = json.load(f)
-            engine, error = ConnectionManager.get_db_engine(saved["db_type"], saved["config"])
-            if not error:
-                self.db_engine = engine
-                self.db_config = saved["config"]
-        except Exception:
-            pass  # Silently skip if restore fails
-
-    def connect_db(self, db_type: str, config: dict):
-        engine, error = ConnectionManager.get_db_engine(db_type, config)
-        if error:
-            raise Exception(error)
-        self.db_engine = engine
-        self.db_config = config
-        # Persist for auto-restore on reload
-        try:
-            with open(_SESSION_FILE, "w") as f:
-                json.dump({"db_type": db_type, "config": config}, f)
-        except Exception:
-            pass
-        return True
+            engine = create_engine(settings.DATABASE_URL, pool_pre_ping=True)
+            with engine.connect():
+                pass
+            logger.info("Datasource connection established.")
+            return engine
+        except Exception as e:
+            logger.warning("Datasource connection failed at startup: %s", e)
+            return None
 
     def get_nlp_engine(self) -> NLPEngine:
         """Get NLPEngine singleton, creating it lazily on first use."""
@@ -55,11 +50,24 @@ class GlobalStateManager:
                     self.nlp_engine = NLPEngine()
         return self.nlp_engine
 
+
 # Singleton Instance
 state_manager = GlobalStateManager()
+
 
 def get_nlp_engine() -> NLPEngine:
     return state_manager.get_nlp_engine()
 
+
 def get_state_manager() -> GlobalStateManager:
     return state_manager
+
+
+def require_api_key(x_api_key: str = Header(default="")) -> None:
+    """Reject the request unless it carries the shared secret.
+
+    No-op when ``API_KEY`` is unset, so local dev and the bundled demo UI work
+    without a key.
+    """
+    if settings.API_KEY and x_api_key != settings.API_KEY:
+        raise HTTPException(status_code=401, detail="invalid or missing API key")

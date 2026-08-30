@@ -455,12 +455,12 @@ async function sendMessage() {
         removeLoading();
 
         if (data.error) {
-            appendMessage(`❌ Error: ${sanitize(data.error)}<br><pre><code class="language-sql">${sanitize(data.sql)}</code></pre>`, false);
+            appendMessage(`❌ Error: ${sanitize(data.error.message)}<br><pre><code class="language-sql">${sanitize(data.sql)}</code></pre>`, false);
         } else {
             let html = `<strong>Generated SQL:</strong><pre><code class="language-sql">${sanitize(data.sql)}</code></pre>`;
 
-            if (data.data && data.data.length > 0) {
-                html += renderTable(data.data);
+            if (data.rows && data.rows.length > 0) {
+                html += renderTable(data.rows);
             } else {
                 html += "<br><em>No results found or empty set.</em>";
             }
@@ -476,7 +476,7 @@ async function sendMessage() {
                 html += `<div class="chart-container"><canvas id="${chartId}"></canvas></div>`;
 
                 // Update visualization state
-                setVizState(data.visualization, data.data, chartId);
+                setVizState(data.visualization, data.rows, chartId);
 
                 // Show selector
                 chartSelector.style.display = 'inline-block';
@@ -489,7 +489,7 @@ async function sendMessage() {
             appendMessage(html, false);
 
             if (chartId && data.visualization) {
-                renderChart(chartId, data.visualization, data.data);
+                renderChart(chartId, data.visualization, data.rows);
             }
 
             // Refresh history if open

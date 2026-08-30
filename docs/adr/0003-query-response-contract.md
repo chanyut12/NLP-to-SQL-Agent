@@ -35,8 +35,10 @@ Envelope shape:
 }
 ```
 
-`error.code` is a closed set: `LLM_FAILED`, `SQL_INVALID`, `EXEC_FAILED`,
-`EMPTY_RESULT`.
+`error.code` is a closed set: `LLM_FAILED` (no SQL produced), `EXEC_FAILED` (SQL
+produced but rejected by PostgreSQL or by the safety validator). A valid query that
+returns no rows is `status: "ok"` with `row_count: 0` and `error: null` — an empty
+result is a normal answer, not an error.
 
 ## Why
 

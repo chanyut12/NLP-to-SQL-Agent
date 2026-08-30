@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Body
 from api.schemas import (
-    ConnectRequest, ConnectResponse, QueryRequest, QueryResponse,
+    QueryRequest, QueryResponse, QueryError,
     SchemaResponse, TableInfo, ColumnInfo,
     HistoryResponse, HistoryItem,
     FavoritesResponse, FavoriteItem, CreateFavoriteRequest,
@@ -8,7 +8,6 @@ from api.schemas import (
 )
 from api.dependencies import get_state_manager, get_nlp_engine, GlobalStateManager
 from core.services.engine import NLPEngine
-from core.domain.schema_utils import get_database_schema
 from core.utils.sql_metrics import parse_sql_metrics
 from core.config import settings
 from sqlalchemy import inspect
@@ -103,19 +102,24 @@ def log_query_to_file(
 
     return log_id
 
-@router.post("/connect", response_model=ConnectResponse)
-async def connect_database(
-    request: ConnectRequest,
-    state: GlobalStateManager = Depends(get_state_manager)
-):
-    try:
-        config_dict = request.config.dict()
-        state.connect_db(request.config.db_type, config_dict)
-        # Preload NLP engine at connect time so first query is not delayed by lazy init.
-        await asyncio.to_thread(state.get_nlp_engine)
-        return ConnectResponse(status="success", message=f"Connected to {request.config.database}")
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+@router.post("/connect")
+async def connect_database(_: dict = Body(default={})):
+    """Deprecated no-op. The datasource is fixed at deploy time from DATABASE_URL;
+    kept only so the bundled demo UI's connect button keeps working."""
+    return {"status": "success", "message": "Using server-configured datasource"}
+
+
+def _derive_columns(rows: list[dict]) -> list[ColumnInfo]:
+    """Best-effort column list from the first row (SQL types are lost upstream)."""
+    if not rows:
+        return []
+    first = rows[0]
+    cols = []
+    for key in first:
+        sample = next((r[key] for r in rows if r.get(key) is not None), None)
+        cols.append(ColumnInfo(name=key, type=type(sample).__name__ if sample is not None else "unknown"))
+    return cols
+
 
 @router.post("/query", response_model=QueryResponse)
 async def query_data(
@@ -124,79 +128,71 @@ async def query_data(
     engine: NLPEngine = Depends(get_nlp_engine)
 ):
     if not state.db_engine:
-        raise HTTPException(status_code=400, detail="Database not connected. Please call /connect first.")
-    
+        raise HTTPException(status_code=503, detail="Datasource unavailable")
+
+    request_id = str(uuid.uuid4())
+    dialect = request.dialect or "postgres"
     start_time = time.time()
+
     try:
         sql, data, error, retry_count, viz_config, rag_examples_count = await engine.query_database(
             question=request.question,
             engine=state.db_engine,
-            dialect=request.dialect if request.dialect else "sqlite",
+            dialect=dialect,
             preferred_chart_type=request.preferred_chart_type
         )
-        duration = time.time() - start_time
-
-        status = "Success" if not error else "Error"
-        if retry_count > 0 and not error:
-            status += f" (Retry {retry_count})"
-
-        # Derive model name from active provider
-        provider = settings.MODEL_PROVIDER
-        if provider == "openai":
-            model_name = settings.OPENAI_MODEL
-        elif provider == "google":
-            model_name = settings.GOOGLE_MODEL
-        else:
-            model_name = settings.OLLAMA_MODEL
-
-        # SQL structural metrics
-        dialect_str = request.dialect or "sqlite"
-        metrics = parse_sql_metrics(sql or "", dialect=dialect_str)
-        result_row_count = len(data) if data is not None else -1
-
-        # Log to file
-        log_id = await asyncio.to_thread(
-            log_query_to_file,
-            question=request.question,
-            sql=sql or "",
-            status=status,
-            error_msg=error or "",
-            duration=duration,
-            dialect=request.dialect,
-            retry_count=retry_count,
-            tables_used=metrics.tables_used,
-            join_count=metrics.join_count,
-            has_aggregation=metrics.has_aggregation,
-            has_subquery=metrics.has_subquery,
-            has_group_by=metrics.has_group_by,
-            result_row_count=result_row_count,
-            rag_examples_count=rag_examples_count,
-            model_name=model_name,
-        )
-        
-        if error:
-            return QueryResponse(sql=sql or "", error=error, retry_count=retry_count, log_id=log_id)
-            
-        return QueryResponse(
-            sql=sql, 
-            data=data, 
-            retry_count=retry_count, 
-            log_id=log_id,
-            visualization=viz_config
-        )
-        
     except Exception as e:
         duration = time.time() - start_time
         await asyncio.to_thread(
-            log_query_to_file,
-            request.question,
-            "",
-            "Error",
-            str(e),
-            duration,
-            request.dialect
+            log_query_to_file, request.question, "", "Error", str(e), duration, dialect
         )
-        raise HTTPException(status_code=500, detail=str(e))
+        return QueryResponse(
+            status="error", request_id=request_id, question=request.question,
+            elapsed_ms=int(duration * 1000),
+            error=QueryError(code="EXEC_FAILED", message=str(e)),
+        )
+
+    duration = time.time() - start_time
+    elapsed_ms = int(duration * 1000)
+
+    # --- File logging (demo UI history; NestJS keeps its own record) ---
+    status_str = "Success" if not error else "Error"
+    if retry_count > 0 and not error:
+        status_str += f" (Retry {retry_count})"
+    provider = settings.MODEL_PROVIDER
+    model_name = (
+        settings.OPENAI_MODEL if provider == "openai"
+        else settings.GOOGLE_MODEL if provider == "google"
+        else settings.OLLAMA_MODEL
+    )
+    metrics = parse_sql_metrics(sql or "", dialect=dialect)
+    await asyncio.to_thread(
+        log_query_to_file,
+        question=request.question, sql=sql or "", status=status_str,
+        error_msg=error or "", duration=duration, dialect=dialect,
+        retry_count=retry_count, tables_used=metrics.tables_used,
+        join_count=metrics.join_count, has_aggregation=metrics.has_aggregation,
+        has_subquery=metrics.has_subquery, has_group_by=metrics.has_group_by,
+        result_row_count=len(data) if data is not None else -1,
+        rag_examples_count=rag_examples_count, model_name=model_name,
+    )
+
+    # --- Envelope ---
+    if error:
+        code = "EXEC_FAILED" if sql else "LLM_FAILED"
+        return QueryResponse(
+            status="error", request_id=request_id, question=request.question,
+            sql=sql or None, retry_count=retry_count, elapsed_ms=elapsed_ms,
+            error=QueryError(code=code, message=error),
+        )
+
+    rows = data or []
+    return QueryResponse(
+        status="ok", request_id=request_id, question=request.question,
+        sql=sql, columns=_derive_columns(rows), rows=rows, row_count=len(rows),
+        truncated=len(rows) >= settings.MAX_SQL_LIMIT,
+        visualization=viz_config, retry_count=retry_count, elapsed_ms=elapsed_ms,
+    )
 
 @router.get("/schema", response_model=SchemaResponse)
 async def get_schema(state: GlobalStateManager = Depends(get_state_manager)):
@@ -298,7 +294,3 @@ async def delete_favorite(
     if not success:
         raise HTTPException(status_code=404, detail="Favorite not found")
     return {"status": "success"}
-
-@router.get("/health")
-async def health_check():
-    return {"status": "ok"}
