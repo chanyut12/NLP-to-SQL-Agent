@@ -63,3 +63,13 @@ These limitations are real and must be stated plainly in the README and the thes
 
 Moving toward the full guide later is additive: the profile content stays, and the
 gateway is built in NestJS in front of a generate-only version of this service.
+
+## Schema drift (found while building `profiles/sts/`)
+
+The guide and the 86-example corpus were written against a newer STS schema than the
+dev database we connect to. `classroom_subject_teachers` (a table) and
+`case_reviews.deleted_at` (a column) do not exist here, so 8 corpus examples were
+dropped and the teacher-subject join path in the guide's section 4.2 is not fully
+implementable. `scripts/build_sts_profile.py` filters examples by `EXPLAIN` against
+the live database, so the profile stays honest as the schema moves — but the
+corpus itself needs a pass against the real catalog.
