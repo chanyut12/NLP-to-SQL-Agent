@@ -64,13 +64,16 @@ async def health_check():
 
 app.include_router(router, prefix="/api", dependencies=[Depends(require_api_key)])
 
-# Mount Frontend (Must be after API routes)
+# Bundled demo UI — a local dev aid, served only when auth is off. Once API_KEY is
+# set the page is not mounted; Consumers (e.g. the NestJS backend) call /api directly.
 from fastapi.staticfiles import StaticFiles
 import os
 
-# Ensure web directory exists
-if os.path.exists("web"):
+if os.path.exists("web") and not settings.API_KEY:
     app.mount("/", StaticFiles(directory="web", html=True), name="static")
+    logger.info("Demo UI mounted at / (API_KEY unset — dev mode).")
+elif settings.API_KEY:
+    logger.info("Demo UI not mounted (API_KEY set); /api requires X-API-Key.")
 
 if __name__ == "__main__":
     import uvicorn

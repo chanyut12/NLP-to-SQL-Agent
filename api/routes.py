@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Body
+from fastapi import APIRouter, Depends, HTTPException
 from api.schemas import (
     QueryRequest, QueryResponse, QueryError,
     SchemaResponse, TableInfo, ColumnInfo,
@@ -101,13 +101,6 @@ def log_query_to_file(
             print(f"CSV Logging error: {e}")
 
     return log_id
-
-@router.post("/connect")
-async def connect_database(_: dict = Body(default={})):
-    """Deprecated no-op. The datasource is fixed at deploy time from DATABASE_URL;
-    kept only so the bundled demo UI's connect button keeps working."""
-    return {"status": "success", "message": "Using server-configured datasource"}
-
 
 def _derive_columns(rows: list[dict]) -> list[ColumnInfo]:
     """Best-effort column list from the first row (SQL types are lost upstream)."""

@@ -5,8 +5,9 @@
 
 // Application state
 const state = {
-    isConnected: false,
-    currentTab: 'connection',
+    // The datasource is fixed server-side; the UI is always "connected".
+    isConnected: true,
+    currentTab: 'schema',
     // Visualization state
     currentVizConfig: null,
     currentVizData: null,
@@ -24,7 +25,6 @@ export const getChartId = () => state.currentChartId;
 export const getFeedbackLogId = () => state.currentFeedbackLogId;
 
 // Setters
-export const setConnected = (value) => { state.isConnected = value; };
 export const setCurrentTab = (value) => { state.currentTab = value; };
 export const setFeedbackLogId = (value) => { state.currentFeedbackLogId = value; };
 

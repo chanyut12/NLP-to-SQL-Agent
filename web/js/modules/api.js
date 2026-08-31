@@ -20,6 +20,14 @@ async function handleResponse(response) {
 }
 
 /**
+ * Datasource health — { status, datasource: bool }
+ */
+export async function fetchHealth() {
+    const res = await fetch(`${API_URL}/health`);
+    return handleResponse(res);
+}
+
+/**
  * Fetch database schema
  * @returns {Promise<Object>} Schema data with tables array
  * @throws {Error} If server returns non-ok status
@@ -51,44 +59,16 @@ export async function fetchFavoritesData() {
 }
 
 /**
- * Connect to database
- * @param {Object} config - Database configuration
- * @param {string} config.db_type - Database type (sqlite, mysql, postgresql)
- * @param {string} [config.host] - Database host
- * @param {number} [config.port] - Database port
- * @param {string} [config.username] - Database username
- * @param {string} [config.password] - Database password
- * @param {string} [config.database] - Database name
- * @param {string} [config.file_path] - SQLite file path
- * @returns {Promise<Object>} Connection result with status and dialect
- * @throws {Error} If connection fails or server returns non-ok status
- */
-export async function connectDatabase(config) {
-    const res = await fetch(`${API_URL}/connect`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ config })
-    });
-    return handleResponse(res);
-}
-
-/**
- * Send NLP query to generate and execute SQL
+ * Send a question. The service picks the dialect from its own datasource.
  * @param {string} question - User question in natural language
- * @param {string} dialect - Database dialect (sqlite, mysql, postgresql)
  * @param {string|null} [preferredChartType=null] - Optional chart type (bar, line, pie, scatter)
- * @returns {Promise<Object>} Query result containing sql, data, viz_config, and log_id
- * @throws {Error} If query fails or server returns non-ok status
+ * @returns {Promise<Object>} The response envelope (status, sql, rows, visualization, error, ...)
  */
-export async function sendQuery(question, dialect, preferredChartType = null) {
+export async function sendQuery(question, preferredChartType = null) {
     const res = await fetch(`${API_URL}/query`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            question,
-            dialect,
-            preferred_chart_type: preferredChartType
-        })
+        body: JSON.stringify({ question, preferred_chart_type: preferredChartType })
     });
     return handleResponse(res);
 }

@@ -45,12 +45,11 @@ class TestApiKeyGate(unittest.TestCase):
         self.assertEqual(r.status_code, 401)
 
 
-class TestConnectShim(unittest.TestCase):
-    def test_connect_is_noop_success(self):
-        r = client.post("/api/connect", json={"anything": 1},
+class TestConnectRemoved(unittest.TestCase):
+    def test_connect_endpoint_is_gone(self):
+        r = client.post("/api/connect", json={},
                         headers={"X-API-Key": "test-secret"})
-        self.assertEqual(r.status_code, 200)
-        self.assertEqual(r.json()["status"], "success")
+        self.assertIn(r.status_code, (404, 405))
 
 
 class TestAdminRefreshSchema(unittest.TestCase):

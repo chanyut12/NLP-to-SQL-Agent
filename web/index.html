@@ -45,57 +45,21 @@
             </div>
         </div>
 
+        <div id="ds-status" class="status-badge" title="ฐานข้อมูลตั้งค่าไว้ที่ฝั่ง service">กำลังตรวจสอบ…</div>
+
         <div class="tabs" role="tablist" aria-label="Sidebar sections">
-            <button type="button" class="tab active" data-action="switchTab" data-tab="connection"
-                role="tab" aria-selected="true" aria-controls="tab-connection" id="tab-btn-connection" tabindex="0">🔌 Connect</button>
-            <button type="button" class="tab" data-action="switchTab" data-tab="schema"
-                role="tab" aria-selected="false" aria-controls="tab-schema" id="tab-btn-schema" tabindex="-1">🗄️ Schema</button>
+            <button type="button" class="tab active" data-action="switchTab" data-tab="schema"
+                role="tab" aria-selected="true" aria-controls="tab-schema" id="tab-btn-schema" tabindex="0">🗄️ Schema</button>
             <button type="button" class="tab" data-action="switchTab" data-tab="history"
                 role="tab" aria-selected="false" aria-controls="tab-history" id="tab-btn-history" tabindex="-1">📜 History</button>
             <button type="button" class="tab" data-action="switchTab" data-tab="favorites"
                 role="tab" aria-selected="false" aria-controls="tab-favorites" id="tab-btn-favorites" tabindex="-1">⭐ Favs</button>
         </div>
 
-        <!-- Tab Content: Connection -->
-        <div id="tab-connection" class="tab-content active" role="tabpanel" aria-labelledby="tab-btn-connection">
-            <div class="control-group">
-                <label>Database Type</label>
-                <select id="db-type">
-                    <option value="SQLite">SQLite</option>
-                    <option value="MySQL">MySQL</option>
-                    <option value="PostgreSQL">PostgreSQL</option>
-                </select>
-            </div>
-
-            <div id="sqlite-config" class="control-group">
-                <label>Database File</label>
-                <input type="text" id="db-path" value="local_database.db" placeholder="database.db">
-            </div>
-
-            <div id="sql-config" class="control-group" style="display: none;">
-                <p class="field-hint">ไม่แน่ใจว่าต้องกรอกอะไร? สอบถามข้อมูลนี้จากทีมไอทีหรือผู้ดูแลฐานข้อมูลของคุณ</p>
-                <label>Host</label>
-                <input type="text" id="db-host" value="localhost">
-                <label>Port</label>
-                <input type="text" id="db-port" value="3306">
-                <label>User</label>
-                <input type="text" id="db-user" placeholder="username">
-                <label>Password</label>
-                <input type="password" id="db-pass" placeholder="••••••">
-                <label>Database Name</label>
-                <input type="text" id="db-name" placeholder="mydb">
-            </div>
-
-            <button id="connect-btn" class="primary-btn">Connect Database</button>
-            <div id="connection-status" class="status-badge disconnected">Disconnected</div>
-        </div>
-
         <!-- Tab Content: Schema -->
-        <div id="tab-schema" class="tab-content" role="tabpanel" aria-labelledby="tab-btn-schema">
+        <div id="tab-schema" class="tab-content active" role="tabpanel" aria-labelledby="tab-btn-schema">
             <div id="schema-container">
-                <p class="empty-state">
-                    Please connect to a database to view schema.
-                </p>
+                <p class="empty-state">กำลังโหลด schema…</p>
             </div>
         </div>
 
@@ -123,18 +87,17 @@
         <div class="chat-history" id="chat-history">
             <!-- Messages will appear here -->
             <div class="message bot-message">
-                สวัสดีครับ! ผมคือ AI Assistant ที่ช่วยคุณเขียน SQL Query ภาษาไทย<br>
-                กรุณาเชื่อมต่อ Database ด้านซ้ายก่อนเริ่มใช้งานนะครับ พอเชื่อมต่อแล้ว ลองถามได้แบบนี้:
+                สวัสดีครับ! ถามข้อมูลระบบติดตามนักเรียน (STS) เป็นภาษาไทยได้เลย ลองแบบนี้:
                 <div class="example-chips">
-                    <button type="button" class="example-chip" data-action="loadSQL" data-question="ยอดขายเดือนนี้เท่าไหร่">ยอดขายเดือนนี้เท่าไหร่</button>
-                    <button type="button" class="example-chip" data-action="loadSQL" data-question="ลูกค้า 5 อันดับแรกที่ซื้อเยอะที่สุด">ลูกค้า 5 อันดับแรกที่ซื้อเยอะที่สุด</button>
-                    <button type="button" class="example-chip" data-action="loadSQL" data-question="จำนวนออเดอร์ในแต่ละเดือน">จำนวนออเดอร์ในแต่ละเดือน</button>
+                    <button type="button" class="example-chip" data-action="loadSQL" data-question="จำนวนนักเรียนปัจจุบันแยกตามโรงเรียน">จำนวนนักเรียนปัจจุบันแยกตามโรงเรียน</button>
+                    <button type="button" class="example-chip" data-action="loadSQL" data-question="อัตราการมาเรียนรายโรงเรียน ปีการศึกษา 2569 ภาคเรียน 1">อัตราการมาเรียนรายโรงเรียน เทอม 1/2569</button>
+                    <button type="button" class="example-chip" data-action="loadSQL" data-question="นักเรียนเสี่ยงสูงมีกี่คนในแต่ละโรงเรียน">นักเรียนเสี่ยงสูงในแต่ละโรงเรียน</button>
                 </div>
             </div>
         </div>
 
         <div class="input-area">
-            <input type="text" id="user-input" placeholder="ถามเกี่ยวกับข้อมูลของคุณ... (เช่น ยอดขายเดือนนี้เท่าไหร่)">
+            <input type="text" id="user-input" placeholder="ถามข้อมูลนักเรียน... (เช่น จำนวนนักเรียนแต่ละโรงเรียน)">
 
             <!-- Chart Type Selector (Dynamic) -->
             <select id="chart-type-selector"

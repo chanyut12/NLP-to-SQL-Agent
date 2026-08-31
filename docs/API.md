@@ -1,0 +1,146 @@
+# Thai NLP-to-SQL service — API
+
+One HTTP service. A Consumer (e.g. the NestJS backend) sends a Thai question and
+gets back the generated SQL, the result rows, and a chart suggestion.
+
+- **Base URL (local dev):** `http://localhost:8000`
+- **Interactive docs / OpenAPI:** `GET /docs`, `GET /openapi.json` — generate a
+  typed client from this if you like.
+- **Datasource:** fixed at deploy time by the `DATABASE_URL` env var. A Consumer
+  never passes database credentials.
+
+## Authentication
+
+Every `/api/*` call needs the shared secret in a header:
+
+```
+X-API-Key: <the value of the service's API_KEY env var>
+```
+
+Exceptions: `GET /api/health` needs no key. When `API_KEY` is unset (local dev),
+auth is off entirely and the bundled demo UI is served at `/`.
+
+## Endpoints
+
+### `POST /api/query`
+
+**Request**
+
+```json
+{ "question": "จำนวนนักเรียนปัจจุบันแยกตามโรงเรียน", "preferred_chart_type": null }
+```
+
+- `question` (required) — Thai natural-language question.
+- `preferred_chart_type` (optional) — `"bar" | "line" | "pie" | "scatter"`; omit for auto.
+- `dialect` is accepted but **ignored** — the service uses its own datasource's dialect.
+
+**Response — always HTTP 200 for a business outcome**
+
+```json
+{
+  "status": "ok",
+  "request_id": "b1a1…",
+  "question": "จำนวนนักเรียนปัจจุบันแยกตามโรงเรียน",
+  "sql": "SELECT school.id AS school_id, … LIMIT 500",
+  "columns": [{ "name": "school_id", "type": "int" }, { "name": "student_count", "type": "int" }],
+  "rows": [{ "school_id": 10010002, "student_count": 613 }],
+  "row_count": 10,
+  "truncated": false,
+  "visualization": { "chart_type": "bar", "x_col": "school_id", "y_col": "student_count", "series_col": null, "options": ["Bar"] },
+  "retry_count": 0,
+  "elapsed_ms": 3400,
+  "error": null
+}
+```
+
+**On a business failure — still HTTP 200**, with `status: "error"` and `error` set:
+
+```json
+{ "status": "error", "request_id": "…", "question": "…", "sql": "SELECT …", "error": { "code": "EXEC_FAILED", "message": "column … does not exist" } }
+```
+
+`error.code`: `LLM_FAILED` (no SQL produced) · `EXEC_FAILED` (SQL produced but
+rejected by PostgreSQL or the safety validator). An empty result set is
+`status: "ok"` with `row_count: 0` and `error: null`.
+
+**Infrastructure failures use real HTTP status:** `401` (missing/wrong key),
+`503` (`Datasource unavailable`), `422` (malformed body), `5xx` (unexpected).
+
+### `GET /api/health`
+
+`{ "status": "ok", "datasource": true }` — no key required. `datasource` is
+`false` when `DATABASE_URL` is unset or unreachable.
+
+### `GET /api/schema`
+
+`{ "tables": [{ "name": "...", "columns": [{ "name": "...", "type": "..." }] }] }`
+— the analytical tables/views the model can use (backup/audit/PII objects are
+hidden). `503` without a datasource.
+
+### `POST /api/admin/refresh-schema`
+
+`{ "status": "ok" }` — drop the cached schema; call after a migration on the
+datasource.
+
+### History / favorites
+
+`GET /api/history`, `GET /api/favorites`, `POST /api/favorites`,
+`DELETE /api/favorites/{id}`, `PATCH /api/history/{log_id}/feedback` — used by the
+demo UI, backed by local files. A Consumer that wants its own history should keep
+it itself (persist the `request_id` and the fields from the envelope).
+
+## Calling it from NestJS
+
+```ts
+// text-to-sql.service.ts
+import { Injectable, HttpException } from '@nestjs/common';
+
+type QueryEnvelope = {
+  status: 'ok' | 'error';
+  request_id: string;
+  question: string;
+  sql: string | null;
+  columns: { name: string; type: string }[];
+  rows: Record<string, unknown>[] | null;
+  row_count: number;
+  truncated: boolean;
+  visualization: {
+    chart_type: string;
+    x_col: string | null;
+    y_col: string | null;
+    series_col: string | null;
+    options: string[];
+  } | null;
+  retry_count: number;
+  elapsed_ms: number;
+  error: { code: string; message: string } | null;
+};
+
+@Injectable()
+export class TextToSqlService {
+  private readonly baseUrl = process.env.TEXT_TO_SQL_URL ?? 'http://localhost:8000';
+  private readonly apiKey = process.env.TEXT_TO_SQL_API_KEY ?? '';
+
+  async ask(question: string, preferredChartType?: string): Promise<QueryEnvelope> {
+    const res = await fetch(`${this.baseUrl}/api/query`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-API-Key': this.apiKey },
+      body: JSON.stringify({ question, preferred_chart_type: preferredChartType ?? null }),
+      signal: AbortSignal.timeout(60_000),
+    });
+
+    // Infrastructure failure — the service is unreachable / auth failed / no datasource.
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new HttpException(body.detail ?? `text-to-sql ${res.status}`, 502);
+    }
+
+    // Business outcome — always 200; branch on the envelope.
+    const env: QueryEnvelope = await res.json();
+    return env; // caller inspects env.status / env.error.code and forwards to React
+  }
+}
+```
+
+React never calls this service directly — it goes through NestJS, which holds the
+API key. The service therefore needs no CORS configuration.

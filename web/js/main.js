@@ -6,14 +6,12 @@
  */
 
 // Module imports
-import { API_URL } from './modules/config.js';
 import {
-    isConnected, setConnected, getCurrentTab,
-    getVizConfig, getVizData, getChartId,
+    getCurrentTab, getVizConfig, getVizData, getChartId,
     setVizState, clearVizState
 } from './modules/state.js';
 import { sanitize, formatError } from './modules/utils.js';
-import { connectDatabase, sendQuery, saveFavorite, deleteFavoriteById } from './modules/api.js';
+import { fetchHealth, sendQuery, saveFavorite, deleteFavoriteById } from './modules/api.js';
 import {
     initUI, switchTab, appendMessage, appendLoading, removeLoading,
     renderTable, fetchSchema, fetchHistory, fetchFavorites
@@ -25,9 +23,7 @@ import { renderChart } from './modules/chart.js';
 
 // DOM Elements
 let userInput = null;
-let dbTypeSelect = null;
-let statusBadge = null;
-let connectBtn = null;
+let dsStatus = null;
 let chartSelector = null;
 let sidebar = null;
 let openSidebarBtn = null;
@@ -43,9 +39,7 @@ const isMobileViewport = () => window.matchMedia(MOBILE_QUERY).matches;
 function init() {
     // Cache DOM elements
     userInput = document.getElementById('user-input');
-    dbTypeSelect = document.getElementById('db-type');
-    statusBadge = document.getElementById('connection-status');
-    connectBtn = document.getElementById('connect-btn');
+    dsStatus = document.getElementById('ds-status');
     chartSelector = document.getElementById('chart-type-selector');
     sidebar = document.getElementById('sidebar');
     openSidebarBtn = document.getElementById('open-sidebar-btn');
@@ -63,36 +57,31 @@ function init() {
 
     // Sync theme toggle icon with the theme applied pre-paint (see index.html inline script)
     restoreThemeState();
+
+    // Show datasource status and load the schema
+    checkDatasource();
+    fetchSchema();
+}
+
+/**
+ * Ping /api/health and reflect it in the status badge.
+ */
+async function checkDatasource() {
+    try {
+        const h = await fetchHealth();
+        const ok = h.datasource;
+        dsStatus.className = `status-badge ${ok ? 'connected' : 'disconnected'}`;
+        dsStatus.textContent = ok ? '🟢 ต่อฐานข้อมูลแล้ว (read-only)' : '🔴 service ยังไม่ได้ตั้ง DATABASE_URL';
+    } catch (e) {
+        dsStatus.className = 'status-badge disconnected';
+        dsStatus.textContent = '🔴 ติดต่อ service ไม่ได้';
+    }
 }
 
 /**
  * Set up all event listeners using event delegation
  */
 function setupEventListeners() {
-    // Database type selector
-    const DEFAULT_PORTS = { MySQL: '3306', PostgreSQL: '5432' };
-    dbTypeSelect.addEventListener('change', (e) => {
-        const type = e.target.value;
-        const sqliteConfig = document.getElementById('sqlite-config');
-        const sqlConfig = document.getElementById('sql-config');
-
-        if (type === 'SQLite') {
-            sqliteConfig.style.display = 'flex';
-            sqlConfig.style.display = 'none';
-        } else {
-            sqliteConfig.style.display = 'none';
-            sqlConfig.style.display = 'flex';
-
-            // Refresh the port to this dialect's default, unless the user
-            // already typed something other than one of the known defaults.
-            const portInput = document.getElementById('db-port');
-            const knownDefaults = Object.values(DEFAULT_PORTS);
-            if (!portInput.value || knownDefaults.includes(portInput.value)) {
-                portInput.value = DEFAULT_PORTS[type] || '';
-            }
-        }
-    });
-
     // Chart type selector
     chartSelector.addEventListener('change', (e) => {
         const vizConfig = getVizConfig();
@@ -112,9 +101,6 @@ function setupEventListeners() {
             renderChart(chartId, pConfig, vizData);
         }
     });
-
-    // Connect button
-    connectBtn.addEventListener('click', connectDB);
 
     // User input - Enter key to send
     userInput.addEventListener('keydown', (e) => {
@@ -215,7 +201,7 @@ function handleAction(e) {
             saveFavoriteFromHistory(target.dataset.logId, target.dataset.question, target.dataset.sql, target.dataset.dialect);
             break;
         case 'rerunQuery':
-            rerunQuery(target.dataset.question, target.dataset.dialect);
+            rerunQuery(target.dataset.question);
             break;
         case 'deleteFavorite':
             deleteFavorite(target.dataset.favId);
@@ -237,9 +223,8 @@ function loadSQL(question, _sql) {
  * @param {string} question - Question to re-run
  * @param {string} dialect - Database dialect
  */
-function rerunQuery(question, dialect) {
+function rerunQuery(question) {
     userInput.value = question;
-    dbTypeSelect.value = dialect === 'sqlite' ? 'SQLite' : (dialect === 'mysql' ? 'MySQL' : 'PostgreSQL');
     sendMessage();
 }
 
@@ -377,62 +362,11 @@ function handleResize() {
 }
 
 /**
- * Connect to database
- */
-async function connectDB() {
-    const type = dbTypeSelect.value;
-    const config = {
-        db_type: type,
-        database: "",
-        host: "localhost",
-        port: "",
-        user: "",
-        password: ""
-    };
-
-    if (type === 'SQLite') {
-        config.database = document.getElementById('db-path').value;
-    } else {
-        config.host = document.getElementById('db-host').value;
-        config.port = document.getElementById('db-port').value;
-        config.user = document.getElementById('db-user').value;
-        config.password = document.getElementById('db-pass').value;
-        config.database = document.getElementById('db-name').value;
-    }
-
-    connectBtn.textContent = "Connecting...";
-    connectBtn.disabled = true;
-
-    try {
-        await connectDatabase(config);
-        setConnected(true);
-        statusBadge.className = "status-badge connected";
-        statusBadge.textContent = "Connected";
-        appendMessage(`✅ Connected to ${type} successfully!`, false);
-
-        // Auto fetch schema
-        fetchSchema();
-    } catch (e) {
-        appendMessage(formatError("เชื่อมต่อฐานข้อมูลไม่สำเร็จ กรุณาตรวจสอบ Host, Port, Username และ Password อีกครั้ง", e), false);
-        statusBadge.className = "status-badge disconnected";
-        statusBadge.textContent = "Error";
-    } finally {
-        connectBtn.textContent = "Connect Database";
-        connectBtn.disabled = false;
-    }
-}
-
-/**
  * Send message/query to backend
  */
 async function sendMessage() {
     const text = userInput.value.trim();
     if (!text) return;
-
-    if (!isConnected()) {
-        appendMessage("⚠️ Please connect to a database first.", false);
-        return;
-    }
 
     appendMessage(text, true);
     userInput.value = '';
@@ -446,11 +380,7 @@ async function sendMessage() {
         // Get selected chart type from dropdown
         const preferredChartType = chartSelector.value !== 'auto' ? chartSelector.value : null;
 
-        const data = await sendQuery(
-            text,
-            dbTypeSelect.value.toLowerCase(),
-            preferredChartType
-        );
+        const data = await sendQuery(text, preferredChartType);
 
         removeLoading();
 

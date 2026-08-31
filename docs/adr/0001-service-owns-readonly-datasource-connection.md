@@ -40,10 +40,12 @@ behaviours depend on executing the query inside the service:
   enforcement, no PII gating, and its read-only role can see the OLTP tables. That
   is acceptable only because this is a research prototype answering aggregate
   questions; see `0002-sts-guide-tier-1-adoption.md`.
-- The mutable global connection state and `.last_connection.json` are removed. The
-  connection is fixed at deploy time from `DATABASE_URL`, which makes the service
-  effectively stateless per request. `/connect` survives only as a no-op shim so the
-  bundled demo UI's button keeps working; it changes nothing.
+- The mutable global connection state, `.last_connection.json`, and the `/connect`
+  endpoint are removed. The connection is fixed at deploy time from `DATABASE_URL`,
+  which makes the service effectively stateless per request.
+- The bundled demo UI in `web/` is a local dev aid, not a Consumer. It is mounted at
+  `/` only when `API_KEY` is unset; once a key is required the page is not served and
+  a Consumer is the only way in. See `docs/API.md`.
 - If STS ever needs real multi-tenant scope or PII controls, this decision is
   revisited: execution would move behind the NestJS-owned gateway described in
   `TEXT_TO_SQL_STS_GUIDE.md` and this service would become generate-only.

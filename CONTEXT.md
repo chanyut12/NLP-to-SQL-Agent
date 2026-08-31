@@ -6,9 +6,14 @@ relational database, and returns the result together with a suggested chart.
 ## Glossary
 
 ### Consumer
-An external application that calls this service's API. Distinct from the built-in
-web UI in `web/`, which is one specific client. A Consumer renders results in its
-own pages using its own components.
+An external application that calls this service's API. Distinct from the Demo UI. A
+Consumer renders results in its own pages using its own components.
+
+### Demo UI
+The chat page bundled in `web/`, served by the service itself. A local development
+aid for eyeballing what the service returns — not a Consumer and not shipped to
+production. It is served only when the API key is unset; once a key is required, the
+page is not mounted and a Consumer is the only way in.
 
 ### Export
 Delivering the result of one question to a Consumer as a structured JSON payload:
