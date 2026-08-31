@@ -8,9 +8,10 @@ engine nor the datasource.
 import os
 import sys
 
-# Must be set before core.config / api.main are imported.
+# Must be set before core.config / api.main are imported. Set (not pop) so a
+# stray load_dotenv() from the import chain can't repopulate these from .env.
 os.environ["API_KEY"] = "test-secret"
-os.environ.pop("DATABASE_URL", None)
+os.environ["DATABASE_URL"] = ""
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
 

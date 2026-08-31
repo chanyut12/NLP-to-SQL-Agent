@@ -70,6 +70,14 @@ from fastapi.staticfiles import StaticFiles
 import os
 
 if os.path.exists("web") and not settings.API_KEY:
+    @app.middleware("http")
+    async def _no_store_demo_ui(request, call_next):
+        response = await call_next(request)
+        p = request.url.path
+        if not (p.startswith("/api") or p.startswith("/docs") or p.startswith("/openapi")):
+            response.headers["Cache-Control"] = "no-store"
+        return response
+
     app.mount("/", StaticFiles(directory="web", html=True), name="static")
     logger.info("Demo UI mounted at / (API_KEY unset — dev mode).")
 elif settings.API_KEY:
