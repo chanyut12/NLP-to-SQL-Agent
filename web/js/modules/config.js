@@ -12,25 +12,13 @@ export const API_URL = isLocal
     : "/api"; // served same-origin by the FastAPI app
 
 /**
- * Chart color palette for multi-series charts
- * @type {Array<{bg: string, border: string}>}
- */
-export const CHART_COLORS = [
-    { bg: 'rgba(96, 165, 250, 0.7)', border: '#60a5fa' },   // Blue
-    { bg: 'rgba(239, 68, 68, 0.7)', border: '#ef4444' },    // Red
-    { bg: 'rgba(34, 197, 94, 0.7)', border: '#22c55e' },    // Green
-    { bg: 'rgba(168, 85, 247, 0.7)', border: '#a855f7' },   // Purple
-    { bg: 'rgba(251, 191, 36, 0.7)', border: '#fbbf24' },   // Yellow
-    { bg: 'rgba(236, 72, 153, 0.7)', border: '#ec4899' },   // Pink
-    { bg: 'rgba(20, 184, 166, 0.7)', border: '#14b8a6' },   // Teal
-    { bg: 'rgba(249, 115, 22, 0.7)', border: '#f97316' },   // Orange
-];
-
-/**
- * Pie chart color palette
+ * Categorical palette for pie/doughnut slices and multi-series charts.
+ * Muted (seaborn "deep") — reads as intentional, easy on the eyes in both themes.
+ * Single-series bar/line take their colour from the `--chart-series-1` CSS token
+ * instead, so they track the UI theme.
  * @type {Array<string>}
  */
-export const PIE_COLORS = [
-    '#60a5fa', '#34d399', '#f472b6', '#a78bfa',
-    '#fbbf24', '#f87171', '#818cf8', '#fb7185'
+export const CATEGORICAL_COLORS = [
+    '#4C72B0', '#DD8452', '#55A868', '#C44E52',
+    '#8172B2', '#937860', '#DA8BC3',
 ];

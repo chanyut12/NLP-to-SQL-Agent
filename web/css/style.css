@@ -38,6 +38,12 @@
     --text-lg: 1.125rem;
     --text-xl: 1.25rem;
     --text-2xl: 1.5rem;
+
+    /* Chart tokens — resolve against the current theme (no dark override needed:
+       they are color-mix / var() of tokens that already flip). */
+    --chart-series-1: var(--color-primary);
+    --chart-fill-1: color-mix(in oklch, var(--color-primary) 14%, transparent);
+    --chart-grid: color-mix(in oklch, var(--color-text) 8%, transparent);
 }
 
 :root[data-theme="dark"] {
@@ -653,6 +659,14 @@ code {
 .result-mini-btn:hover {
     color: var(--color-text);
     background: color-mix(in oklch, var(--color-text) 10%, transparent);
+}
+
+.result-title {
+    margin: 4px 0 10px;
+    font-size: var(--text-md);
+    font-weight: 600;
+    color: var(--color-text);
+    line-height: 1.4;
 }
 
 .result-tabs {

@@ -3,11 +3,36 @@
  * Handles Chart.js visualization rendering
  */
 
-import { CHART_COLORS, PIE_COLORS } from './config.js';
+import { CATEGORICAL_COLORS } from './config.js';
 import { formatAxisValue } from './format.js';
 
 // canvasId -> Chart instance, so a re-render (chart-type switch) destroys the old one.
 const _charts = new Map();
+
+// Category axis goes horizontal past this many bars (long Thai labels read better).
+const HORIZONTAL_BAR_THRESHOLD = 8;
+
+let _defaultsApplied = false;
+function applyChartDefaults() {
+    if (_defaultsApplied || typeof Chart === 'undefined' || !Chart.defaults) return;
+    Chart.defaults.font.family = "'Anuphan', system-ui, sans-serif";
+    _defaultsApplied = true;
+}
+
+/**
+ * Resolve a CSS color expression (including `var(...)` and `color-mix(...)`) to a
+ * concrete `rgb()/rgba()` string via a hidden probe. `getPropertyValue` alone
+ * returns custom properties unresolved, and Chart.js draws to a canvas that may
+ * not understand `color-mix()`.
+ */
+function resolveColor(expr) {
+    const probe = document.createElement('span');
+    probe.style.cssText = `color:${expr};position:absolute;left:-9999px`;
+    document.body.appendChild(probe);
+    const value = getComputedStyle(probe).color;
+    probe.remove();
+    return value;
+}
 
 /** Tear down the chart bound to a canvas, if any. */
 function destroyChart(canvasId) {
@@ -62,15 +87,21 @@ export function renderChart(canvasId, config, data, columns) {
         console.error(`Canvas element not found: ${canvasId}`);
         return;
     }
+    applyChartDefaults();
     destroyChart(canvasId);
 
     const ctx = canvas.getContext('2d');
     const isPie = config.chart_type === 'pie';
     const isScatter = config.chart_type === 'scatter';
+    const isLine = config.chart_type === 'line';
 
-    const rootStyles = getComputedStyle(document.documentElement);
-    const axisTextColor = rootStyles.getPropertyValue('--color-text-muted').trim();
-    const gridColor = rootStyles.getPropertyValue('--color-border').trim();
+    const tick = resolveColor('var(--color-text-muted)');
+    const grid = resolveColor('var(--chart-grid)');
+    const series1 = resolveColor('var(--chart-series-1)');
+    const fill1 = resolveColor('var(--chart-fill-1)');
+    const surface = resolveColor('var(--color-surface)');
+    const surfaceAlt = resolveColor('var(--color-surface-alt)');
+    const textColor = resolveColor('var(--color-text)');
 
     let datasets = [];
     let labels = [];
@@ -84,8 +115,10 @@ export function renderChart(canvasId, config, data, columns) {
         datasets.push({
             label: `${xCol} × ${yCol}`,
             data: data.map((row) => ({ x: Number(row[xCol]), y: Number(row[yCol]) })),
-            backgroundColor: CHART_COLORS[0].bg,
-            borderColor: CHART_COLORS[0].border,
+            backgroundColor: series1,
+            borderColor: series1,
+            pointRadius: 4,
+            pointHoverRadius: 6,
         });
     } else if (config.series_col) {
         // Multi-series: one dataset per distinct series value.
@@ -96,79 +129,133 @@ export function renderChart(canvasId, config, data, columns) {
             const rows = data.filter((r) => r[config.series_col] === seriesVal);
             const map = {};
             rows.forEach((r) => { map[r[config.x_col]] = r[config.y_col]; });
-            const color = CHART_COLORS[idx % CHART_COLORS.length];
+            const color = CATEGORICAL_COLORS[idx % CATEGORICAL_COLORS.length];
             datasets.push({
                 label: `${config.series_col}: ${seriesVal}`,
                 data: xValues.map((x) => (map[x] !== undefined ? map[x] : null)),
-                backgroundColor: color.bg,
-                borderColor: color.border,
+                backgroundColor: color,
+                borderColor: color,
                 borderWidth: 2,
-                tension: 0.3,
+                borderRadius: isLine ? 0 : 6,
+                maxBarThickness: 48,
+                tension: 0.35,
+                pointRadius: 0,
+                pointHoverRadius: 5,
                 fill: false,
             });
         });
     } else {
         const rows = applyTopN(config, data);
         labels = rows.map((r) => r[config.x_col]);
-        datasets.push({
-            label: config.y_label || config.y_col,
-            data: rows.map((r) => r[config.y_col]),
-            backgroundColor: isPie ? PIE_COLORS : CHART_COLORS[0].bg,
-            borderColor: isPie ? PIE_COLORS : CHART_COLORS[0].border,
-            borderWidth: 1,
-        });
+        const values = rows.map((r) => r[config.y_col]);
+        if (isPie) {
+            datasets.push({
+                data: values,
+                backgroundColor: CATEGORICAL_COLORS,
+                borderColor: surface,
+                borderWidth: 2,
+            });
+        } else if (isLine) {
+            datasets.push({
+                label: config.y_label || config.y_col,
+                data: values,
+                borderColor: series1,
+                backgroundColor: fill1,
+                borderWidth: 2.5,
+                tension: 0.35,
+                pointRadius: 0,
+                pointHoverRadius: 5,
+                fill: true,
+            });
+        } else {
+            datasets.push({
+                label: config.y_label || config.y_col,
+                data: values,
+                backgroundColor: series1,
+                borderRadius: 6,
+                borderWidth: 0,
+                maxBarThickness: 48,
+            });
+        }
     }
 
-    const chartTypeMap = { bar: 'bar', column: 'bar', line: 'line', scatter: 'scatter', pie: 'pie' };
+    const horizontal = config.chart_type === 'bar'
+        && !config.series_col
+        && labels.length > HORIZONTAL_BAR_THRESHOLD;
+    const chartType = isPie ? 'doughnut' : (isScatter ? 'scatter' : (isLine ? 'line' : 'bar'));
+
     const yType = semanticTypeOf(columns, config.y_col);
-    const fmtY = (v) => formatAxisValue(v, yType);
+    const fmtVal = (v) => formatAxisValue(v, yType);
+
+    const catAxis = () => {
+        const a = { grid: { display: false }, border: { display: false }, ticks: { color: tick } };
+        if (config.x_label) a.title = { display: true, text: config.x_label, color: tick };
+        return a;
+    };
+    const valAxis = () => {
+        const a = {
+            grid: { color: grid },
+            border: { display: false },
+            ticks: { color: tick, callback: (v) => fmtVal(v) },
+        };
+        if (config.y_label) a.title = { display: true, text: config.y_label, color: tick };
+        return a;
+    };
+
+    let scales = {};
+    if (isScatter) {
+        const axis = (label) => ({
+            grid: { color: grid },
+            border: { display: false },
+            ticks: { color: tick },
+            ...(label ? { title: { display: true, text: label, color: tick } } : {}),
+        });
+        scales = { x: axis(config.x_label), y: axis(config.y_label) };
+    } else if (!isPie) {
+        scales = horizontal ? { x: valAxis(), y: catAxis() } : { x: catAxis(), y: valAxis() };
+    }
 
     const chart = new Chart(ctx, {
-        type: chartTypeMap[config.chart_type] || 'bar',
+        type: chartType,
         data: { labels, datasets },
         options: {
             responsive: true,
             maintainAspectRatio: isPie,
+            indexAxis: horizontal ? 'y' : 'x',
+            ...(isPie ? { cutout: '55%' } : {}),
+            layout: { padding: 4 },
             plugins: {
-                title: {
-                    display: !!config.title,
-                    text: config.title,
-                    color: axisTextColor,
-                },
                 legend: {
-                    position: isPie ? 'right' : 'top',
-                    labels: { color: axisTextColor },
                     display: isPie || !!config.series_col,
+                    position: isPie ? 'right' : 'top',
+                    labels: { color: textColor, usePointStyle: true, boxWidth: 8, padding: 14 },
                 },
                 tooltip: {
+                    usePointStyle: true,
+                    padding: 10,
+                    cornerRadius: 8,
+                    backgroundColor: surfaceAlt || 'rgba(0, 0, 0, 0.8)',
+                    titleColor: textColor,
+                    bodyColor: textColor,
+                    borderColor: grid,
+                    borderWidth: 1,
                     callbacks: {
                         label(context) {
                             const base = context.dataset.label ? `${context.dataset.label}: ` : '';
                             if (isPie) {
                                 const total = context.dataset.data.reduce((a, b) => a + b, 0);
                                 const pct = ((context.parsed / total) * 100).toFixed(1);
-                                return `${base}${fmtY(context.parsed)} (${pct}%)`;
+                                return `${base}${fmtVal(context.parsed)} (${pct}%)`;
                             }
                             if (isScatter) {
-                                return `${base}(${fmtY(context.parsed.x)}, ${fmtY(context.parsed.y)})`;
+                                return `${base}(${fmtVal(context.parsed.x)}, ${fmtVal(context.parsed.y)})`;
                             }
-                            return `${base}${fmtY(context.parsed.y)}`;
+                            return `${base}${fmtVal(horizontal ? context.parsed.x : context.parsed.y)}`;
                         },
                     },
                 },
             },
-            scales: isPie ? {} : {
-                x: {
-                    title: { display: !!config.x_label, text: config.x_label, color: axisTextColor },
-                    ticks: { color: axisTextColor },
-                    grid: { color: gridColor },
-                },
-                y: {
-                    title: { display: !!config.y_label, text: config.y_label, color: axisTextColor },
-                    ticks: { color: axisTextColor, callback: (v) => fmtY(v) },
-                    grid: { color: gridColor },
-                },
-            },
+            scales,
         },
     });
 

@@ -63,6 +63,12 @@ export function renderResult(env) {
     chartPane.className = 'result-pane result-pane-chart';
     chartPane.innerHTML = `<div class="chart-container"><canvas id="${chartId}"></canvas></div>`;
 
+    if (viz.title) {
+        const h4 = document.createElement('h4');
+        h4.className = 'result-title';
+        h4.textContent = viz.title;
+        card.appendChild(h4);
+    }
     card.appendChild(buildTabs(card, viz, chartId, rows, env.columns));
     if (viz.reason) {
         const reason = document.createElement('div');
