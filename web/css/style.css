@@ -501,6 +501,15 @@ summary:hover {
     max-height: 350px !important;
 }
 
+/* Inside a result card the card already provides the frame. */
+.result-pane-chart .chart-container {
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    padding: 0;
+    margin-top: 0;
+}
+
 .message pre {
     background: var(--color-code-bg);
     padding: 12px;
@@ -602,21 +611,110 @@ code {
     color: var(--color-code-accent);
 }
 
-.table-wrapper {
-    overflow-x: auto;
-    margin-top: 15px;
-    /* Scroll-shadow affordance: hints there are more columns off-screen.
-       Two covers scroll WITH the content (attachment: local) to mask the
-       shadows below them; the shadows themselves stay pinned to each edge
-       (attachment: scroll), so they only peek out once there's more to scroll. */
-    background:
-        linear-gradient(to right, var(--color-surface) 50%, transparent) 0 0,
-        linear-gradient(to left, var(--color-surface) 50%, transparent) 100% 0,
-        radial-gradient(farthest-side at 0 50%, color-mix(in oklch, var(--color-text) 22%, transparent), transparent) 0 0,
-        radial-gradient(farthest-side at 100% 50%, color-mix(in oklch, var(--color-text) 22%, transparent), transparent) 100% 0;
-    background-repeat: no-repeat;
-    background-size: 24px 100%, 24px 100%, 10px 100%, 10px 100%;
-    background-attachment: local, local, scroll, scroll;
+/* ---- Result card: one query's output, full width below the chat bubble ---- */
+.result-card {
+    align-self: stretch;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    padding: 16px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+    animation: fadeIn 0.3s ease;
+}
+
+.result-summary {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 12px;
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+}
+
+.result-actions {
+    display: flex;
+    gap: 6px;
+}
+
+.result-mini-btn {
+    font-family: inherit;
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    background: color-mix(in oklch, var(--color-text) 5%, transparent);
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    padding: 4px 10px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.result-mini-btn:hover {
+    color: var(--color-text);
+    background: color-mix(in oklch, var(--color-text) 10%, transparent);
+}
+
+.result-tabs {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 10px;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.result-tab {
+    font-family: inherit;
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 8px 12px;
+    cursor: pointer;
+}
+
+.result-tab.active {
+    color: var(--color-primary);
+    border-bottom-color: var(--color-primary);
+}
+
+.result-chart-type {
+    margin-left: auto;
+    font-size: var(--text-xs);
+    padding: 4px 8px;
+}
+
+.result-reason {
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    margin-bottom: 10px;
+}
+
+.result-bignum {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 24px 12px;
+}
+
+.bignum-value {
+    font-size: var(--text-2xl);
+    font-weight: 700;
+    color: var(--color-primary);
+}
+
+.bignum-label {
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+}
+
+.result-table-scroll {
+    overflow: auto;
+    max-height: 480px;
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
 }
 
 table {
@@ -627,16 +725,42 @@ table {
 
 th,
 td {
-    padding: 12px;
+    padding: 10px 12px;
     text-align: left;
     border-bottom: 1px solid var(--color-border);
     white-space: nowrap;
 }
 
 th {
-    background: color-mix(in oklch, var(--color-text) 5%, transparent);
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--color-surface-alt);
     color: var(--color-text-muted);
     font-weight: 600;
+}
+
+th.sortable {
+    cursor: pointer;
+    user-select: none;
+}
+
+th.sortable:hover {
+    color: var(--color-text);
+}
+
+th[data-sort="asc"]::after {
+    content: " ▲";
+}
+
+th[data-sort="desc"]::after {
+    content: " ▼";
+}
+
+td.num,
+th.num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
 }
 
 tr:hover td {
@@ -914,13 +1038,6 @@ tr:hover td {
         min-height: 44px;
         flex: 1 1 100%;
         order: 1;
-    }
-
-    #chart-type-selector {
-        max-width: 100% !important;
-        flex: 1 1 auto;
-        margin: 0 !important;
-        order: 2;
     }
 
     .input-area .primary-btn {

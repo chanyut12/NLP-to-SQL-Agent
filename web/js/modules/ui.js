@@ -95,30 +95,6 @@ export function removeLoading() {
 }
 
 /**
- * Render data as HTML table
- * @param {Array<Object>} data - Array of row objects
- * @returns {string} HTML table string
- */
-export function renderTable(data) {
-    if (!data || data.length === 0) return "";
-
-    const headers = Object.keys(data[0]);
-    let html = '<div class="table-wrapper"><table><thead><tr>';
-
-    headers.forEach(h => html += `<th>${sanitize(h)}</th>`);
-    html += "</tr></thead><tbody>";
-
-    data.forEach(row => {
-        html += "<tr>";
-        headers.forEach(h => html += `<td>${sanitize(row[h])}</td>`);
-        html += "</tr>";
-    });
-
-    html += "</tbody></table></div>";
-    return html;
-}
-
-/**
  * Fetch and render database schema into the sidebar panel.
  * Displays table names with expandable column details.
  * @throws {Error} If fetchSchemaData() fails (caught internally, logged to console)

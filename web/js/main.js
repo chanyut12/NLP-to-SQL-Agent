@@ -6,25 +6,21 @@
  */
 
 // Module imports
-import {
-    getCurrentTab, getVizConfig, getVizData, getChartId,
-    setVizState, clearVizState
-} from './modules/state.js';
+import { getCurrentTab } from './modules/state.js';
 import { sanitize, formatError } from './modules/utils.js';
 import { fetchHealth, sendQuery, saveFavorite, deleteFavoriteById } from './modules/api.js';
 import {
     initUI, switchTab, appendMessage, appendLoading, removeLoading,
-    renderTable, fetchSchema, fetchHistory, fetchFavorites
+    fetchSchema, fetchHistory, fetchFavorites
 } from './modules/ui.js';
 import {
     showFeedbackModal, closeFeedbackModal, submitFeedbackWithText, sendFeedback
 } from './modules/feedback.js';
-import { renderChart } from './modules/chart.js';
+import { renderResult } from './modules/result.js';
 
 // DOM Elements
 let userInput = null;
 let dsStatus = null;
-let chartSelector = null;
 let sidebar = null;
 let openSidebarBtn = null;
 let sidebarBackdrop = null;
@@ -40,7 +36,6 @@ function init() {
     // Cache DOM elements
     userInput = document.getElementById('user-input');
     dsStatus = document.getElementById('ds-status');
-    chartSelector = document.getElementById('chart-type-selector');
     sidebar = document.getElementById('sidebar');
     openSidebarBtn = document.getElementById('open-sidebar-btn');
     sidebarBackdrop = document.getElementById('sidebar-backdrop');
@@ -82,26 +77,6 @@ async function checkDatasource() {
  * Set up all event listeners using event delegation
  */
 function setupEventListeners() {
-    // Chart type selector
-    chartSelector.addEventListener('change', (e) => {
-        const vizConfig = getVizConfig();
-        const vizData = getVizData();
-        const chartId = getChartId();
-
-        if (vizConfig && vizData && chartId) {
-            let type = e.target.value;
-            let pConfig = { ...vizConfig };
-
-            if (type === 'auto') {
-                type = pConfig.chart_type;
-            } else {
-                pConfig.chart_type = type;
-            }
-
-            renderChart(chartId, pConfig, vizData);
-        }
-    });
-
     // User input - Enter key to send
     userInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') sendMessage();
@@ -373,55 +348,15 @@ async function sendMessage() {
 
     appendLoading();
 
-    // Hide chart selector while loading
-    chartSelector.style.display = 'none';
-
     try {
-        // Get selected chart type from dropdown
-        const preferredChartType = chartSelector.value !== 'auto' ? chartSelector.value : null;
-
-        const data = await sendQuery(text, preferredChartType);
+        const data = await sendQuery(text);
 
         removeLoading();
 
         if (data.error) {
             appendMessage(`❌ Error: ${sanitize(data.error.message)}<br><pre><code class="language-sql">${sanitize(data.sql)}</code></pre>`, false);
         } else {
-            let html = `<strong>Generated SQL:</strong><pre><code class="language-sql">${sanitize(data.sql)}</code></pre>`;
-
-            if (data.rows && data.rows.length > 0) {
-                html += renderTable(data.rows);
-            } else {
-                html += "<br><em>No results found or empty set.</em>";
-            }
-
-            if (data.retry_count > 0) {
-                html += `<br><small class="text-warning">Self-corrected after ${data.retry_count} retries</small>`;
-            }
-
-            // Visualization
-            let chartId = null;
-            if (data.visualization && data.visualization.chart_type !== 'none' && data.visualization.chart_type !== 'table') {
-                chartId = 'chart-' + Math.random().toString(36).substr(2, 9);
-                html += `<div class="chart-container"><canvas id="${chartId}"></canvas></div>`;
-
-                // Update visualization state
-                setVizState(data.visualization, data.rows, chartId);
-
-                // Show selector
-                chartSelector.style.display = 'inline-block';
-                chartSelector.value = 'auto';
-            } else {
-                chartSelector.style.display = 'none';
-                clearVizState();
-            }
-
-            appendMessage(html, false);
-
-            if (chartId && data.visualization) {
-                renderChart(chartId, data.visualization, data.rows);
-            }
-
+            renderResult(data);
             // Refresh history if open
             if (getCurrentTab() === 'history') fetchHistory();
         }
