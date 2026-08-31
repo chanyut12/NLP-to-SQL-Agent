@@ -208,6 +208,33 @@ def recommend_chart(df: pd.DataFrame, question: str = "", preferred_chart_type: 
     # Case 4: Single Value or just Table
     return "table", None, None
 
+_CHART_REASON_TH = {
+    "bar": "เทียบค่าข้ามหมวดหมู่",
+    "line": "ดูแนวโน้มตามลำดับเวลา",
+    "pie": "ดูสัดส่วนขององค์ประกอบ",
+    "scatter": "ดูความสัมพันธ์ระหว่างสองตัวแปร",
+    "table": "ข้อมูลไม่เหมาะกับกราฟ แสดงเป็นตาราง",
+    "none": "ไม่มีข้อมูลให้แสดง",
+}
+
+# Fold a category axis into a "top N + other" view past this many distinct values.
+_TOP_N_THRESHOLD = 12
+
+
+def humanize_label(col: Optional[str]) -> Optional[str]:
+    """`attendance_rate_percent` -> `attendance rate percent`. Thai names pass through."""
+    if not col:
+        return None
+    return col.replace("_", " ").strip()
+
+
+def compute_top_n(df: pd.DataFrame, chart_type: str, x_col: Optional[str]) -> Optional[int]:
+    if chart_type not in ("bar", "pie") or not x_col or x_col not in df.columns:
+        return None
+    distinct = int(df[x_col].nunique(dropna=True))
+    return _TOP_N_THRESHOLD if distinct > _TOP_N_THRESHOLD else None
+
+
 def get_chart_options(chart_type: str) -> List[str]:
     """Get compatible alternatives based on recommended type."""
     common = ["Table"]
@@ -318,14 +345,23 @@ class VizService:
             df, question, preferred_chart_type
         )
 
+        x_label = humanize_label(x_col)
+        y_label = humanize_label(y_col)
+        title = (question or "").strip() or (
+            f"{y_label} ตาม {x_label}" if x_label and y_label else "ผลลัพธ์"
+        )
+
         return {
             "chart_type": chart_type,
             "x_col": x_col,
             "y_col": y_col,
             "series_col": series_col,
             "options": get_chart_options(chart_type),
-            "title": "Visualization",
-            "reason": "Rule-based recommendation"
+            "title": title,
+            "x_label": x_label,
+            "y_label": y_label,
+            "top_n": compute_top_n(df, chart_type, x_col),
+            "reason": _CHART_REASON_TH.get(chart_type, ""),
         }
 
 

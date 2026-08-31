@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from api.schemas import (
-    QueryRequest, QueryResponse, QueryError,
+    QueryRequest, QueryResponse, QueryError, ResultSummary,
     SchemaResponse, TableInfo, ColumnInfo,
     HistoryResponse, HistoryItem,
     FavoritesResponse, FavoriteItem, CreateFavoriteRequest,
@@ -9,6 +9,7 @@ from api.schemas import (
 from api.dependencies import get_state_manager, get_nlp_engine, GlobalStateManager
 from core.services.engine import NLPEngine
 from core.domain.schema_utils import get_database_schema
+from core.viz.column_meta import describe_result
 from core.utils.sql_metrics import parse_sql_metrics
 from core.config import settings
 import uuid
@@ -102,18 +103,6 @@ def log_query_to_file(
 
     return log_id
 
-def _derive_columns(rows: list[dict]) -> list[ColumnInfo]:
-    """Best-effort column list from the first row (SQL types are lost upstream)."""
-    if not rows:
-        return []
-    first = rows[0]
-    cols = []
-    for key in first:
-        sample = next((r[key] for r in rows if r.get(key) is not None), None)
-        cols.append(ColumnInfo(name=key, type=type(sample).__name__ if sample is not None else "unknown"))
-    return cols
-
-
 @router.post("/query", response_model=QueryResponse)
 async def query_data(
     request: QueryRequest,
@@ -183,10 +172,14 @@ async def query_data(
         )
 
     rows = data or []
+    truncated = len(rows) >= settings.MAX_SQL_LIMIT
+    col_dicts, summary_dict = await asyncio.to_thread(describe_result, rows, truncated)
     return QueryResponse(
         status="ok", request_id=request_id, question=request.question,
-        sql=sql, columns=_derive_columns(rows), rows=rows, row_count=len(rows),
-        truncated=len(rows) >= settings.MAX_SQL_LIMIT,
+        sql=sql,
+        columns=[ColumnInfo(**c) for c in col_dicts],
+        rows=rows, row_count=len(rows), truncated=truncated,
+        summary=ResultSummary(**summary_dict),
         visualization=viz_config, retry_count=retry_count, elapsed_ms=elapsed_ms,
     )
 

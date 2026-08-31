@@ -11,13 +11,28 @@ class VizConfig(BaseModel):
     chart_type: str
     x_col: Optional[str]
     y_col: Optional[str]
-    series_col: Optional[str] = None  # NEW: Column for multi-series grouping
+    series_col: Optional[str] = None  # Column for multi-series grouping
     options: List[str]
+    title: Optional[str] = None
+    x_label: Optional[str] = None
+    y_label: Optional[str] = None
+    top_n: Optional[int] = None  # fold categories past this into one "other" slice
+    reason: Optional[str] = None
 
 # Schema Models
 class ColumnInfo(BaseModel):
     name: str
     type: str
+    numeric: bool = False
+    # count | number | percent | gpa | date | id | category | name | text
+    semantic_type: str = "text"
+
+class ResultSummary(BaseModel):
+    row_count: int
+    truncated: bool = False
+    # column name -> {"sum","min","max","mean"} (non-finite values dropped)
+    numeric_aggregates: Dict[str, Dict[str, float]] = {}
+    single_value: bool = False  # 1 row x 1 numeric column
 
 class QueryError(BaseModel):
     code: str  # LLM_FAILED | SQL_INVALID | EXEC_FAILED
@@ -32,6 +47,7 @@ class QueryResponse(BaseModel):
     rows: Optional[List[Dict[str, Any]]] = None
     row_count: int = 0
     truncated: bool = False
+    summary: Optional[ResultSummary] = None
     visualization: Optional[VizConfig] = None
     retry_count: int = 0
     elapsed_ms: int = 0
