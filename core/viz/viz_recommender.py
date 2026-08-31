@@ -231,7 +231,10 @@ def humanize_label(col: Optional[str]) -> Optional[str]:
 def compute_top_n(df: pd.DataFrame, chart_type: str, x_col: Optional[str]) -> Optional[int]:
     if chart_type not in ("bar", "pie") or not x_col or x_col not in df.columns:
         return None
-    distinct = int(df[x_col].nunique(dropna=True))
+    try:
+        distinct = int(df[x_col].nunique(dropna=True))
+    except TypeError:
+        return None  # unhashable cells; no meaningful category count
     return _TOP_N_THRESHOLD if distinct > _TOP_N_THRESHOLD else None
 
 

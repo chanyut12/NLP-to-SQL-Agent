@@ -19,7 +19,7 @@ import pandas as pd
 # against the lowercased column name.
 _DATE_RE = re.compile(r"(date|datetime|timestamp|_at$|_on$|วันที่)", re.I)
 _ID_RE = re.compile(r"(^id$|_id$|^uuid$|_uuid$|รหัส)", re.I)
-_PERCENT_RE = re.compile(r"(rate|pct|percent|ratio|อัตรา|ร้อยละ|เปอร์เซ)", re.I)
+_PERCENT_RE = re.compile(r"(rate|pct|percent|อัตรา|ร้อยละ|เปอร์เซ)", re.I)
 _GPA_RE = re.compile(r"(gpax?|grade_point|เกรดเฉลี่ย)", re.I)
 _COUNT_RE = re.compile(r"(count|_cnt$|^cnt|num_|_num$|total|จำนวน|ยอด|amount)", re.I)
 _NAME_RE = re.compile(r"(^name$|_name$|fullname|full_name|title|ชื่อ)", re.I)
@@ -54,7 +54,10 @@ def _semantic_type(name: str, series: pd.Series) -> str:
 
     if _NAME_RE.search(n):
         return "name"
-    distinct = int(series.nunique(dropna=True))
+    try:
+        distinct = int(series.nunique(dropna=True))
+    except TypeError:
+        return "text"  # unhashable cells (JSONB / array columns)
     return "category" if distinct <= _CATEGORY_MAX_DISTINCT else "text"
 
 

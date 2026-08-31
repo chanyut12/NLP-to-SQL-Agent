@@ -51,6 +51,17 @@ class TestSemanticType(unittest.TestCase):
         self.assertTrue(cols[0]["numeric"])
         self.assertIn("ratio", summary["numeric_aggregates"])
 
+    def test_unhashable_cells_do_not_crash(self):
+        # PostgreSQL JSONB / array columns arrive as dicts / lists.
+        rows = [{"meta": {"a": 1}, "tags": [1, 2]}, {"meta": {"b": 2}, "tags": [3]}]
+        t = _types(rows)
+        self.assertEqual(t["meta"], "text")
+        self.assertEqual(t["tags"], "text")
+
+    def test_ratio_is_not_forced_to_percent(self):
+        t = _types([{"pass_ratio": 0.83}, {"pass_ratio": 0.5}])
+        self.assertEqual(t["pass_ratio"], "number")
+
     def test_iso_date_strings_not_coerced_to_numeric(self):
         rows = [{"report_date": "2026-08-17"}, {"report_date": "2026-08-18"}]
         cols, _ = describe_result(rows, truncated=False)
