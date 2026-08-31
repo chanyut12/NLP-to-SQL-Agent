@@ -5,7 +5,7 @@
  */
 
 import { appendMessage } from './ui.js';
-import { renderChart } from './chart.js';
+import { renderChart, resizeChart } from './chart.js';
 import {
     formatValue, isRightAligned, humanizeHeader, toCSV, toMarkdown,
 } from './format.js';
@@ -137,6 +137,7 @@ function buildTabs(card, viz, chartId, rows, columns) {
         tabs.querySelectorAll('.result-tab').forEach((b) => {
             b.classList.toggle('active', b.dataset.pane === pane);
         });
+        if (pane === 'chart') resizeChart(chartId);  // re-measure after being hidden
     };
 
     ['chart', 'table'].forEach((pane) => {
@@ -161,8 +162,11 @@ function buildTabs(card, viz, chartId, rows, columns) {
         select.appendChild(opt);
     }
     select.addEventListener('change', () => {
-        renderChart(chartId, { ...viz, chart_type: select.value }, rows, columns);
+        // Make the pane visible *before* rendering — Chart.js measures the
+        // container at creation and renders blank (and won't self-heal) if it
+        // is still display:none.
         show('chart');
+        renderChart(chartId, { ...viz, chart_type: select.value }, rows, columns);
     });
     tabs.appendChild(select);
 

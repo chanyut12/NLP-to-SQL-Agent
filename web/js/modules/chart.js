@@ -36,11 +36,24 @@ function resolveColor(expr) {
 
 /** Tear down the chart bound to a canvas, if any. */
 function destroyChart(canvasId) {
-    const existing = _charts.get(canvasId);
-    if (existing) {
-        existing.destroy();
+    const tracked = _charts.get(canvasId);
+    if (tracked) {
+        tracked.destroy();
         _charts.delete(canvasId);
     }
+    // Belt-and-suspenders: if a previous `new Chart()` threw part-way through
+    // init, Chart.js may still hold an instance on this canvas that we never
+    // recorded. Reusing the canvas would then throw "Canvas is already in use".
+    const orphan = (typeof Chart !== 'undefined' && Chart.getChart)
+        ? Chart.getChart(canvasId)
+        : null;
+    if (orphan) orphan.destroy();
+}
+
+/** Re-measure a chart after its container was hidden and shown again. */
+export function resizeChart(canvasId) {
+    const chart = _charts.get(canvasId);
+    if (chart) chart.resize();
 }
 
 /** semantic_type of a column, from the envelope's `columns` list. */
@@ -91,6 +104,10 @@ export function renderChart(canvasId, config, data, columns) {
     destroyChart(canvasId);
 
     const ctx = canvas.getContext('2d');
+    if (!ctx) {
+        console.error(`Could not get a 2d context for ${canvasId}`);
+        return;
+    }
     const isPie = config.chart_type === 'pie';
     const isScatter = config.chart_type === 'scatter';
     const isLine = config.chart_type === 'line';
@@ -139,8 +156,8 @@ export function renderChart(canvasId, config, data, columns) {
                 borderRadius: isLine ? 0 : 6,
                 maxBarThickness: 48,
                 tension: 0.35,
-                pointRadius: 0,
-                pointHoverRadius: 5,
+                pointRadius: xValues.length <= 30 ? 3 : 0,
+                pointHoverRadius: 6,
                 fill: false,
             });
         });
@@ -163,8 +180,9 @@ export function renderChart(canvasId, config, data, columns) {
                 backgroundColor: fill1,
                 borderWidth: 2.5,
                 tension: 0.35,
-                pointRadius: 0,
-                pointHoverRadius: 5,
+                pointRadius: values.length <= 30 ? 3 : 0,
+                pointHoverRadius: 6,
+                pointBackgroundColor: series1,
                 fill: true,
             });
         } else {
@@ -215,7 +233,7 @@ export function renderChart(canvasId, config, data, columns) {
         scales = horizontal ? { x: valAxis(), y: catAxis() } : { x: catAxis(), y: valAxis() };
     }
 
-    const chart = new Chart(ctx, {
+    const spec = {
         type: chartType,
         data: { labels, datasets },
         options: {
@@ -257,7 +275,13 @@ export function renderChart(canvasId, config, data, columns) {
             },
             scales,
         },
-    });
+    };
 
-    _charts.set(canvasId, chart);
+    try {
+        _charts.set(canvasId, new Chart(ctx, spec));
+    } catch (e) {
+        // Leave the canvas clean so the next chart-type switch can retry.
+        destroyChart(canvasId);
+        console.error('Chart render failed:', e);
+    }
 }
