@@ -17,17 +17,37 @@ page is not mounted and a Consumer is the only way in.
 
 ### Export
 Delivering the result of one question to a Consumer as a structured JSON payload:
-the generated **SQL**, the **result rows**, and a **visualization config** (chart
-type + column roles). The service does not render anything visual for a Consumer;
-the Consumer draws the table and chart itself.
+the generated **SQL**, the **result rows**, the **column metadata**, a **result
+summary**, and a **visualization config**. The service does not render anything
+visual for a Consumer; the Consumer draws the table and chart itself, using the
+metadata and summary to format and headline the result.
+
+### Column metadata
+Per-column descriptors the service attaches to a result: the column name, a coarse
+**semantic type** (`count`, `number`, `percent`, `gpa`, `date`, `id`, `category`,
+`name`, `text`), and whether the column is numeric. Derived deterministically from the
+result's data types and column names — never from a language model. Advisory: a
+Consumer uses it to right-align and format values (thousands separators, a `%`
+suffix, date trimming) but may ignore it.
+
+### Result summary
+A small digest of one result the service computes from the returned rows: the total
+row count, whether the row cap truncated the set, and for each numeric column its
+sum / min / max / mean. When a result is a single row with a single numeric column,
+it is also flagged as a **single-value answer** so a Consumer can headline the number
+instead of drawing a one-cell table.
 
 ### Question
 A single natural-language request from an end user, expressed in Thai, that the
 service answers with one SQL statement and one result set.
 
 ### Visualization config
-The service's recommendation for how to chart a result: a chart type plus which
-columns map to which axis / series role. Advisory only — the Consumer may ignore it.
+The service's recommendation for how to chart a result: a chart type, which columns
+map to which axis / series role, a chart title and axis labels, the list of
+alternative chart types the Consumer may offer, a plain-language reason for the
+choice, and — for a high-cardinality category axis — a `top_n` cut beyond which the
+remaining categories should be folded into one "other" slice. Advisory only — the
+Consumer may ignore any of it.
 
 ### Datasource
 The single relational database this service answers questions against. The service
