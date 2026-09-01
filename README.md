@@ -383,9 +383,10 @@ curl http://localhost:8000/api/health
 
 ### Deploying the microservice
 
-The `Dockerfile` is production-ready. For the current STS deployment
-(Hugging Face Space → Supabase, Consumer = `sts-backend` on Render) follow
-**[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** — read `docs/adr/0005-*` for why HF Spaces.
+For the current STS setup — the service runs on-demand on a dev machine, exposed
+to `sts-backend` (Render) via ngrok, querying Supabase — follow
+**[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** (`docs/adr/0005-*` for why). The
+`Dockerfile` stays ready for a paid always-on host later.
 
 ---
 
