@@ -1,12 +1,13 @@
-# Deployment — NL-to-SQL microservice (on-demand, local + ngrok)
+# Deployment — NL-to-SQL microservice (on-demand, local + Tailscale Funnel)
 
 `sts-backend` (NestJS) and the frontend run on Render; the STS database is
-Supabase. This microservice runs **on your machine, on demand** — you start it
-when the NL-query feature is needed and stop it afterwards — and is exposed to
-the Render backend through a **stable ngrok URL**. Rationale: `docs/adr/0005-*`.
+Supabase. This microservice runs **on one developer machine, on demand** — you
+start it when the NL-query feature is needed and stop it afterwards — and is
+exposed to the Render backend through a stable **Tailscale Funnel** URL.
+Rationale: `docs/adr/0005-*`.
 
 ```
-React ─▶ sts-backend (Render) ── POST /api/query, X-API-Key ──▶ ngrok ──▶ your machine:8000
+React ─▶ sts-backend (Render) ── POST /api/query, X-API-Key ──▶ Funnel ──▶ your machine:8000
                     │                                                          │ SELECT only
                     └───────────── read-write ──▶ Supabase ◀── read-only (nl2sql_ro) ┘
 ```
@@ -89,28 +90,38 @@ SCHEMA_STRATEGY=pruned
 Fallback LLM: comment the `OPENROUTER_*` lines and add `MODEL_PROVIDER=openai` +
 `OPENAI_API_KEY` + `OPENAI_MODEL=gpt-4o-mini`.
 
-### 2b. ngrok with a stable domain
+### 2b. Tailscale Funnel — a stable public URL, no interstitial, no request cap
 
-1. Sign up at ngrok.com (free) → **Domains** → you get one free static domain,
-   e.g. `sts-nl2sql.ngrok-free.app`. Note it.
-2. Install ngrok and add your authtoken (dashboard → Your Authtoken):
+Chosen over ngrok: the NestJS client (`docs/API.md`) sends only `X-API-Key` /
+`Content-Type`, and ngrok's free plan puts a browser-warning interstitial in
+front of the tunnel plus a ~20k-request/month cap. Funnel has neither.
+
+1. Install Tailscale on **this one machine** and sign in:
    ```
-   brew install ngrok        # macOS
-   ngrok config add-authtoken <token>
+   brew install --cask tailscale      # macOS
+   tailscale up
    ```
+2. In the [admin console](https://login.tailscale.com/admin) enable, for your
+   tailnet: **HTTPS certificates** (DNS → enable MagicDNS + HTTPS) and **Funnel**
+   (Access controls → add `"nodeAttrs": [{"target": ["*"], "attr": ["funnel"]}]`,
+   or use the Funnel toggle in the machine's ⋯ menu).
+3. The public URL is `https://<hostname>.<tailnet>.ts.net` — `tailscale status`
+   shows the hostname; it is stable for the life of this machine + tailnet.
 
 ### 2c. Point `sts-backend` at it (once)
 
 Render → `sts-backend` service → **Environment**:
 
 ```
-TEXT_TO_SQL_URL=https://sts-nl2sql.ngrok-free.app
+TEXT_TO_SQL_URL=https://<hostname>.<tailnet>.ts.net
 TEXT_TO_SQL_API_KEY=1df6af602a3f783d86c7bce648f785dc0e7095efccaf12969057368bdb1e631f
-TEXT_TO_SQL_TIMEOUT_MS=60000
+TEXT_TO_SQL_TIMEOUT_MS=90000
 ```
 
 Redeploy. (Confirm the friend used these exact env names in the NestJS `nl-query`
-module — `docs/INTEGRATION.md` §2.3 — otherwise match theirs.)
+module — `docs/INTEGRATION.md` §2.3 — otherwise match theirs.) The 90 s timeout
+covers a cold first request after a fresh model download or a STS migration; a
+warm request is a few seconds.
 
 ---
 
@@ -118,19 +129,22 @@ module — `docs/INTEGRATION.md` §2.3 — otherwise match theirs.)
 
 ```bash
 # start (two terminals, from the repo root)
-uv run uvicorn api.main:app --host 0.0.0.0 --port 8000     # terminal 1
-ngrok http --url=https://sts-nl2sql.ngrok-free.app 8000    # terminal 2
+uv run uvicorn api.main:app --host 127.0.0.1 --port 8000   # terminal 1
+tailscale funnel 8000                                       # terminal 2
 
 # ... use the NL-query feature in the deployed STS app ...
 
-# stop: Ctrl+C both
+# stop: Ctrl+C both. `tailscale funnel status` to check; `tailscale funnel reset` to force-clear.
 ```
 
-- First `/api/query` after each start is slow (~1–2 min): the engine loads the
-  embedding model and builds the schema index off Supabase. Fast after that.
-- Warm it yourself right after starting:
+- The engine warms during startup (unless `SKIP_ENGINE_PRELOAD=1`). The model
+  cache (`~/.cache/huggingface`) and the ChromaDB indexes (`rag_db/`,
+  `schema_rag_db/`) persist on this machine, so only the **very first** start and
+  the first start **after a STS migration** are slow (~1–2 min); a normal daily
+  start is ~10–20 s.
+- Confirm it is ready before anyone uses it:
   ```bash
-  curl -X POST https://sts-nl2sql.ngrok-free.app/api/query \
+  curl -X POST https://<hostname>.<tailnet>.ts.net/api/query \
     -H 'Content-Type: application/json' -H 'X-API-Key: 1df6af60...' \
     -d '{"question":"จำนวนนักเรียนปัจจุบันแยกตามโรงเรียน"}'
   ```
@@ -147,14 +161,14 @@ just use `uvicorn` as above.
 **Verify:**
 
 ```bash
-curl https://sts-nl2sql.ngrok-free.app/api/health          # {"status":"ok","datasource":true}
+curl https://<hostname>.<tailnet>.ts.net/api/health          # {"status":"ok","datasource":true}
 # datasource:false → DATABASE_URL wrong / Supabase unreachable / RLS / role
 ```
 
 **After a STS migration** (tables added/removed):
 
 ```bash
-curl -X POST https://sts-nl2sql.ngrok-free.app/api/admin/refresh-schema -H 'X-API-Key: 1df6af60...'
+curl -X POST https://<hostname>.<tailnet>.ts.net/api/admin/refresh-schema -H 'X-API-Key: 1df6af60...'
 ```
 
 **OpenRouter quota hit / model deprecated** (`error.code: LLM_FAILED` everywhere):

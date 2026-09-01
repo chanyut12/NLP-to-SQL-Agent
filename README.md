@@ -383,10 +383,10 @@ curl http://localhost:8000/api/health
 
 ### Deploying the microservice
 
-For the current STS setup — the service runs on-demand on a dev machine, exposed
-to `sts-backend` (Render) via ngrok, querying Supabase — follow
-**[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** (`docs/adr/0005-*` for why). The
-`Dockerfile` stays ready for a paid always-on host later.
+For the current STS setup — the service runs on-demand on one dev machine,
+exposed to `sts-backend` (Render) via Tailscale Funnel, querying Supabase —
+follow **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** (`docs/adr/0005-*` for why).
+The `Dockerfile` stays ready for a paid always-on host later.
 
 ---
 
