@@ -25,6 +25,7 @@ fastapi
 uvicorn
 python-multipart
 pydantic
+gradio>=4.44,<6    # only used as the Hugging Face Space launch shim (app.py)
 
 # Testing
 pytest>=7.0.0

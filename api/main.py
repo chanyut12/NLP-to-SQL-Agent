@@ -41,7 +41,12 @@ async def lifespan(app: FastAPI):
                 await preload_task
 
 
-app = FastAPI(title="Thai NLP-to-SQL API", version="1.0.0", lifespan=lifespan)
+# Hide the interactive API docs once a key is required (i.e. in a real deployment):
+# the service is then Consumer-only and there is no reason to expose the schema of
+# its endpoints to anyone who hits the public URL.
+_docs_kwargs = {"docs_url": None, "redoc_url": None, "openapi_url": None} if settings.API_KEY else {}
+
+app = FastAPI(title="Thai NLP-to-SQL API", version="1.0.0", lifespan=lifespan, **_docs_kwargs)
 
 # Enable CORS for frontend
 allow_origins = (

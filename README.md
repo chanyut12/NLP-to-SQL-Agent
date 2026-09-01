@@ -381,17 +381,11 @@ curl http://localhost:8000/api/health
 - [ ] ตั้ง Database Connection Pool
 - [ ] เพิ่ม Monitoring (Prometheus/Grafana)
 
-### Docker (Coming Soon)
+### Deploying the microservice
 
-```dockerfile
-# Dockerfile example
-FROM python:3.10-slim
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install -r requirements.txt
-COPY . .
-CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
-```
+The `Dockerfile` is production-ready. For the current STS deployment
+(Hugging Face Space → Supabase, Consumer = `sts-backend` on Render) follow
+**[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** — read `docs/adr/0005-*` for why HF Spaces.
 
 ---
 
@@ -410,6 +404,7 @@ CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
 ## 📚 Documentation
 
 - [Product Specification](docs/PRODUCT_SPEC.md) - Developer guide
+- [Deployment](docs/DEPLOYMENT.md) - Deploy the microservice (HF Space → Supabase)
 - [Model Setup](docs/MODEL_SETUP.md) - LLM configuration
 - [Tuning Guide](docs/TUNING_GUIDE.md) - Performance optimization
 - [Issues & Roadmap](docs/ISSUES_ROADMAP.md) - Known issues and development plan
