@@ -89,18 +89,20 @@ postgresql://nl2sql_ro.abcdefghijklmnop:THE_PASSWORD@aws-0-ap-southeast-1.pooler
 In the repo root, create `.env`:
 
 ```
-DATABASE_URL=postgresql+psycopg2://nl2sql_ro.abcdefghijklmnop:THE_PASSWORD@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres?sslmode=require
+DATABASE_URL=postgresql+psycopg2://nl2sql_ro.abcdefghijklmnop:THE_PASSWORD@aws-0-ap-northeast-1.pooler.supabase.com:5432/postgres?sslmode=require
 API_KEY=1df6af602a3f783d86c7bce648f785dc0e7095efccaf12969057368bdb1e631f
-MODEL_PROVIDER=openrouter
-OPENROUTER_API_KEY=sk-or-v1-...
-OPENROUTER_MODEL=<verified slug from openrouter.ai/models>
+MODEL_PROVIDER=openai
+OPENAI_API_KEY=sk-...
+OPENAI_MODEL=gpt-4o-mini
 DOMAIN_PROFILE=sts
 SCHEMA_STRATEGY=pruned
 ```
 
 `API_KEY` set → the demo UI and `/docs` are off; the service is Consumer-only.
-Fallback LLM: comment the `OPENROUTER_*` lines and add `MODEL_PROVIDER=openai` +
-`OPENAI_API_KEY` + `OPENAI_MODEL=gpt-4o-mini`.
+**LLM: gpt-4o-mini** — OpenRouter's free models were ~58 s per call (unusable
+with the 90 s HTTP timeout once self-correction retries stack). gpt-4o-mini is
+~2–8 s and costs roughly $0.5–2/month at ≤ 500 queries/day. To try a free model
+again, swap `MODEL_PROVIDER` / add `OPENROUTER_*` and expect slower responses.
 
 ### 2b. Tailscale Funnel — a stable public URL, no interstitial, no request cap
 
@@ -149,11 +151,13 @@ tailscale funnel 8000                                       # terminal 2
 # stop: Ctrl+C both. `tailscale funnel status` to check; `tailscale funnel reset` to force-clear.
 ```
 
-- The engine warms during startup (unless `SKIP_ENGINE_PRELOAD=1`). The model
-  cache (`~/.cache/huggingface`) and the ChromaDB indexes (`rag_db/`,
-  `schema_rag_db/`) persist on this machine, so only the **very first** start and
-  the first start **after a STS migration** are slow (~1–2 min); a normal daily
-  start is ~10–20 s.
+- Timing (gpt-4o-mini, Supabase session pooler in ap-northeast-1):
+  - warm query (schema cached < 1 h): **3–9 s**
+  - first query after a normal restart (`schema_rag_db/` persisted): **~15 s**
+  - first query after `rm -rf schema_rag_db` or a STS migration: **~60 s**
+    (re-embeds 105 table descriptions)
+  The model cache (`~/.cache/huggingface`) and ChromaDB indexes persist on this
+  machine, so the ~60 s case is rare.
 - Confirm it is ready before anyone uses it:
   ```bash
   curl -X POST https://<hostname>.<tailnet>.ts.net/api/query \
