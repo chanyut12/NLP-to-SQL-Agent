@@ -25,7 +25,10 @@ fastapi
 uvicorn
 python-multipart
 pydantic
-gradio>=4.44,<6    # only used as the Hugging Face Space launch shim (app.py)
+# NOTE: `gradio` is intentionally NOT pinned here. The HF Space (Gradio SDK)
+# force-installs its own `gradio==<current>` during build; adding our own version
+# range causes a pip resolution conflict. app.py's `import gradio` is satisfied by
+# HF's install. Local dev runs `uvicorn api.main:app` and never imports app.py.
 
 # Testing
 pytest>=7.0.0

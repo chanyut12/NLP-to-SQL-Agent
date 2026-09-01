@@ -18,8 +18,10 @@ KEEP_REGEX='^(api/|core/|profiles/|web/)|^(app\.py|requirements\.txt|README\.md|
 echo "Building $DEPLOY_BRANCH from $SOURCE_BRANCH ..."
 git switch -C "$DEPLOY_BRANCH" >/dev/null
 
-# Drop everything not matched by KEEP_REGEX (index only; working tree untouched).
-git ls-files | grep -vE "$KEEP_REGEX" | tr '\n' '\0' | xargs -0 --no-run-if-empty git rm -q --cached
+# Drop everything not matched by KEEP_REGEX. Plain `git rm` (not --cached) so the
+# working tree is clean too — switching back to $SOURCE_BRANCH restores the files
+# as tracked, leaving no untracked orphans that would block the switch.
+git ls-files | grep -vE "$KEEP_REGEX" | tr '\n' '\0' | xargs -0 --no-run-if-empty git rm -q
 
 # Prepend the HF Space frontmatter to README.md (once).
 if ! head -1 README.md | grep -q '^---$'; then
