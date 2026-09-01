@@ -66,23 +66,21 @@ def get_database_schema(engine: Engine) -> Dict[str, Any]:
         t for t in list(inspector.get_table_names()) + sorted(view_names)
         if not is_denylisted(t)
     ]
+
+    # Batch reflection: one round trip per metadata kind instead of ~3 per table.
+    # Over a distant connection pooler this is the difference between ~5 s and
+    # minutes for a 100-table schema. Falls back to per-table on any failure.
+    cols_by_name, pk_by_name, fk_by_name = _reflect_all(inspector, table_names)
+
     for table in table_names:
         columns = []
         try:
-            # Get column info
-            cols_info = inspector.get_columns(table)
+            cols_info = cols_by_name.get(table)
+            if not cols_info:
+                continue
 
-            # Get primary keys (views have none)
-            try:
-                pk_cols = set(inspector.get_pk_constraint(table).get("constrained_columns", []))
-            except Exception:
-                pk_cols = set()
-
-            # Get foreign keys (views have none)
-            try:
-                fk_info = inspector.get_foreign_keys(table)
-            except Exception:
-                fk_info = []
+            pk_cols = set((pk_by_name.get(table) or {}).get("constrained_columns", []))
+            fk_info = fk_by_name.get(table) or []
             fk_lookup = {}  # {src_col: "referred_table.referred_col"}
             for fk in fk_info:
                 for src_col, ref_col in zip(
@@ -113,6 +111,43 @@ def get_database_schema(engine: Engine) -> Dict[str, Any]:
         "tables": tables_schema,
         "foreign_keys": all_foreign_keys,
     }
+
+
+def _reflect_all(inspector, table_names):
+    """Return ({table: columns}, {table: pk_constraint}, {table: [fk]}).
+
+    Uses SQLAlchemy 2.0 batch reflection (one query per kind); on any failure
+    (old SQLAlchemy, dialect without batch support) falls back to per-table
+    reflection with the same per-table error tolerance as before.
+    """
+    try:
+        from sqlalchemy.engine import ObjectKind
+
+        def _by_name(multi):
+            return {name: value for (_schema, name), value in multi.items()}
+
+        return (
+            _by_name(inspector.get_multi_columns(filter_names=table_names, kind=ObjectKind.ANY)),
+            _by_name(inspector.get_multi_pk_constraint(filter_names=table_names, kind=ObjectKind.ANY)),
+            _by_name(inspector.get_multi_foreign_keys(filter_names=table_names, kind=ObjectKind.ANY)),
+        )
+    except Exception:
+        cols, pks, fks = {}, {}, {}
+        for t in table_names:
+            try:
+                cols[t] = inspector.get_columns(t)
+            except Exception:
+                continue
+            try:
+                pks[t] = inspector.get_pk_constraint(t)
+            except Exception:
+                pass
+            try:
+                fks[t] = inspector.get_foreign_keys(t)
+            except Exception:
+                pass
+        return cols, pks, fks
+
 
 def format_schema_for_prompt(schema_data: Dict[str, Any], max_tables: Optional[int] = None) -> str:
     """
