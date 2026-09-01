@@ -1,32 +1,38 @@
-"""Hugging Face Space entrypoint.
+"""Hugging Face Space entrypoint (Gradio SDK, no billing needed).
 
-The Docker SDK needs billing on the HF account; the Gradio SDK does not. With
-`sdk: gradio` HF runs `python app.py` and expects THAT process to start and hold
-a web server. So this file just runs the real service (`api.main:app`) with
-uvicorn — no Gradio object, nothing for HF to auto-launch, no second bind.
+HF runs `python app.py` and expects a long-lived server on port 7860 that also
+answers Gradio's readiness endpoints (`/config`). So:
 
-Local dev is unchanged: run `uvicorn api.main:app` as before. This file is only
-the Space launch shim. See docs/DEPLOYMENT.md.
+  * mount a one-page Gradio block at "/" — gives HF the `/config` route it probes
+  * `ssr_mode=False` — Gradio 6's SSR would otherwise spawn a Node server that
+    races uvicorn for the port (the earlier "address already in use")
+  * run uvicorn ourselves on 7860 — the only server in the process
+
+Every real route (`/api/health`, `/api/query`, ...) is `api.main:app` underneath;
+Gradio 6 serves its own endpoints under `/gradio_api/`, so `/api/*` stays ours.
+
+Local dev is unchanged: `uvicorn api.main:app`. This file is only the Space shim.
+See docs/DEPLOYMENT.md.
 """
 
 import os
 
-from api.main import app
+import gradio as gr
 
-# So the Space's root URL returns 200 instead of 404 (api.main only serves "/"
-# when API_KEY is unset, i.e. the dev demo UI).
-@app.get("/", include_in_schema=False)
-def _root():
-    return {"service": "sts-nl2sql", "docs": "server-to-server only", "health": "/api/health"}
+from api.main import app as api_app
 
+with gr.Blocks(title="STS NL-to-SQL") as demo:
+    gr.Markdown(
+        "# STS NL-to-SQL microservice\n"
+        "Called server-to-server by `sts-backend`.\n\n"
+        "- `GET /api/health`\n- `POST /api/query` (needs `X-API-Key`)\n"
+    )
+
+app = gr.mount_gradio_app(api_app, demo, path="/", ssr_mode=False)
 
 if __name__ == "__main__":
     import uvicorn
 
-    # HF may hand us the port via env; fall back to the Spaces default 7860.
-    port_env = {k: os.environ.get(k) for k in ("PORT", "GRADIO_SERVER_PORT", "SERVER_PORT")}
-    print(f"[app.py] port env: {port_env}", flush=True)
     port = int(os.environ.get("PORT") or os.environ.get("GRADIO_SERVER_PORT") or 7860)
     print(f"[app.py] starting uvicorn on 0.0.0.0:{port}", flush=True)
-
     uvicorn.run(app, host="0.0.0.0", port=port)
