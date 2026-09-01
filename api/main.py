@@ -3,6 +3,7 @@ load_dotenv()
 
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager, suppress
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -30,6 +31,14 @@ async def _preload_nlp_engine():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # On a platform with a short startup healthcheck (e.g. a Hugging Face Space),
+    # warming the engine here starves the event loop while the embedding model
+    # loads and the probe is killed. SKIP_ENGINE_PRELOAD=1 defers it to the first
+    # request instead.
+    if os.getenv("SKIP_ENGINE_PRELOAD") == "1":
+        logger.info("NLPEngine preload skipped (SKIP_ENGINE_PRELOAD=1); lazy-init on first request.")
+        yield
+        return
     preload_task = asyncio.create_task(_preload_nlp_engine())
     app.state.preload_task = preload_task
     try:

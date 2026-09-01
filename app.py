@@ -17,6 +17,10 @@ See docs/DEPLOYMENT.md.
 
 import os
 
+# Defer the heavy engine warm-up to the first request — loading the embedding
+# model during startup starves the event loop and HF's readiness probe kills us.
+os.environ.setdefault("SKIP_ENGINE_PRELOAD", "1")
+
 import gradio as gr
 
 from api.main import app as api_app
