@@ -29,6 +29,10 @@ _DENYLIST_RE = re.compile(
 _DENYLIST_EXACT = {
     "araid_identity_records", "araid_profiles", "audit_log", "system_settings",
     "schema_migrations", "_prisma_migrations",
+    # STS: token/hash-only tables the read-only role cannot SELECT at all
+    # (no analytical value; see docs/DEPLOYMENT.md §1).
+    "task_links", "classroom_attendance_links",
+    "teacher_line_group_invitations", "pii_export_requests",
 }
 
 

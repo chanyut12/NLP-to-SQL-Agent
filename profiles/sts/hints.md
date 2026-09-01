@@ -85,11 +85,18 @@ cases.id
   ├─ case_reviews.case_id
   ├─ case_referrals.case_id
   └─ tasks.case_id
-       ├─ task_links.task_id
-       │    └─ task_submissions.task_link_id
        └─ task_assistance_measures.task_id
 ```
 When a child has both an ID FK and a `school_id`, join on both to fail closed on the school boundary.
+
+### Read restrictions (the datasource role is column-limited on some tables)
+- `users`, `araid_profiles`: never `SELECT *` — password / PIN hashes are
+  column-blocked and `*` errors; name the columns you need. `araid_profiles` is
+  hidden from the schema entirely.
+- `task_links`, `classroom_attendance_links`, `teacher_line_group_invitations`,
+  `pii_export_requests`: token/hash only, not readable at all — never reference them.
+  `task_submissions` itself is fine to query directly, but it **cannot be joined
+  back to a task / case** (that path went through `task_links`).
 
 ### Counting and grain
 - First decide the output grain and which identity is being counted.
@@ -97,7 +104,7 @@ When a child has both an ID FK and a `school_id`, join on both to fail closed on
   Sessions → `COUNT(DISTINCT attendance_sessions.id)`. Cases → `COUNT(DISTINCT cases.id)`.
   Tasks → `COUNT(DISTINCT tasks.id)`. Teachers → `COUNT(DISTINCT teachers.id)`.
 - Pre-aggregate one-to-many child tables (CTE) before joining the parent — never
-  `JOIN cases → tasks → task_links` then `COUNT(cases.id)` without `DISTINCT`.
+  `JOIN cases → tasks → task_assistance_measures` then `COUNT(cases.id)` without `DISTINCT`.
 - A ratio aggregates numerator and denominator at the same grain, `* 100.0`, `NULLIF` the denominator.
 - "อันดับ N ของแต่ละ<กลุ่ม>" → window function `ROW_NUMBER()/RANK()` partitioned by that group, not a global `LIMIT N`.
 - Always add a deterministic tie-breaker to `ORDER BY` (e.g. `, id ASC`).

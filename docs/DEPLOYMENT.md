@@ -58,6 +58,18 @@ SELECT count(*) FROM <some_real_sts_table>;   -- real count, not 0 or an error
 RESET ROLE;
 ```
 
+### What the delivered role enforces (STS, as of first setup)
+
+- `BYPASSRLS` — 28 tables had RLS on with no policies; set so the role sees all rows.
+- Column-level grants hide `password` / PIN hashes on `users` and `araid_profiles`
+  → `SELECT *` on those errors. `araid_profiles` is also denylisted in
+  `core/domain/schema_utils.py`; `users` stays visible (name columns explicitly).
+- Fully blocked (token/hash only): `task_links`, `classroom_attendance_links`,
+  `teacher_line_group_invitations`, `pii_export_requests` — added to the denylist.
+- `statement_timeout = 30s`, `idle_in_transaction_session_timeout = 1min`,
+  `default_transaction_read_only = on`. If a legitimate heavy aggregate needs more
+  than 30 s, ask the Supabase owner to raise it for the role.
+
 ### 1d. Send back the connection string
 
 Dashboard → **Project Settings → Database → Connection string → "Session pooler"**
