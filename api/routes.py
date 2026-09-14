@@ -8,6 +8,7 @@ from api.schemas import (
 )
 from api.dependencies import get_state_manager, get_nlp_engine, GlobalStateManager
 from core.services.engine import NLPEngine
+from core.services.agent import AgentTurnResult
 from core.domain.schema_utils import get_database_schema
 from core.viz.column_meta import describe_result
 from core.utils.sql_metrics import parse_sql_metrics
@@ -120,6 +121,13 @@ async def query_data(
     )
     start_time = time.time()
 
+    # ADR 0006: a request carrying history is a conversational Turn and runs
+    # the function-calling agent loop; omitting history reproduces the legacy
+    # one-shot behaviour exactly, so existing Consumers don't break.
+    if request.history:
+        return await _agent_query(
+            request, state, engine, dialect, request_id, start_time)
+
     try:
         sql, data, error, retry_count, viz_config, rag_examples_count = await engine.query_database(
             question=request.question,
@@ -181,6 +189,82 @@ async def query_data(
         rows=rows, row_count=len(rows), truncated=truncated,
         summary=ResultSummary(**summary_dict),
         visualization=viz_config, retry_count=retry_count, elapsed_ms=elapsed_ms,
+    )
+
+
+async def _agent_query(
+    request: QueryRequest,
+    state: GlobalStateManager,
+    engine: NLPEngine,
+    dialect: str,
+    request_id: str,
+    start_time: float,
+) -> QueryResponse:
+    """One conversational Turn (ADR 0006): the LLM-driven agent loop with
+    history supplied by the Consumer. Builds the extended envelope."""
+    result: AgentTurnResult = await engine.agent_query_database(
+        question=request.question,
+        engine=state.db_engine,
+        dialect=dialect,
+        history=[t.model_dump() for t in request.history],
+        preferred_chart_type=request.preferred_chart_type,
+    )
+    duration = time.time() - start_time
+    elapsed_ms = int(duration * 1000)
+
+    # --- File logging (same trail as the one-shot path) ---
+    provider = settings.MODEL_PROVIDER
+    model_name = {
+        "openai": settings.OPENAI_MODEL, "google": settings.GOOGLE_MODEL,
+        "openrouter": settings.OPENROUTER_MODEL, "zhipu": settings.ZHIPU_MODEL,
+    }.get(provider, settings.OLLAMA_MODEL)
+    if result.error:
+        status_str = "Error"
+    elif result.answer_type == "result":
+        status_str = "Success"
+    else:
+        status_str = f"Success ({result.answer_type.title()})"
+    await asyncio.to_thread(
+        log_query_to_file,
+        question=request.question, sql=result.sql or "", status=status_str,
+        error_msg=result.error_message or result.error or "",
+        duration=duration, dialect=dialect,
+        # steps beyond the first are the loop's self-corrections
+        retry_count=max(0, result.steps_used - 1),
+        tables_used=[], join_count=0, has_aggregation=False,
+        has_subquery=False, has_group_by=False,
+        result_row_count=(result.row_count if result.answer_type == "result" else -1),
+        rag_examples_count=result.rag_examples_count, model_name=model_name,
+    )
+
+    if result.error:
+        code = result.error if result.error in (
+            "STEP_BUDGET_EXCEEDED", "LLM_FAILED") else "LLM_FAILED"
+        return QueryResponse(
+            status="error", request_id=request_id, question=request.question,
+            answer_type="result", steps_used=result.steps_used,
+            elapsed_ms=elapsed_ms,
+            error=QueryError(code=code, message=result.error_message or code),
+        )
+
+    if result.answer_type == "result":
+        rows = result.rows or []
+        return QueryResponse(
+            status="ok", request_id=request_id, question=request.question,
+            answer_type="result", message=None, steps_used=result.steps_used,
+            sql=result.sql,
+            columns=[ColumnInfo(**c) for c in (result.columns or [])],
+            rows=rows, row_count=result.row_count, truncated=result.truncated,
+            summary=ResultSummary(**(result.summary or {"row_count": result.row_count})),
+            visualization=result.viz_config, elapsed_ms=elapsed_ms,
+        )
+
+    # Clarification / Refusal: an Answer without a query behind it.
+    return QueryResponse(
+        status="ok", request_id=request_id, question=request.question,
+        answer_type=result.answer_type, message=result.message,
+        steps_used=result.steps_used, sql=None, rows=[], row_count=0,
+        elapsed_ms=elapsed_ms,
     )
 
 @router.get("/schema", response_model=SchemaResponse)

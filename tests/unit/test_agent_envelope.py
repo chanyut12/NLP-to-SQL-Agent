@@ -26,6 +26,7 @@ from fastapi.testclient import TestClient
 from api import dependencies as deps
 from api.main import app
 from api.schemas import QueryError
+from core.services.agent import AgentTurnResult
 
 client = TestClient(app)
 
@@ -36,10 +37,15 @@ CLARIFY_TURN = {"question": "ความเสี่ยงคืออะไร
 
 
 class _FakeEngine:
-    """Stands in for NLPEngine: returns one legacy one-shot result."""
+    """Stands in for NLPEngine: one legacy one-shot result, one canned Turn."""
 
     async def query_database(self, **kwargs):
         return ("SELECT 1 AS n", [{"n": 1}], None, 0, None, 0)
+
+    async def agent_query_database(self, **kwargs):
+        return AgentTurnResult(answer_type="result", steps_used=1,
+                               sql="SELECT 1 AS n", rows=[{"n": 1}],
+                               row_count=1)
 
 
 class EnvelopeTestBase(unittest.TestCase):

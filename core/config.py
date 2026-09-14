@@ -15,6 +15,7 @@ class Settings:
     # Model Configuration
     MODEL_PROVIDER = os.getenv("MODEL_PROVIDER", "openai").lower()
     LLM_MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "6"))  # backoff on 429 / transient errors
+    LLM_TIMEOUT_SECONDS = int(os.getenv("LLM_TIMEOUT_SECONDS", "120"))  # abort a hung request (some OpenRouter providers stall)
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
     OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
     

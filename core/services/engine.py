@@ -1,6 +1,7 @@
 import time
 import pandas as pd
 import asyncio
+from types import SimpleNamespace
 from langchain_community.utilities import SQLDatabase
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
@@ -65,6 +66,7 @@ class NLPEngine:
                 temperature=0,
                 api_key=settings.OPENAI_API_KEY,
                 max_retries=settings.LLM_MAX_RETRIES,
+                timeout=settings.LLM_TIMEOUT_SECONDS,
             )
         elif settings.MODEL_PROVIDER == "google":
             from langchain_google_genai import ChatGoogleGenerativeAI
@@ -77,6 +79,7 @@ class NLPEngine:
                 google_api_key=settings.GOOGLE_API_KEY,
                 convert_system_message_to_human=True,
                 max_retries=settings.LLM_MAX_RETRIES,
+                timeout=settings.LLM_TIMEOUT_SECONDS,
             )
         elif settings.MODEL_PROVIDER == "zhipu":
             from langchain_openai import ChatOpenAI
@@ -88,6 +91,7 @@ class NLPEngine:
                 api_key=settings.ZHIPU_API_KEY,
                 base_url="https://api.z.ai/api/coding/paas/v4",
                 max_retries=settings.LLM_MAX_RETRIES,
+                timeout=settings.LLM_TIMEOUT_SECONDS,
             )
         elif settings.MODEL_PROVIDER == "openrouter":
             from langchain_openai import ChatOpenAI
@@ -99,6 +103,7 @@ class NLPEngine:
                 api_key=settings.OPENROUTER_API_KEY,
                 base_url="https://openrouter.ai/api/v1",
                 max_retries=settings.LLM_MAX_RETRIES,
+                timeout=settings.LLM_TIMEOUT_SECONDS,
             )
         else:
             from langchain_ollama import ChatOllama
@@ -166,32 +171,16 @@ SQL:"""
         """Cleans and formats SQL from various LLM output formats."""
         return clean_sql_response(response, dialect)
 
-    async def query_database(
-        self,
-        question: str,
-        engine: Engine,
-        dialect: str = "sqlite",
-        max_limit: int = None,
-        max_retries: int = None,
-        preferred_chart_type: str = None
-    ):
+    async def _prepare_context(self, question: str, engine: Engine, dialect: str):
+        """Shared retrieval prep for the one-shot chain and the agent loop.
+
+        Schema fetch + RAG (re)index run under one lock so concurrent queries
+        (and a concurrent /admin/refresh-schema) never double-index or race a
+        half-built _schema_rag; then example RAG and schema formatting run in
+        parallel. Returns a context bundle consumed by both entry points.
         """
-        Main entry point to generate SQL and execute it against the DB.
-        Returns: (sql, dataframe_dict, error_message, retry_count, viz_config)
-        
-        This method is async and uses parallel RAG retrieval for better performance.
-        """
-        # Use settings if not explicitly provided
-        if max_limit is None:
-            max_limit = settings.MAX_SQL_LIMIT
-        if max_retries is None:
-            max_retries = settings.MAX_RETRIES
-        
         pruned = settings.SCHEMA_STRATEGY == "pruned"
 
-        # Schema fetch + RAG (re)index run under one lock so concurrent queries
-        # (and a concurrent /admin/refresh-schema) never double-index or race a
-        # half-built _schema_rag.
         async with self._schema_lock:
             engine_changed = (self._current_engine != engine)
             cache_fresh = (
@@ -229,7 +218,7 @@ SQL:"""
             if self._all_tables_cache is None:
                 tables_dict = raw_schema.get("tables", raw_schema) if isinstance(raw_schema, dict) and "tables" in raw_schema else raw_schema
                 self._all_tables_cache = list(tables_dict.keys())
-        
+
         # Cache the full formatted schema (used by the "full" strategy and by retries)
         if self._schema_text_cache is None:
             schema_text = format_schema_for_prompt(raw_schema)
@@ -237,12 +226,7 @@ SQL:"""
             if join_hints:
                 schema_text += f"\n\n{join_hints}"
             self._schema_text_cache = schema_text
-        
-        # =============================================================
-        # PARALLEL RAG RETRIEVAL - Key Performance Optimization
-        # =============================================================
-        # Execute Example RAG and Schema processing concurrently
-        
+
         async def get_examples():
             """Async task: Get similar examples from RAG store (returns (text, count))."""
             return await self._example_store.async_format_examples_for_prompt_with_count(
@@ -251,7 +235,7 @@ SQL:"""
                 dialect=dialect,
                 threshold=settings.RAG_DISTANCE_THRESHOLD
             )
-        
+
         async def get_schema_text():
             """Per-query pruned schema, or the cached full schema."""
             if not pruned:
@@ -272,13 +256,70 @@ SQL:"""
             if join_hints:
                 schema_text += f"\n\n{join_hints}"
             return schema_text
-        
+
         # Run both tasks in parallel
         (dynamic_examples, rag_count), schema_text = await asyncio.gather(
             get_examples(),
             get_schema_text()
         )
-        
+
+        tables_dict = raw_schema.get("tables", raw_schema) if isinstance(raw_schema, dict) and "tables" in raw_schema else raw_schema
+        return SimpleNamespace(
+            sql_examples_text=dynamic_examples,
+            rag_count=rag_count,
+            schema_text=schema_text,
+            all_tables=self._all_tables_cache,
+            raw_schema=raw_schema,
+            raw_tables=tables_dict,
+            pruned=pruned,
+        )
+
+    async def agent_query_database(
+        self,
+        question: str,
+        engine: Engine,
+        dialect: str = "sqlite",
+        history: list = None,
+        max_limit: int = None,
+        preferred_chart_type: str = None,
+    ):
+        """Conversational Turn entry point (ADR 0006): the function-calling
+        agent loop with the LLM as controller. Retrieval runs before the loop,
+        unchanged. Returns the loop's AgentTurnResult.
+        """
+        from core.services.agent import run_agent_turn
+        return await run_agent_turn(
+            self, question, engine, dialect=dialect,
+            history=history, max_limit=max_limit,
+            preferred_chart_type=preferred_chart_type,
+        )
+
+    async def query_database(
+        self,
+        question: str,
+        engine: Engine,
+        dialect: str = "sqlite",
+        max_limit: int = None,
+        max_retries: int = None,
+        preferred_chart_type: str = None
+    ):
+        """
+        Main entry point to generate SQL and execute it against the DB.
+        Returns: (sql, dataframe_dict, error_message, retry_count, viz_config, rag_count)
+
+        This method is async and uses parallel RAG retrieval for better performance.
+        """
+        # Use settings if not explicitly provided
+        if max_limit is None:
+            max_limit = settings.MAX_SQL_LIMIT
+        if max_retries is None:
+            max_retries = settings.MAX_RETRIES
+
+        bundle = await self._prepare_context(question, engine, dialect)
+        raw_schema = bundle.raw_schema
+        dynamic_examples, rag_count = bundle.sql_examples_text, bundle.rag_count
+        schema_text = bundle.schema_text
+
         # =============================================================
         # LLM Chain Execution
         # =============================================================
@@ -301,7 +342,7 @@ SQL:"""
             return None, None, f"LLM Generation Failed: {str(e)}", 0, None, 0
 
         # Use cached table list
-        all_tables = self._all_tables_cache
+        all_tables = bundle.all_tables
 
         # Lazy: full_schema_text only computed if a retry actually needs it
         full_schema_text = self._full_schema_text_cache if self._full_schema_text_cache else None
