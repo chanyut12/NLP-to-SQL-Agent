@@ -1,10 +1,41 @@
 from pydantic import BaseModel
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Literal
+
+# ADR 0006: STEP_BUDGET_EXCEEDED is reserved for the agent loop (ticket #20)
+# exhausting its step budget; today it can only come from a future Consumer
+# contract, but the vocabulary is pinned here so Consumers can match on it.
+ERROR_CODES = ("LLM_FAILED", "SQL_INVALID", "EXEC_FAILED", "STEP_BUDGET_EXCEEDED")
 
 class QueryRequest(BaseModel):
     question: str
     dialect: str = "postgres"
     preferred_chart_type: Optional[str] = None  # User selected chart type from dropdown
+    # Conversational Sessions (ADR 0006): the Consumer sends structured prior
+    # Turns with each request; the service itself stays stateless. Rows are
+    # deliberately not part of a Turn — only question / answer_type / SQL /
+    # row_count, mirroring the envelope minus the payload.
+    history: Optional[List["PriorTurn"]] = None
+
+class PriorTurn(BaseModel):
+    """One completed Turn of a Session, as replayed by the Consumer."""
+    question: str
+    answer_type: Literal["result", "clarification", "refusal"]
+    # A result Turn carries the SQL that produced it; clarification/refusal
+    # turns must not (there was no query to run).
+    sql: Optional[str] = None
+    row_count: Optional[int] = None
+
+    def model_post_init(self, __context) -> None:
+        has_sql = bool(self.sql and self.sql.strip())
+        if self.answer_type == "result" and not has_sql:
+            raise ValueError("a result Turn must carry the SQL that produced it")
+        if self.answer_type in ("clarification", "refusal") and has_sql:
+            raise ValueError(
+                f"a {self.answer_type} Turn must not carry SQL")
+        if not self.question.strip():
+            raise ValueError("a Turn must carry its question")
+        if self.row_count is not None and self.row_count < 0:
+            raise ValueError("row_count must be non-negative")
 
 # Visualization Model
 class VizConfig(BaseModel):
@@ -35,13 +66,20 @@ class ResultSummary(BaseModel):
     single_value: bool = False  # 1 row x 1 numeric column
 
 class QueryError(BaseModel):
-    code: str  # LLM_FAILED | SQL_INVALID | EXEC_FAILED
+    code: Literal[ERROR_CODES]  # LLM_FAILED | SQL_INVALID | EXEC_FAILED | STEP_BUDGET_EXCEEDED
     message: str
 
 class QueryResponse(BaseModel):
     status: str  # "ok" | "error"
     request_id: str
     question: str
+    # Answer (ADR 0006): result | clarification | refusal. Today's one-shot
+    # pipeline only ever produces "result"; the vocabulary ships with the
+    # envelope so Consumers can dispatch on it before the agent loop lands.
+    answer_type: Literal["result", "clarification", "refusal"] = "result"
+    # Thai text for clarifications/refusals; None when answer_type is result.
+    message: Optional[str] = None
+    steps_used: int = 1
     sql: Optional[str] = None
     columns: List[ColumnInfo] = []
     rows: Optional[List[Dict[str, Any]]] = None
