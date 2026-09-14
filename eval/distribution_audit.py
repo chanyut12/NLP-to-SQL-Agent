@@ -58,8 +58,10 @@ _LEGACY_TAG_FOLDS = {
 }
 
 # Exemplar-block categories for the Example set (outside the bucket quotas).
+# Known vocabulary — counted by count_exemplar_block, never UNMAPPED.
 CLARIFY_EXEMPLAR_TAG = "clarification_exemplar"
 REFUSAL_EXEMPLAR_TAG = "refusal_exemplar"
+EXEMPLAR_TAGS = (CLARIFY_EXEMPLAR_TAG, REFUSAL_EXEMPLAR_TAG)
 
 
 def bucket_for(category: str):
@@ -73,16 +75,20 @@ def count_buckets(items):
     """Count items per bucket; returns (counts, unmapped).
 
     Unmapped categories are returned separately so an audit never silently
-    swallows a tag that escaped the taxonomy.
+    swallows a tag that escaped the taxonomy. The exemplar tags are known
+    vocabulary (scored by count_exemplar_block) and are excluded from both.
     """
     counts = dict.fromkeys(CATEGORY_BUCKETS, 0)
     unmapped = {}
     for item in items:
-        bucket = bucket_for(item.get("category"))
+        category = item.get("category")
+        if category in EXEMPLAR_TAGS:
+            continue
+        bucket = bucket_for(category)
         if bucket:
             counts[bucket] += 1
         else:
-            tag = item.get("category", "<missing>")
+            tag = category or "<missing>"
             unmapped[tag] = unmapped.get(tag, 0) + 1
     return counts, unmapped
 

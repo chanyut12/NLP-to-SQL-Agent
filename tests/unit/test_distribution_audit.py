@@ -171,7 +171,8 @@ class TestRealSetsAuditability(unittest.TestCase):
             self.assertIn("category", e, f"example {e.get('id')} missing category")
 
     def test_all_real_categories_resolve_to_a_bucket_or_known_block(self):
-        known = set(CATEGORY_BUCKETS) | {"multi_join_aggregation"}
+        known = (set(CATEGORY_BUCKETS) | {"multi_join_aggregation"}
+                 | {"clarification_exemplar", "refusal_exemplar"})
         for e in EX:
             cat = e["category"]
             self.assertTrue(

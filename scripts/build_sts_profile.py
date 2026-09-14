@@ -4,6 +4,9 @@
   are removed from the retrieval corpus so eval cannot retrieve its own answer.
 - Inlines the corpus's parameter values into the SQL so the remaining examples are
   directly executable few-shot (the Tier-1 engine does not bind $n placeholders).
+- Clarify/refusal exemplars (ADR 0007) carry no SQL: they skip the executability
+  filter and the hold-out carve, and pass their answer contract through so the
+  agent prompt can format them.
 """
 
 import json
@@ -72,16 +75,27 @@ def executable_ids(examples: list) -> set:
     return ok
 
 
+EXEMPLAR_TAGS = ("clarification_exemplar", "refusal_exemplar")
+
+
+def is_exemplar(ex: dict) -> bool:
+    return ex.get("category") in EXEMPLAR_TAGS
+
+
 def main():
     corpus = json.load(open(SRC, encoding="utf-8"))
     examples = corpus["examples"]
 
-    runnable = executable_ids(examples)
-    examples = [e for e in examples if e["id"] in runnable]
+    exemplars = [e for e in examples if is_exemplar(e)]
+    sql_examples = [e for e in examples if not is_exemplar(e)]
 
-    # deterministic stratified hold-out
+    runnable = executable_ids(sql_examples)
+    sql_examples = [e for e in sql_examples if e["id"] in runnable]
+
+    # deterministic stratified hold-out (SQL examples only — exemplars stay in
+    # retrieval; the eval hold-out carve is about SQL leakage)
     by_pack: dict = {}
-    for ex in sorted(examples, key=lambda e: e["id"]):
+    for ex in sorted(sql_examples, key=lambda e: e["id"]):
         by_pack.setdefault(primary_pack(ex), []).append(ex)
 
     heldout_ids = set()
@@ -98,7 +112,7 @@ def main():
         heldout_ids.update(e["id"] for e in picked)
 
     kept = []
-    for ex in examples:
+    for ex in sql_examples:
         if ex["id"] in heldout_ids:
             continue
         kept.append({
@@ -110,6 +124,19 @@ def main():
             "grain": ex.get("grain", ""),
             "schema_packs": ex.get("schema_packs", []),
             "retrieval_tags": ex.get("retrieval_tags", []),
+        })
+    for ex in exemplars:
+        kept.append({
+            "id": ex["id"],
+            "question": ex["question"],
+            "sql": "",
+            "category": ex["category"],
+            "dialect": "postgresql",
+            "grain": ex.get("grain", ""),
+            "schema_packs": ex.get("schema_packs", []),
+            "retrieval_tags": ex.get("retrieval_tags", []),
+            "expected_answer_type": ex.get("expected_answer_type", ""),
+            "expected_message": ex.get("expected_message", ""),
         })
 
     os.makedirs(OUT_DIR, exist_ok=True)
@@ -124,7 +151,8 @@ def main():
     with open(os.path.join(OUT_DIR, "heldout_ids.json"), "w", encoding="utf-8") as f:
         json.dump(sorted(heldout_ids), f, ensure_ascii=False, indent=2)
 
-    print(f"corpus {len(examples)} -> kept {len(kept)}, held out {len(heldout_ids)}")
+    print(f"corpus {len(sql_examples)} SQL + {len(exemplars)} exemplars "
+          f"-> kept {len(kept)}, held out {len(heldout_ids)} SQL questions")
     print("held out:", sorted(heldout_ids))
 
 
