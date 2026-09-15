@@ -6,6 +6,7 @@ answers, refusal-first ordering, the 8-step budget, safety-inside-run_sql, and
 unchanged one-shot behaviour.
 """
 
+import asyncio
 import os
 import sys
 import tempfile
@@ -55,8 +56,12 @@ class ScriptedLLM:
     def __init__(self, script):
         self.script = list(script)
         self.prompts = []
+        self.bound_tools = None
 
     def bind_tools(self, tools):
+        # Record what the loop binds — a real ChatOpenAI needs the tool spec
+        # or it can only answer in prose and burns the step budget (ticket #21).
+        self.bound_tools = tools
         return self
 
     async def ainvoke(self, messages):
@@ -325,6 +330,28 @@ def run_agent_turn_sync(engine, question, db, history):
     import asyncio
     return asyncio.get_event_loop().run_until_complete(
         run_agent_turn(engine, question, db, dialect="sqlite", history=history))
+
+
+class TestToolBinding(unittest.TestCase):
+    def test_loop_binds_the_tool_spec_to_the_llm(self):
+        # Regression: without bind_tools a real ChatOpenAI never sees the tool
+        # definitions, emits prose for all 8 steps, and dies with
+        # STEP_BUDGET_EXCEEDED (found live during the #21 after-run smoke).
+        import asyncio
+        eng = _make_engine(None, ScriptedLLM([
+            AIMessage(content="", tool_calls=[{
+                "name": "final_answer", "args": {
+                    "answer_type": "refusal",
+                    "message": "คำขอนี้อยู่นอกขอบเขต"},
+                "id": "c1"}]),
+        ]))
+        turn = asyncio.run(run_agent_turn(
+            eng, "จำนวนนักเรียนแยกโรงเรียน", None, "postgres"))
+        self.assertIsNone(turn.error)
+        tools = eng._llm.bound_tools
+        self.assertIsNotNone(tools, "loop must bind the tool spec to the LLM")
+        names = {t["function"]["name"] for t in tools}
+        self.assertEqual(names, {"get_schema", "run_sql", "final_answer"})
 
 
 if __name__ == "__main__":

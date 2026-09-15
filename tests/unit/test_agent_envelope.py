@@ -24,8 +24,9 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"
 from fastapi.testclient import TestClient
 
 from api import dependencies as deps
+from api import routes as api_routes
 from api.main import app
-from api.schemas import QueryError
+from api.schemas import QueryError, QueryResponse
 from core.services.agent import AgentTurnResult
 
 client = TestClient(app)
@@ -155,6 +156,40 @@ class TestAuthCoversExtendedContract(unittest.TestCase):
         r = client.post("/api/query",
                         json={"question": "x", "history": [RESULT_TURN]})
         self.assertEqual(r.status_code, 401)
+
+
+class TestAgentDispatch(EnvelopeTestBase):
+    """Dispatch rule after ticket #21: the demo UI (and any conversational
+    Consumer) sends history on EVERY question — [] on the first one. The
+    field's PRESENCE is the agent-mode contract; absent or null is legacy."""
+
+    def _post(self, payload):
+        return client.post("/api/query", json=payload,
+                           headers={"X-API-Key": "test-secret"})
+
+    def _spy_agent(self):
+        return mock.patch.object(
+            api_routes, "_agent_query",
+            new=mock.AsyncMock(return_value=QueryResponse(
+                status="ok", request_id="r", question="x")))
+
+    def test_present_but_empty_history_runs_the_agent(self):
+        with self._spy_agent() as spy:
+            r = self._post({"question": "x", "history": []})
+        self.assertEqual(r.status_code, 200)
+        spy.assert_awaited_once()
+
+    def test_absent_history_stays_on_the_legacy_path(self):
+        with self._spy_agent() as spy:
+            r = self._post({"question": "x"})
+        self.assertEqual(r.status_code, 200)
+        spy.assert_not_awaited()
+
+    def test_null_history_stays_on_the_legacy_path(self):
+        with self._spy_agent() as spy:
+            r = self._post({"question": "x", "history": None})
+        self.assertEqual(r.status_code, 200)
+        spy.assert_not_awaited()
 
 
 if __name__ == "__main__":

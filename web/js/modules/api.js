@@ -62,13 +62,16 @@ export async function fetchFavoritesData() {
  * Send a question. The service picks the dialect from its own datasource.
  * @param {string} question - User question in natural language
  * @param {string|null} [preferredChartType=null] - Optional chart type (bar, line, pie, scatter)
- * @returns {Promise<Object>} The response envelope (status, sql, rows, visualization, error, ...)
+ * @param {Array|null} [history=null] - Prior Turns for a conversational session (ADR 0006)
+ * @returns {Promise<Object>} The response envelope (status, answer_type, sql, rows, visualization, error, ...)
  */
-export async function sendQuery(question, preferredChartType = null) {
+export async function sendQuery(question, preferredChartType = null, history = null) {
     const res = await fetch(`${API_URL}/query`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question, preferred_chart_type: preferredChartType })
+        body: JSON.stringify(history && history.length
+            ? { question, preferred_chart_type: preferredChartType, history }
+            : { question, preferred_chart_type: preferredChartType })
     });
     return handleResponse(res);
 }

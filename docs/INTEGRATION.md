@@ -55,6 +55,13 @@ interface QueryEnvelope {
   status: 'ok' | 'error';
   request_id: string;                 // ใช้ผูก log ข้ามระบบ
   question: string;
+  answer_type: 'result' | 'clarification' | 'refusal';
+  // ^ ชนิดคำตอบของ Turn นี้ (ADR 0006):
+  //   result        — มี sql/rows ให้แสดงผลตามปกติ
+  //   clarification — message คือคำถามกลับ 1 ข้อ (sql/rows = null, row_count = 0)
+  //   refusal       — message คือคำอธิบายการปฏิเสธ + ทางเลือก (sql/rows = null)
+  message: string | null;             // ข้อความ user-facing สำหรับ clarification/refusal
+  steps_used: number;                 // จำนวน step ที่ agent ใช้ใน Turn นี้ (1 ในโหมด one-shot)
   sql: string | null;
   columns: {
     name: string;
@@ -89,9 +96,39 @@ interface QueryEnvelope {
 }
 ```
 
-**`error.code`** (closed set): `LLM_FAILED` (สร้าง SQL ไม่ได้) · `EXEC_FAILED` (SQL
-รันไม่ผ่าน/ไม่ปลอดภัย) · *(PDPA phase จะเพิ่ม `PII_BLOCKED`)*
+**`error.code`** (closed set): `LLM_FAILED` (สร้าง SQL ไม่ได้) · `SQL_INVALID`
+(SQL ไม่ผ่านการตรวด้านความปลอดภัย — write/ตารางต้องห้าม) · `EXEC_FAILED` (SQL รันไม่ผ่าน) ·
+`STEP_BUDGET_EXCEEDED` (agent ใช้ครบ 8 step โดยไม่มี final answer — **ไม่มี SQL ให้ best-effort**,
+ADR 0006 decision #8) · *(PDPA phase จะเพิ่ม `PII_BLOCKED`)*
 **ผลว่าง** = `status:"ok"`, `row_count:0`, `error:null` (ไม่ใช่ error)
+
+### 1.1 Request — การสนทนาต่อเนื่อง (history, ADR 0006)
+
+Service **ไม่เก็บ memory** — Consumer ส่ง Turn ก่อนหน้ากลับมาใน request เอง:
+
+```ts
+interface PriorTurn {
+  question: string;                   // ต้องมีทุก Turn
+  answer_type: 'result' | 'clarification' | 'refusal';
+  sql: string | null;                 // result Turn: ต้องมี / ชนิดอื่น: ห้ามมี (422 ถ้าผิด)
+  row_count: number;                  // >= 0
+}
+
+// ตัวอย่าง: ผู้ใช้ตอบคำถามกลับของ agent (สรรพนาม "ห้องนั้น" อ้าง Turn ก่อน)
+POST /api/query
+{
+  "question": "แล้วห้องนั้นมีอัตราการมาเรียนเท่าไหร่",
+  "history": [
+    { "question": "ห้องไหนมีการขาดเรียนมากที่สุด", "answer_type": "result",
+      "sql": "SELECT classroom_id, ... ", "row_count": 5 }
+  ]
+}
+```
+
+กติกาของ history (enforce โดย validation — ผิด = HTTP 422):
+- ไม่ส่ง `history` = โหมด one-shot เดิม ทำงานเหมือนก่อนทุกอย่าง (backward compatible)
+- result Turn ต้องมี `sql` · clarification/refusal Turn ห้ามมี `sql`
+- ห้ามส่ง `rows` กลับมา — payload อยู่ฝั่ง Consumer เท่านั้น
 
 ### ตัวอย่างจริง
 
@@ -153,6 +190,38 @@ interface QueryEnvelope {
 ```
 
 **ผลว่าง:** `status: "ok"`, `rows: []`, `row_count: 0`, `error: null`
+
+**Agent ถามกลับ (clarification, HTTP 200):**
+
+```json
+{
+  "status": "ok",
+  "request_id": "...",
+  "question": "เด็กเสี่ยงมีเท่าไหร่",
+  "answer_type": "clarification",
+  "message": "อยากทราบจำนวนนักเรียนเสี่ยงในช่วงเวลาใดครับ (ภาคเรียนนี้ หรือ 30 วันล่าสุด)",
+  "steps_used": 2,
+  "sql": null, "columns": [], "rows": null, "row_count": 0,
+  "summary": null, "visualization": null,
+  "retry_count": 0, "elapsed_ms": 6210, "error": null
+}
+```
+
+**Agent ปฏิเสธคำขอข้อมูลส่วนบุคคล (refusal, HTTP 200):**
+
+```json
+{
+  "status": "ok",
+  "request_id": "...",
+  "question": "ขอเบอร์โทรผู้ปกครองของนักเรียน ชื่อ ด.ญ. กก",
+  "answer_type": "refusal",
+  "message": "ข้อมูลส่วนบุคคลไม่สามารถให้ได้ตามนโยบายความเป็นส่วนตัว — หากต้องการติดต่อผู้ปกครอง แนะนำให้ติดต่อฝ่ายกิจการนักเรียนของโรงเรียนโดยตรงครับ",
+  "steps_used": 1,
+  "sql": null, "columns": [], "rows": null, "row_count": 0,
+  "summary": null, "visualization": null,
+  "retry_count": 0, "elapsed_ms": 4100, "error": null
+}
+```
 
 ---
 

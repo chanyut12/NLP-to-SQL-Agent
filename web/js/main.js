@@ -6,7 +6,7 @@
  */
 
 // Module imports
-import { getCurrentTab } from './modules/state.js';
+import { getCurrentTab, getSessionTurns, addSessionTurn } from './modules/state.js';
 import { sanitize, formatError } from './modules/utils.js';
 import { fetchHealth, sendQuery, saveFavorite, deleteFavoriteById } from './modules/api.js';
 import {
@@ -16,7 +16,7 @@ import {
 import {
     showFeedbackModal, closeFeedbackModal, submitFeedbackWithText, sendFeedback
 } from './modules/feedback.js';
-import { renderResult } from './modules/result.js';
+import { renderAnswer } from './modules/result.js';
 
 // DOM Elements
 let userInput = null;
@@ -349,14 +349,24 @@ async function sendMessage() {
     appendLoading();
 
     try {
-        const data = await sendQuery(text);
+        // Conversational session (ADR 0006): replay completed Turns so the
+        // service can resolve pronouns like "ห้องนั้น" against prior context.
+        const data = await sendQuery(text, null, getSessionTurns());
 
         removeLoading();
 
         if (data.error) {
             appendMessage(`❌ Error: ${sanitize(data.error.message)}<br><pre><code class="language-sql">${sanitize(data.sql)}</code></pre>`, false);
         } else {
-            renderResult(data);
+            renderAnswer(data);
+            // Record this Turn for the next request — including refusals, so
+            // the agent knows the prior topic was declined.
+            addSessionTurn({
+                question: text,
+                answer_type: data.answer_type || 'result',
+                sql: (data.answer_type || 'result') === 'result' ? data.sql : null,
+                row_count: data.row_count || 0,
+            });
             // Refresh history if open
             if (getCurrentTab() === 'history') fetchHistory();
         }

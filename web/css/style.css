@@ -1160,3 +1160,28 @@ tr:hover td {
         transition-duration: 0.01ms !important;
     }
 }
+
+/* ---------- clarification / refusal cards (ADR 0006 answer types) ---------- */
+
+.clarify-card,
+.refusal-card {
+    border-left: 4px solid;
+}
+
+.clarify-card {
+    border-left-color: #f59e0b; /* amber — a question back to the user */
+}
+
+.refusal-card {
+    border-left-color: #ef4444; /* red — request declined */
+}
+
+.nonresult-title {
+    font-weight: 600;
+    margin-bottom: 0.35rem;
+}
+
+.nonresult-message {
+    margin: 0;
+    white-space: pre-wrap;
+}

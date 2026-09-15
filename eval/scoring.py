@@ -119,3 +119,96 @@ def domain_of(q):
         if keyword in question:
             return domain
     return "other"
+
+
+# --- result-set scoring (extracted from the runner, ticket #21) ---------------
+# The runner and the agent-mode path must score SQL answers identically, so the
+# comparators live here where both can import and tests can reach them.
+
+def _col_vectors(df):
+    """Each column as an order-normalised tuple of its (rounded/lowercased) values."""
+    s = df.sort_values(list(df.columns), kind="stable").reset_index(drop=True)
+    out = set()
+    for col in s.columns:
+        vec = []
+        for v in s[col]:
+            if isinstance(v, float):
+                vec.append(round(v, 2))
+            elif isinstance(v, str):
+                vec.append(v.strip().lower())
+            else:
+                vec.append(v)
+        out.add(tuple(vec))
+    return out
+
+
+def relaxed_match(gold_df, pred_df):
+    """Same answer up to one added or dropped descriptive column (a name/label
+    that is functionally dependent on the grouping key). Row counts must match.
+    Looser than strict EX; a wrong metric can slip through only if >=2 other
+    columns still line up."""
+    if gold_df.empty or pred_df.empty:
+        return gold_df.empty and pred_df.empty
+    if len(gold_df) != len(pred_df):
+        return False
+    gv, pv = _col_vectors(gold_df), _col_vectors(pred_df)
+    shared = len(gv & pv)
+    return shared >= len(gv) - 1 and shared >= len(pv) - 1
+
+
+def result_sets_match(gold_df, pred_df):
+    """Strict execution accuracy: order-free equality of full result sets.
+    Verbatim semantics from eval/run_eval.py (row-tuple comparison, column
+    names dropped, floats rounded, strings lowercased) — the after-run must
+    be scored under exactly the same comparator as the baseline."""
+    if gold_df.shape[1] != pred_df.shape[1]:
+        return False
+    return _to_comparable(gold_df) == _to_comparable(pred_df)
+
+
+def _to_comparable(df):
+    """Verbatim from eval/run_eval.py: rows as normalised tuples in a frozenset."""
+    rows = []
+    for row in df.itertuples(index=False):
+        normalized = []
+        for v in row:
+            if isinstance(v, float):
+                normalized.append(round(v, 2))
+            elif isinstance(v, str):
+                normalized.append(v.strip().lower())
+            elif v is None:
+                normalized.append(None)
+            else:
+                normalized.append(v)
+        rows.append(tuple(normalized))
+    return frozenset(rows)
+
+
+def score_sql_row(rec, gold_df, pred_df, retry=0):
+    """Fill one question record's result-set fields in place and return it.
+    Used by BOTH engines (pipeline and agent) so the after-numbers are scored
+    under exactly the same rules as the baseline."""
+    rec["ex_pass"] = result_sets_match(gold_df, pred_df)
+    rec["ex_pass_relaxed"] = rec["ex_pass"] or relaxed_match(gold_df, pred_df)
+    rec["grain_ok"] = rec["ex_pass"] or (pred_df.shape[0] == gold_df.shape[0])
+    rec["first_try"] = rec["ex_pass"] and retry == 0
+    if not rec["ex_pass"]:
+        rec["error_class"] = "wrong_grain" if not rec["grain_ok"] else (
+            "cols_only" if rec["ex_pass_relaxed"] else "wrong_result")
+    return rec
+
+
+def turn_result_fields(turn):
+    """Map an agent Turn answering a SQL question onto the record fields the
+    pipeline path produces (pred_sql / validity / executability), so both
+    engines land in the same report shape."""
+    sql = getattr(turn, "sql", None)
+    rows = getattr(turn, "rows", None)
+    error = getattr(turn, "error", None)
+    ok = bool(sql) and not error
+    return {
+        "pred_sql": sql if ok else None,
+        "sql_valid": ok,
+        "executable": ok and rows is not None,
+        "error_class": error if not ok else None,
+    }

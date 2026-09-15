@@ -21,6 +21,16 @@ import sys
 import time
 from datetime import datetime
 
+
+def engine_call_for(mode, eng):
+    """Pick the engine entrypoint that answers SQL questions (ticket #21).
+    `pipeline` = one-shot chain (the #18 baseline path); `agent` = the ADR 0006
+    conversational loop. Answer-type questions always use the agent entrypoint
+    regardless of this switch."""
+    if mode == "agent":
+        return eng.agent_query_database
+    return eng.query_database
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
@@ -51,6 +61,9 @@ def main():
     ap.add_argument("--concurrency", type=int, default=3, help="questions answered in parallel")
     ap.add_argument("--question-timeout", type=int, default=150,
                     help="hard cap per question; a stuck one is marked 'timeout' and the run continues")
+    ap.add_argument("--engine", default="pipeline", choices=["pipeline", "agent"],
+                    help="which engine answers SQL questions; answer-type "
+                         "questions always go through the conversational agent")
     ap.add_argument("--skip-quota-gate", action="store_true",
                     help="override the ADR 0007 distribution gate (not recommended)")
     ap.add_argument("--verbose", action="store_true")
@@ -72,36 +85,9 @@ def main():
     from sqlalchemy import create_engine
     from core.services.engine import NLPEngine
     from core.config import settings
-    from eval.run_eval import result_sets_match, _to_comparable
-
-    def _col_vectors(df):
-        """Each column as an order-normalised tuple of its (rounded/lowercased) values."""
-        s = df.sort_values(list(df.columns), kind="stable").reset_index(drop=True)
-        out = set()
-        for col in s.columns:
-            vec = []
-            for v in s[col]:
-                if isinstance(v, float):
-                    vec.append(round(v, 2))
-                elif isinstance(v, str):
-                    vec.append(v.strip().lower())
-                else:
-                    vec.append(v)
-            out.add(tuple(vec))
-        return out
-
-    def relaxed_match(gold_df, pred_df):
-        """Same answer up to one added or dropped descriptive column (a name/label
-        that is functionally dependent on the grouping key). Row counts must match.
-        Looser than strict EX; a wrong metric can slip through only if >=2 other
-        columns still line up."""
-        if gold_df.empty or pred_df.empty:
-            return gold_df.empty and pred_df.empty
-        if len(gold_df) != len(pred_df):
-            return False
-        gv, pv = _col_vectors(gold_df), _col_vectors(pred_df)
-        shared = len(gv & pv)
-        return shared >= len(gv) - 1 and shared >= len(pv) - 1
+    from eval.scoring import (
+        relaxed_match, result_sets_match, score_sql_row, turn_result_fields,
+    )
 
     bench = json.load(open(os.path.join(ROOT, args.benchmark), encoding="utf-8"))
     questions = bench["questions"][: args.limit] if args.limit else bench["questions"]
@@ -124,9 +110,11 @@ def main():
             sys.exit(2)
     # Pool must cover concurrent gold + predicted-SQL executions.
     db = create_engine(args.db_url, pool_size=args.concurrency * 3, max_overflow=args.concurrency * 2)
-    print(f"model={provider}/{model_id} rag_top_k={settings.RAG_TOP_K} "
+    print(f"model={provider}/{model_id} engine={args.engine} "
+          f"rag_top_k={settings.RAG_TOP_K} "
           f"max_retries={settings.MAX_RETRIES} schema={settings.SCHEMA_STRATEGY}")
     eng = NLPEngine()
+    sql_call = engine_call_for(args.engine, eng)
 
     async def run_one(q):
         t0 = time.time()
@@ -167,9 +155,46 @@ def main():
                 print(f"  [{rec['id']}] {'AT-PASS' if passed else reason} "
                       f"steps={turn.steps_used} {rec['duration_sec']}s")
             return rec
+        if args.engine == "agent":
+            # Agent engine (ADR 0006): the SQL question is answered inside a
+            # conversational Turn; the Turn's SQL is scored against gold exactly
+            # like the pipeline path (ticket #21 — same comparator, same axes).
+            try:
+                turn = await asyncio.wait_for(
+                    sql_call(q["question"], db, dialect="postgres"),
+                    timeout=args.question_timeout,
+                )
+            except asyncio.TimeoutError:
+                rec["duration_sec"] = round(time.time() - t0, 2)
+                rec["error"] = f"question timed out after {args.question_timeout}s"
+                rec["error_class"] = "timeout"
+                return rec
+            except Exception as e:
+                rec["error"], rec["error_class"] = str(e), "exception"
+                return rec
+            rec["duration_sec"] = round(time.time() - t0, 2)
+            rec["steps_used"] = getattr(turn, "steps_used", None)
+            rec.update(turn_result_fields(turn))
+            if not rec["pred_sql"]:
+                rec["error"] = (getattr(turn, "error_message", None)
+                                or rec["error_class"] or "no sql")
+                return rec
+            try:
+                gold_df = await asyncio.to_thread(pd.read_sql, q["gold_sql"], db)
+                pred_df = pd.DataFrame(turn.rows) if turn.rows else pd.DataFrame()
+            except Exception as e:
+                rec["error"], rec["error_class"] = f"gold error: {e}", "gold_error"
+                return rec
+            rec["executable"] = True
+            score_sql_row(rec, gold_df, pred_df, retry=0)
+            if args.verbose:
+                print(f"  [{rec['id']}] {'PASS' if rec['ex_pass'] else rec['error_class']} "
+                      f"gold={gold_df.shape[0]}r pred={pred_df.shape[0]}r "
+                      f"steps={rec['steps_used']} {rec['duration_sec']}s")
+            return rec
         try:
             sql, data, err, retry, _viz, _rag = await asyncio.wait_for(
-                eng.query_database(q["question"], db, dialect="postgres"),
+                sql_call(q["question"], db, dialect="postgres"),
                 timeout=args.question_timeout,
             )
         except asyncio.TimeoutError:
@@ -276,6 +301,7 @@ def main():
 
     report = {
         "model": f"{provider}/{model_id}",
+        "engine": args.engine,
         "evaluated_at": datetime.now().isoformat(),
         "config": {"rag_top_k": settings.RAG_TOP_K, "max_retries": settings.MAX_RETRIES,
                    "schema_strategy": settings.SCHEMA_STRATEGY},

@@ -122,6 +122,66 @@ def _history_block(history: Optional[list]) -> str:
     return "\n".join(lines)
 
 
+AGENT_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_schema",
+            "description": ("Full column list for one table. Use when unsure "
+                            "about columns or join paths."),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "table_name": {"type": "string", "description": "Exact table name"},
+                },
+                "required": ["table_name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_sql",
+            "description": ("Execute a READ-ONLY SELECT against the datasource. "
+                            "Safety validation runs inside the tool — writes and "
+                            "forbidden tables are rejected with the reason returned "
+                            "to you. A LIMIT cap is enforced automatically."),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "sql": {"type": "string", "description": "One SELECT statement"},
+                },
+                "required": ["sql"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "final_answer",
+            "description": ("End the Turn. answer_type: 'result' — a query already "
+                            "executed successfully this Turn; 'clarification' — the "
+                            "question is ambiguous, ask ONE concrete follow-up; "
+                            "'refusal' — out of scope or personal data."),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "answer_type": {"type": "string",
+                                    "enum": ["result", "clarification", "refusal"]},
+                    "message": {"type": "string",
+                                "description": "The user-facing message (Thai)"},
+                    "executed_question": {"type": "string",
+                                          "description": ("For result answers: the "
+                                                          "self-contained question the "
+                                                          "executed SQL answers")},
+                },
+                "required": ["answer_type", "message"],
+            },
+        },
+    },
+]
+
+
 class _AgentSession:
     """Mutable per-Turn state threaded through the tool implementations."""
 
@@ -233,11 +293,15 @@ async def run_agent_turn(
     messages: List[dict] = [{"role": "system", "content": system}]
 
     llm = engine_obj._llm
+    # The model cannot call tools it never sees: bind the spec once per Turn.
+    # (Regression ticket #21: without this a real ChatOpenAI answers in prose
+    # until the budget is gone.)
+    tool_llm = llm.bind_tools(AGENT_TOOLS)
     steps = 0
     while steps < AGENT_STEP_BUDGET:
         steps += 1
         try:
-            ai_msg = await llm.ainvoke(messages)
+            ai_msg = await tool_llm.ainvoke(messages)
         except Exception as e:
             return AgentTurnResult(
                 error="LLM_FAILED", error_message=str(e), steps_used=steps)

@@ -13,6 +13,36 @@ import {
 let _seq = 0;
 
 /**
+ * Render one envelope into the chat, dispatching on answer_type (ADR 0006).
+ * @param {Object} env - the /api/query response envelope
+ */
+export function renderAnswer(env) {
+    if (env.answer_type === 'clarification' || env.answer_type === 'refusal') {
+        renderNonResult(env);
+        return;
+    }
+    renderResult(env);
+}
+
+/**
+ * Render a clarification or refusal — a text answer with no SQL or rows.
+ * @param {Object} env - the /api/query response envelope (answer_type is clarification|refusal)
+ */
+function renderNonResult(env) {
+    const chatHistory = document.getElementById('chat-history');
+    const card = document.createElement('div');
+    const isClarify = env.answer_type === 'clarification';
+    card.className = isClarify ? 'result-card clarify-card' : 'result-card refusal-card';
+    const icon = isClarify ? '❓' : '🛑';
+    const label = isClarify ? 'คำถามกลับจากผู้ช่วย' : 'คำขอนอกขอบเขต';
+    card.innerHTML = `
+        <div class="nonresult-title">${icon} ${label}</div>
+        <p class="nonresult-message">${escapeHtml(env.message || '')}</p>`;
+    chatHistory.appendChild(card);
+    chatHistory.scrollTop = chatHistory.scrollHeight;
+}
+
+/**
  * Render one successful query result into the chat.
  * @param {Object} env - the /api/query response envelope (status === "ok")
  */

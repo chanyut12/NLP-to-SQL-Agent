@@ -121,10 +121,11 @@ async def query_data(
     )
     start_time = time.time()
 
-    # ADR 0006: a request carrying history is a conversational Turn and runs
-    # the function-calling agent loop; omitting history reproduces the legacy
-    # one-shot behaviour exactly, so existing Consumers don't break.
-    if request.history:
+    # ADR 0006 (dispatch refined in #21): the PRESENCE of the history field —
+    # even an empty list, which is how a session's first Turn arrives — selects
+    # the function-calling agent loop. Omitting the field (or null) keeps the
+    # legacy one-shot behaviour, so existing Consumers don't break.
+    if request.history is not None:
         return await _agent_query(
             request, state, engine, dialect, request_id, start_time)
 
