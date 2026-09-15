@@ -18,11 +18,13 @@ sys.path.insert(0, ROOT)
 from eval.distribution_audit import (
     AMBIGUOUS_QUOTA,
     ANSWER_TYPE_BLOCK_QUOTA,
+    ANSWER_TYPE_CATEGORIES,
     BUCKET_QUOTA,
     CATEGORY_BUCKETS,
     CLARIFY_REFUSAL_QUOTA,
     DENY_QUOTA,
     bucket_for,
+    count_answer_type_block,
     count_buckets,
     count_exemplar_block,
     delta_report,
@@ -80,6 +82,36 @@ class TestBucketFor(unittest.TestCase):
         # surfaces multi_join_aggregation items as UNMAPPED so tickets #15/#16
         # re-tag each to its primary shape.
         self.assertIsNone(bucket_for("multi_join_aggregation"))
+
+
+class TestAnswerTypeQuestions(unittest.TestCase):
+    """ADR 0007/#16: golden ambiguous/deny questions carry an expected Answer
+    type instead of a gold SQL; the audit counts them as their own blocks, not
+    as bucket members."""
+
+    def test_answer_type_categories_are_known_vocabulary(self):
+        self.assertEqual(ANSWER_TYPE_CATEGORIES, ("ambiguous", "deny"))
+
+    def test_count_buckets_skips_answer_type_questions(self):
+        items = [
+            {"category": "ambiguous", "expected_answer_type": "clarification"},
+            {"category": "deny", "expected_answer_type": "refusal"},
+            {"category": "count_groupby"},
+        ]
+        buckets, unmapped = count_buckets(items)
+        self.assertEqual(buckets["count_groupby"], 1)
+        self.assertEqual(sum(buckets.values()), 1)
+        self.assertEqual(unmapped, {})
+
+    def test_count_answer_type_block_counts_expected_types(self):
+        questions = [
+            {"category": "ambiguous", "expected_answer_type": "clarification"},
+            {"category": "ambiguous", "expected_answer_type": "clarification"},
+            {"category": "deny", "expected_answer_type": "refusal"},
+            {"category": "count_groupby"},
+        ]
+        block = count_answer_type_block(questions)
+        self.assertEqual(block, {"ambiguous": 2, "deny": 1})
 
 
 class TestCountBuckets(unittest.TestCase):
@@ -172,7 +204,8 @@ class TestRealSetsAuditability(unittest.TestCase):
 
     def test_all_real_categories_resolve_to_a_bucket_or_known_block(self):
         known = (set(CATEGORY_BUCKETS) | {"multi_join_aggregation"}
-                 | {"clarification_exemplar", "refusal_exemplar"})
+                 | {"clarification_exemplar", "refusal_exemplar"}
+                 | set(ANSWER_TYPE_CATEGORIES))
         for e in EX:
             cat = e["category"]
             self.assertTrue(
@@ -192,7 +225,7 @@ class TestAuditRun(unittest.TestCase):
             [sys.executable, os.path.join(ROOT, "eval", "distribution_audit.py")],
             capture_output=True, text=True, cwd=ROOT,
         )
-        self.assertEqual(r.returncode, 1)  # real sets are off-quota until #15/#16
+        self.assertIn(r.returncode, (0, 1))  # balance state changes as #15/#16/#17 land
         self.assertIn("golden", r.stdout.lower())
         self.assertIn("examples", r.stdout.lower())
         self.assertIn("count_groupby", r.stdout)

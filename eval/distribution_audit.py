@@ -57,6 +57,13 @@ _LEGACY_TAG_FOLDS = {
     "ranking_global": "ranking",
 }
 
+# Golden answer-type questions (ADR 0007/#16): carry an expected Answer type
+# instead of a gold SQL. Known vocabulary — counted by count_answer_type_block,
+# never UNMAPPED and never bucket members.
+AMBIGUOUS_CATEGORY = "ambiguous"
+DENY_CATEGORY = "deny"
+ANSWER_TYPE_CATEGORIES = (AMBIGUOUS_CATEGORY, DENY_CATEGORY)
+
 # Exemplar-block categories for the Example set (outside the bucket quotas).
 # Known vocabulary — counted by count_exemplar_block, never UNMAPPED.
 CLARIFY_EXEMPLAR_TAG = "clarification_exemplar"
@@ -83,6 +90,11 @@ def count_buckets(items):
     for item in items:
         category = item.get("category")
         if category in EXEMPLAR_TAGS:
+            continue
+        # ADR 0007/#16: a golden question carrying an expected Answer type is a
+        # block member regardless of how its category is spelled.
+        if (category in ANSWER_TYPE_CATEGORIES
+                or item.get("expected_answer_type") in ("clarification", "refusal")):
             continue
         bucket = bucket_for(category)
         if bucket:

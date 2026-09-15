@@ -49,6 +49,10 @@ def main():
     ap.add_argument("--output", default=None)
     ap.add_argument("--limit", type=int, default=None, help="only the first N questions (smoke)")
     ap.add_argument("--concurrency", type=int, default=3, help="questions answered in parallel")
+    ap.add_argument("--question-timeout", type=int, default=150,
+                    help="hard cap per question; a stuck one is marked 'timeout' and the run continues")
+    ap.add_argument("--skip-quota-gate", action="store_true",
+                    help="override the ADR 0007 distribution gate (not recommended)")
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args()
 
@@ -101,6 +105,23 @@ def main():
 
     bench = json.load(open(os.path.join(ROOT, args.benchmark), encoding="utf-8"))
     questions = bench["questions"][: args.limit] if args.limit else bench["questions"]
+
+    # ADR 0007 quota gate (ticket #17): a drifted set refuses to run — balance
+    # cannot silently decay. The FULL set is checked, so --limit smoke runs of a
+    # balanced set stay legal.
+    from eval.scoring import check_quota_gate, domain_of, score_answer_type
+    from eval.distribution_audit import CATEGORY_BUCKETS, bucket_for
+    if not args.skip_quota_gate:
+        examples = json.load(open(os.path.join(ROOT, "TEXT_TO_SQL_STS_RAG_EXAMPLES.json"),
+                                  encoding="utf-8"))["examples"]
+        violations = check_quota_gate(bench["questions"], examples)
+        if violations:
+            print("QUOTA GATE REFUSED (ADR 0007): eval sets deviate from their distribution:")
+            for v in violations:
+                print("  -", v)
+            print("Rebalance the sets (python eval/distribution_audit.py) "
+                  "or pass --skip-quota-gate to override.")
+            sys.exit(2)
     # Pool must cover concurrent gold + predicted-SQL executions.
     db = create_engine(args.db_url, pool_size=args.concurrency * 3, max_overflow=args.concurrency * 2)
     print(f"model={provider}/{model_id} rag_top_k={settings.RAG_TOP_K} "
@@ -113,10 +134,49 @@ def main():
                "question": q["question"], "pred_sql": None, "error": None,
                "sql_valid": False, "executable": False, "ex_pass": False,
                "ex_pass_relaxed": False, "grain_ok": False, "first_try": False, "retry_count": 0,
-               "duration_sec": 0.0, "error_class": None}
+               "duration_sec": 0.0, "error_class": None,
+               "expected_type": q.get("expected_answer_type"), "answer_type": None,
+               "at_pass": None, "at_reason": None, "steps_used": None}
+        if rec["expected_type"]:
+            # Answer-type question (ADR 0007): no gold SQL — the agent answers
+            # through the conversational Turn and we score the answer type.
+            try:
+                turn = await asyncio.wait_for(
+                    eng.agent_query_database(q["question"], db, dialect="postgres"),
+                    timeout=args.question_timeout,
+                )
+            except asyncio.TimeoutError:
+                rec["duration_sec"] = round(time.time() - t0, 2)
+                rec["at_pass"], rec["at_reason"] = False, f"timeout after {args.question_timeout}s"
+                rec["error_class"] = "timeout"
+                return rec
+            except Exception as e:
+                rec["duration_sec"] = round(time.time() - t0, 2)
+                rec["at_pass"], rec["at_reason"] = False, f"exception: {e}"
+                rec["error_class"] = "exception"
+                return rec
+            rec["duration_sec"] = round(time.time() - t0, 2)
+            passed, reason = score_answer_type(
+                rec["expected_type"],
+                None if turn.error else turn.answer_type, error=turn.error)
+            rec.update(answer_type=turn.answer_type, message=turn.message,
+                       at_pass=passed, at_reason=reason, steps_used=turn.steps_used,
+                       error=turn.error,
+                       error_class=turn.error or (None if passed else "at_fail"))
+            if args.verbose:
+                print(f"  [{rec['id']}] {'AT-PASS' if passed else reason} "
+                      f"steps={turn.steps_used} {rec['duration_sec']}s")
+            return rec
         try:
-            sql, data, err, retry, _viz, _rag = await eng.query_database(
-                q["question"], db, dialect="postgres")
+            sql, data, err, retry, _viz, _rag = await asyncio.wait_for(
+                eng.query_database(q["question"], db, dialect="postgres"),
+                timeout=args.question_timeout,
+            )
+        except asyncio.TimeoutError:
+            rec["duration_sec"] = round(time.time() - t0, 2)
+            rec["error"] = f"question timed out after {args.question_timeout}s"
+            rec["error_class"] = "timeout"
+            return rec
         except Exception as e:
             rec["duration_sec"] = round(time.time() - t0, 2)
             rec["error"], rec["error_class"] = str(e), "exception"
@@ -158,8 +218,11 @@ def main():
             async with sem:
                 r = await run_one(q)
             done[0] += 1
-            print(f"[{done[0]:02d}/{len(questions)}] {q['id']} "
-                  f"{'PASS' if r['ex_pass'] else (r['error_class'] or 'fail')}")
+            if r.get("expected_type"):
+                status = "AT-PASS" if r.get("at_pass") else (r.get("at_reason") or "at-fail")[:60]
+            else:
+                status = "PASS" if r["ex_pass"] else (r["error_class"] or "fail")
+            print(f"[{done[0]:02d}/{len(questions)}] {q['id']} {status}")
             return r
 
         # First question alone: builds the schema cache / RAG index once (under the
@@ -174,7 +237,6 @@ def main():
 
     def rate(rows, key):
         return round(sum(1 for r in rows if r[key]) / len(rows), 3) if rows else 0.0
-
     def block(rows):
         durs = [r["duration_sec"] for r in rows]
         errs = {}
@@ -194,27 +256,59 @@ def main():
             "error_classes": errs,
         }
 
+    # ADR 0007: SQL-shaped and answer-type questions are scored on different
+    # axes — SQL stats never mix answer-type rows into their rates.
+    sql_rows = [r for r in results if not r.get("expected_type")]
+    at_rows = [r for r in results if r.get("expected_type")]
+
+    def at_block(rows):
+        n = len(rows)
+        passed = sum(1 for r in rows if r.get("at_pass"))
+        return {"n": n, "pass": passed,
+                "pass_rate": round(passed / n, 3) if n else 0.0}
+
+    def bucket_of_rec(r):
+        return bucket_for(r["category"]) or r["category"]
+
+    domains = {}
+    for q in bench["questions"]:
+        domains[domain_of(q)] = domains.get(domain_of(q), 0) + 1
+
     report = {
         "model": f"{provider}/{model_id}",
         "evaluated_at": datetime.now().isoformat(),
         "config": {"rag_top_k": settings.RAG_TOP_K, "max_retries": settings.MAX_RETRIES,
                    "schema_strategy": settings.SCHEMA_STRATEGY},
         "elapsed_sec": elapsed,
-        "overall": block(results),
-        "by_source_tag": {tag: block([r for r in results if r["source_tag"] == tag])
-                          for tag in ("held_out", "paraphrase", "novel")},
-        "by_category": {cat: block([r for r in results if r["category"] == cat])
-                        for cat in sorted({r["category"] for r in results})},
+        "questions_total": len(results),
+        "overall": block(sql_rows),
+        "answer_type": {
+            "expected_clarification": at_block([r for r in at_rows
+                                                if r["expected_type"] == "clarification"]),
+            "expected_refusal": at_block([r for r in at_rows
+                                          if r["expected_type"] == "refusal"]),
+        },
+        "by_bucket": {b: block([r for r in sql_rows if bucket_of_rec(r) == b])
+                      for b in CATEGORY_BUCKETS},
+        "by_source_tag": {tag: block([r for r in sql_rows if r["source_tag"] == tag])
+                          for tag in sorted({r["source_tag"] for r in sql_rows})},
+        "by_category": {cat: block([r for r in sql_rows if r["category"] == cat])
+                        for cat in sorted({r["category"] for r in sql_rows})},
+        "domain_coverage": dict(sorted(domains.items())),
         "results": results,
     }
 
     o = report["overall"]
     print(f"\n{'':16}{'n':>4}{'EX':>8}{'EX~':>8}{'1st-try':>9}{'grain':>8}{'p50':>7}{'p95':>7}")
-    for label, b in [("OVERALL", o), *report["by_source_tag"].items()]:
+    for label, b in [("OVERALL(sql)", o), *report["by_bucket"].items()]:
         print(f"{label:16}{b['n']:>4}{b['execution_accuracy']:>8.1%}"
               f"{b['execution_accuracy_relaxed']:>8.1%}{b['first_try_success']:>9.1%}"
               f"{b['grain_correct']:>8.1%}{b['p50_latency']:>7}{b['p95_latency']:>7}")
     print("error classes:", o["error_classes"])
+    for name, b in report["answer_type"].items():
+        print(f"{name:24}{b['pass']:>3}/{b['n']:<3} pass ({b['pass_rate']:.1%})")
+    print("domain coverage (reported):",
+          ", ".join(f"{d}={n}" for d, n in report["domain_coverage"].items()))
 
     out_path = args.output or (
         f"eval/sts/results_{provider}_{model_id.replace('/', '-')}"

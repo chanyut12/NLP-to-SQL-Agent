@@ -640,7 +640,7 @@
     {
       "id": "case_review_count_by_action",
       "question": "จำนวนการพิจารณาเคสแยกตามการดำเนินการ ตั้งแต่ 1 มิถุนายน 2026 ถึง 31 สิงหาคม 2026",
-      "sql": "SELECT review.review_action, action.label_th AS review_action_label_th, COUNT(DISTINCT review.id)::int AS review_count FROM case_reviews review JOIN case_review_actions action ON action.code = review.review_action WHERE review.reviewed_at >= $1::timestamptz AND review.reviewed_at < $2::timestamptz AND review.deleted_at IS NULL GROUP BY review.review_action, action.label_th, action.sort_order ORDER BY action.sort_order ASC",
+      "sql": "SELECT review.review_action, action.label_th AS review_action_label_th, COUNT(DISTINCT review.id)::int AS review_count FROM case_reviews review JOIN case_review_actions action ON action.code = review.review_action WHERE review.reviewed_at >= $1::timestamptz AND review.reviewed_at < $2::timestamptz GROUP BY review.review_action, action.label_th, action.sort_order ORDER BY action.sort_order ASC",
       "category": "count_groupby",
       "dialect": "postgresql",
       "schema_packs": [

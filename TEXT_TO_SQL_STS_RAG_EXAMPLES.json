@@ -1100,7 +1100,7 @@
     {
       "id": "case_without_review_count_by_school",
       "question": "จำนวนเคสที่ยังไม่มีประวัติการพิจารณาแยกตามโรงเรียน",
-      "sql": "SELECT case_row.school_id, COUNT(DISTINCT case_row.id)::int AS case_count FROM cases case_row WHERE case_row.deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM case_reviews review WHERE review.case_id = case_row.id AND review.deleted_at IS NULL) GROUP BY case_row.school_id ORDER BY case_count DESC, case_row.school_id ASC",
+      "sql": "SELECT case_row.school_id, COUNT(DISTINCT case_row.id)::int AS case_count FROM cases case_row WHERE case_row.deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM case_reviews review WHERE review.case_id = case_row.id) GROUP BY case_row.school_id ORDER BY case_count DESC, case_row.school_id ASC",
       "category": "not_exists_groupby",
       "dialect": "postgresql",
       "schema_packs": [
