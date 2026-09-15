@@ -35,11 +35,36 @@ A small digest of one result the service computes from the returned rows: the to
 row count, whether the row cap truncated the set, and for each numeric column its
 sum / min / max / mean. When a result is a single row with a single numeric column,
 it is also flagged as a **single-value answer** so a Consumer can headline the number
-instead of drawing a one-cell table.
+instead of drawing a one-cell table.### Question
+A single natural-language request from an end user, expressed in Thai, asked within one
+Turn of a Session. A Question may rely on earlier Turns of the same Session — follow-ups
+and references such as "โรงเรียนเดียวกัน" — and is interpreted with that context.
 
-### Question
-A single natural-language request from an end user, expressed in Thai, that the
-service answers with one SQL statement and one result set.
+### Answer
+What the service returns for one Question: either a **Result** (SQL with its result rows,
+column metadata, summary and visualization config — see Export), a **Clarification**, or
+a **Refusal**.
+
+### Clarification
+An Answer that asks the end user to narrow or restate the Question instead of producing
+SQL.
+
+### Refusal
+An Answer that declines the Question — outside the Datasource's scope or disallowed
+content — stating the reason instead of producing SQL. A Question that is both ambiguous
+and refusal-eligible always gets a Refusal: the refusal check precedes the ambiguity
+check, so Clarification can never be used to negotiate disallowed content.
+
+### Session
+An ordered conversation between an end user and the service, made of one or more Turns.
+The service keeps no memory of a Session between requests: the Consumer owns the Session
+and supplies its history with every call. Distinct from the Log store, which is the
+record of answered Questions, not live conversation state.
+
+### Turn
+One exchange inside a Session: the end user's Question and the service's answer to it.
+The service answers the current Turn; earlier Turns are context it may use to interpret
+that Question.
 
 ### Visualization config
 The service's recommendation for how to chart a result: a chart type, which columns
@@ -86,17 +111,31 @@ The bundled demo UI's local file logs are for development only, not this record.
 
 ### Example set
 The curated file of Thai-question / SQL pairs used for few-shot retrieval, belonging
-to one Domain profile. Swapping the profile means swapping the Example set and
-rebuilding the retrieval stores.
+to one Domain profile, balanced across the same Category buckets as the Golden set —
+surplus examples of an over-represented shape are retired to the Example archive
+rather than left to dominate retrieval. It also carries a small fixed block of
+Clarification and Refusal exemplars so the agent's non-SQL answers stay in one format.
+Swapping the profile means swapping the Example set and rebuilding the retrieval stores.
+
+### Example archive
+Retired examples kept on disk but never loaded by retrieval — how an over-represented
+shape leaves the corpus without being destroyed.
 
 ### Retrieval store
 A local vector index the service builds from the Example set (`rag_db/`) and from the
 Datasource schema (`schema_rag_db/`). Derived data, not source of truth — it is wiped
-and rebuilt whenever the Example set or the Datasource schema changes.
+and rebuilt whenever the Example set or the Datasource schema changes.### Category bucket
+The coarse class of SQL shape — what the query has to do, not which tables it touches —
+shared as the single primary distribution axis by both the Golden set and the Example
+set, so per-bucket evaluation numbers mean the same thing for questions and for
+few-shot fuel.
 
 ### Golden set
-A fixed list of Thai questions paired with a gold SQL and a category, held per Domain
-profile, that an Evaluation run replays to score the service. The gold SQL defines the
+A fixed list of Thai questions paired with a gold SQL and a Category bucket, held per
+Domain profile, that an Evaluation run replays to score the service. The set is
+quota-balanced: every Category bucket holds the same number of questions, plus a fixed
+block of ambiguity and refusal questions whose expected outcome is an Answer type —
+Clarification or Refusal — rather than rows. The gold SQL defines the
 expected result, not the expected SQL text — two different queries that return the
 same rows both pass. Kept strictly disjoint from the Example set so retrieval cannot
 hand the model its own answer. Each question is tagged with how it was sourced:
@@ -109,6 +148,6 @@ An offline batch that answers every Golden-set question and reports, broken down
 source tag and by category: how often SQL was produced, how often it executed, how
 often the result matched the gold result, how often that happened on the first try
 with no self-correction, whether the row grain was right (no duplicate
-amplification), the latency distribution, and a breakdown of failure kinds. Separate
-from the Log store, which records live traffic. Clarify / deny / adversarial cases
-are not scored while the service always emits SQL — that is Tier-2 work.
+amplification), the latency distribution,and a breakdown of failure kinds. Separate from the Log store, which records live traffic.
+Clarifications and Refusals are first-class scored outcomes, not failures — ambiguous and
+out-of-scope questions expect them.
