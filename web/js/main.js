@@ -6,7 +6,7 @@
  */
 
 // Module imports
-import { getCurrentTab, getSessionTurns, addSessionTurn } from './modules/state.js';
+import { getCurrentTab, getSessionTurns, addSessionTurn, resetSession } from './modules/state.js';
 import { sanitize, formatError } from './modules/utils.js';
 import { fetchHealth, sendQuery, saveFavorite, deleteFavoriteById } from './modules/api.js';
 import {
@@ -156,6 +156,9 @@ function handleAction(e) {
             break;
         case 'sendMessage':
             sendMessage();
+            break;
+        case 'resetSession':
+            resetConversation();
             break;
         case 'closeFeedbackModal':
             closeFeedbackModal();
@@ -339,10 +342,26 @@ function handleResize() {
 /**
  * Send message/query to backend
  */
+// One Turn at a time: an agent question takes ~10s (p95 ~17s), and a second
+// submit mid-flight would interleave Turns of the same session.
+let inFlight = false;
+
+function setSendDisabled(disabled) {
+    const sendBtn = document.querySelector('[data-action="sendMessage"]');
+    if (sendBtn) {
+        sendBtn.disabled = disabled;
+        sendBtn.textContent = disabled ? 'กำลังค้นหา…' : 'Send 🚀';
+    }
+    if (userInput) userInput.disabled = disabled;
+}
+
 async function sendMessage() {
+    if (inFlight) return;
     const text = userInput.value.trim();
     if (!text) return;
 
+    inFlight = true;
+    setSendDisabled(true);
     appendMessage(text, true);
     userInput.value = '';
 
@@ -356,7 +375,12 @@ async function sendMessage() {
         removeLoading();
 
         if (data.error) {
-            appendMessage(`❌ Error: ${sanitize(data.error.message)}<br><pre><code class="language-sql">${sanitize(data.sql)}</code></pre>`, false);
+            // Error envelopes carry no SQL (answer_type stays "result" by
+            // default but sql is null) — only render the SQL when it exists.
+            const sqlPart = data.sql
+                ? `<br><pre><code class="language-sql">${sanitize(data.sql)}</code></pre>`
+                : '';
+            appendMessage(`❌ Error: ${sanitize(data.error.message)}${sqlPart}`, false);
         } else {
             renderAnswer(data);
             // Record this Turn for the next request — including refusals, so
@@ -367,6 +391,7 @@ async function sendMessage() {
                 sql: (data.answer_type || 'result') === 'result' ? data.sql : null,
                 row_count: data.row_count || 0,
             });
+            toggleResetBtn(false);
             // Refresh history if open
             if (getCurrentTab() === 'history') fetchHistory();
         }
@@ -374,7 +399,26 @@ async function sendMessage() {
     } catch (e) {
         removeLoading();
         appendMessage(formatError("ไม่สามารถติดต่อเซิร์ฟเวอร์ได้ กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ตแล้วลองใหม่อีกครั้ง", e), false);
+    } finally {
+        inFlight = false;
+        setSendDisabled(false);
+        userInput.focus();
     }
+}
+
+function toggleResetBtn(hidden) {
+    const btn = document.getElementById('reset-session-btn');
+    if (btn) btn.style.display = hidden ? 'none' : 'inline-flex';
+}
+
+/**
+ * Start a new session: drop the replayed Turns so the next question is
+ * interpreted standalone (topic switch), keeping the chat transcript.
+ */
+function resetConversation() {
+    resetSession();
+    toggleResetBtn(true);
+    appendMessage('🔄 เริ่มบทสนทนาใหม่แล้ว — คำถามถัดไปจะไม่อ้างบริบทเดิม', false);
 }
 
 // Initialize when DOM is ready

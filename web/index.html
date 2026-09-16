@@ -84,7 +84,8 @@
         <button class="open-sidebar-btn" id="open-sidebar-btn" data-action="toggleSidebar" title="Show Sidebar (Ctrl+B)" style="display: none;">
             ☰ Menu
         </button>
-        <div class="chat-history" id="chat-history">
+        <!-- aria-live: answers arrive asynchronously (~10s) — announce them -->
+        <div class="chat-history" id="chat-history" aria-live="polite">
             <!-- Messages will appear here -->
             <div class="message bot-message">
                 สวัสดีครับ! ถามข้อมูลระบบติดตามนักเรียน (STS) เป็นภาษาไทยได้เลย ลองแบบนี้:
@@ -98,6 +99,8 @@
 
         <div class="input-area">
             <input type="text" id="user-input" placeholder="ถามข้อมูลนักเรียน... (เช่น จำนวนนักเรียนแต่ละโรงเรียน)">
+            <button class="secondary-btn" id="reset-session-btn" data-action="resetSession"
+                title="ล้างบริบทบทสนทนา — คำถามถัดไปจะไม่อ้าง Turn ก่อนหน้า" style="display: none;">🔄 ใหม่</button>
             <button class="primary-btn" data-action="sendMessage">Send 🚀</button>
         </div>
     </div>

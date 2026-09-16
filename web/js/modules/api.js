@@ -66,12 +66,18 @@ export async function fetchFavoritesData() {
  * @returns {Promise<Object>} The response envelope (status, answer_type, sql, rows, visualization, error, ...)
  */
 export async function sendQuery(question, preferredChartType = null, history = null) {
+    // ALWAYS include history — an empty array selects agent mode (the PRESENCE
+    // of the field dispatches, not its contents). Omitting it on the first
+    // Turn silently fell back to the legacy one-shot pipeline, so clarify/
+    // refuse never worked on question one (found in the frontend review).
     const res = await fetch(`${API_URL}/query`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(history && history.length
-            ? { question, preferred_chart_type: preferredChartType, history }
-            : { question, preferred_chart_type: preferredChartType })
+        body: JSON.stringify({
+            question,
+            preferred_chart_type: preferredChartType,
+            history: history ?? [],
+        }),
     });
     return handleResponse(res);
 }
