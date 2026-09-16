@@ -1,0 +1,632 @@
+<title>STS Text-to-SQL Scorecard</title>
+<meta name="description" content="Evaluation results for the Thai NL-to-SQL system on the STS database — RAG ablation, model comparison, and error analysis.">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+
+<style>
+  :root {
+    /* committed dark instrument panel — all colors explicit, holds on any host ground */
+    --bg: #0a111e;
+    --bg-2: #0e1728;
+    --panel: #131e33;
+    --panel-2: #17233c;
+    --line: #26344f;
+    --line-soft: #1d2a42;
+    --ink: #e8eef8;
+    --ink-2: #9fb1cd;
+    --ink-3: #64789a;
+    --accent: #52a7f0;          /* cool SQL blue — the one bold hue */
+    --accent-soft: #1c3350;
+    --good: #43d69a;            /* semantic — separate from accent */
+    --warn: #edb24c;
+    --bad: #f2706e;
+    --alt: #a58be8;            /* second model */
+    --shadow: 0 1px 0 rgba(255,255,255,.03), 0 18px 40px -20px rgba(0,0,0,.7);
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-snap-type: y mandatory; scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "IBM Plex Sans Thai", "IBM Plex Sans", system-ui, sans-serif;
+    font-size: 15px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .deck { }
+
+  .slide {
+    min-height: 100vh;
+    scroll-snap-align: start;
+    display: flex;
+    flex-direction: column;
+    padding: clamp(28px, 4.5vh, 56px) clamp(28px, 5vw, 84px);
+    border-bottom: 1px solid var(--line-soft);
+    background:
+      radial-gradient(120% 80% at 88% -10%, rgba(82,167,240,.10), transparent 60%),
+      var(--bg);
+    position: relative;
+  }
+
+  /* ---- slide chrome ---- */
+  .head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 24px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--line);
+    margin-bottom: clamp(20px, 3.5vh, 40px);
+  }
+  .head-l { display: flex; gap: 16px; align-items: stretch; min-width: 0; }
+  .rail { width: 4px; border-radius: 4px; background: var(--accent); flex: none; }
+  .eyebrow {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px; font-weight: 500;
+    letter-spacing: .18em; text-transform: uppercase;
+    color: var(--accent);
+    margin: 2px 0 6px;
+  }
+  h1 {
+    font-size: clamp(23px, 2.8vw, 36px);
+    font-weight: 600;
+    letter-spacing: -.01em;
+    margin: 0;
+    text-wrap: balance;
+    hyphens: none;
+    word-break: normal;
+    overflow-wrap: break-word;
+    color: var(--ink);
+  }
+  .sub { color: var(--ink-2); font-size: 13.5px; margin-top: 8px; max-width: 62ch; }
+  .pageno {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 13px; color: var(--ink-3);
+    border: 1px solid var(--line); border-radius: 999px;
+    padding: 5px 12px; white-space: nowrap; flex: none;
+  }
+  .badges { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; max-width: 46ch; }
+  .badge {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11.5px; color: var(--ink-2);
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 7px; padding: 5px 10px;
+  }
+  .badge b { color: var(--ink); font-weight: 600; }
+
+  .body { flex: 1; display: grid; gap: clamp(14px, 2vh, 22px); align-content: start; min-height: 0; }
+
+  /* ---- panels ---- */
+  .panel {
+    background: linear-gradient(180deg, var(--panel-2), var(--panel));
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 18px 20px;
+    box-shadow: var(--shadow);
+    min-width: 0;
+  }
+  .panel-title {
+    display: flex; align-items: center; gap: 9px;
+    font-size: 13px; font-weight: 600; color: var(--ink-2);
+    margin: 0 0 14px;
+  }
+  .panel-title .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: none; }
+  .panel-note { font-size: 12px; color: var(--ink-3); font-weight: 400; margin-left: auto; }
+
+  /* ---- KPI cards ---- */
+  .kpis { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; }
+  .kpi {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-top: 2px solid var(--kc, var(--accent));
+    border-radius: 12px;
+    padding: 14px 15px 15px;
+  }
+  .kpi .lab {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 10px; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--ink-3);
+  }
+  .kpi .val {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: clamp(22px, 2.4vw, 30px); font-weight: 600;
+    color: var(--kc, var(--ink));
+    line-height: 1.1; margin-top: 8px;
+    font-variant-numeric: tabular-nums;
+  }
+  .kpi .hint { font-size: 11px; color: var(--ink-3); margin-top: 5px; }
+
+  /* ---- chart holders ---- */
+  .chart-wrap { position: relative; width: 100%; }
+
+  /* ---- tables ---- */
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { padding: 9px 12px; text-align: right; border-bottom: 1px solid var(--line-soft); }
+  th:first-child, td:first-child { text-align: left; }
+  thead th {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--ink-3); font-weight: 500;
+    border-bottom: 1px solid var(--line);
+  }
+  tbody td { font-variant-numeric: tabular-nums; color: var(--ink); }
+  tbody tr:last-child td { border-bottom: none; }
+  td .win { color: var(--good); font-weight: 600; }
+  td .lose { color: var(--ink-2); }
+  .chip {
+    display: inline-block; font-family: "IBM Plex Mono", monospace;
+    font-size: 11.5px; font-weight: 600;
+    padding: 3px 9px; border-radius: 6px; min-width: 46px;
+    font-variant-numeric: tabular-nums;
+  }
+  .chip.g { background: rgba(67,214,154,.14); color: var(--good); }
+  .chip.a { background: rgba(237,178,76,.15); color: var(--warn); }
+  .chip.r { background: rgba(242,112,110,.15); color: var(--bad); }
+  .chip.n { background: var(--panel); color: var(--ink-2); border: 1px solid var(--line); }
+
+  /* ---- callout ---- */
+  .callout {
+    border-left: 3px solid var(--cl, var(--accent));
+    background: var(--panel);
+    border-radius: 0 12px 12px 0;
+    padding: 15px 18px;
+  }
+  .callout h3 {
+    margin: 0 0 6px; font-size: 14px; font-weight: 600;
+    color: var(--ink); display: flex; align-items: baseline; gap: 8px;
+  }
+  .callout h3 .tag {
+    font-family: "IBM Plex Mono", monospace; font-size: 11px; font-weight: 600;
+    color: var(--cl, var(--accent)); letter-spacing: .04em;
+  }
+  .callout p { margin: 0; font-size: 12.5px; color: var(--ink-2); }
+  .callout ul { margin: 8px 0 0; padding-left: 18px; font-size: 12.5px; color: var(--ink-2); }
+  .callout li { margin: 4px 0; }
+  .callout li b { color: var(--ink); font-weight: 600; }
+
+  .big-move {
+    display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+    font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums;
+  }
+  .big-move .from { font-size: 26px; color: var(--bad); font-weight: 600; }
+  .big-move .arrow { color: var(--ink-3); font-size: 20px; }
+  .big-move .to { font-size: 40px; color: var(--good); font-weight: 600; }
+  .big-move .cap { font-family: "IBM Plex Sans Thai","IBM Plex Sans",sans-serif; font-size: 12.5px; color: var(--ink-2); }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 12px; font-size: 11.5px; color: var(--ink-2); }
+  .legend span { display: flex; align-items: center; gap: 6px; }
+  .legend i { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+
+  /* ---- deck nav ---- */
+  .nav {
+    position: fixed; right: 18px; bottom: 18px; z-index: 20;
+    display: flex; gap: 6px;
+  }
+  .nav button {
+    font-family: "IBM Plex Mono", monospace; font-size: 13px;
+    width: 34px; height: 34px; border-radius: 9px;
+    background: var(--panel); color: var(--ink-2);
+    border: 1px solid var(--line); cursor: pointer;
+  }
+  .nav button:hover { color: var(--ink); border-color: var(--accent); }
+  .nav button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .dots { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 20; display: flex; gap: 7px; }
+  .dots i { width: 7px; height: 7px; border-radius: 50%; background: var(--line); transition: background .2s, width .2s; }
+  .dots i.on { background: var(--accent); width: 20px; border-radius: 4px; }
+
+  .src { font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--ink-3); margin-top: auto; padding-top: 16px; }
+
+  @media (max-width: 1100px) {
+    .kpis { grid-template-columns: repeat(3, 1fr); }
+    .row-2 { grid-template-columns: 1fr !important; }
+  }
+  @media (max-width: 720px) {
+    .kpis { grid-template-columns: repeat(2, 1fr); }
+    .head { flex-direction: column; }
+    .badges { justify-content: flex-start; }
+  }
+</style>
+
+<div class="deck">
+
+  <!-- ============ SLIDE 1 — HEADLINE ============ -->
+  <section class="slide" id="s1">
+    <div class="head">
+      <div class="head-l">
+        <div class="rail"></div>
+        <div>
+          <div class="eyebrow">Evaluation · gpt-4o-mini</div>
+          <h1>ผลการประเมิน — ระบบทำงานได้จริงที่ EX 47%</h1>
+          <div class="sub">Golden set 30 คำถาม (held_out 10 · paraphrase 12 · novel 8) แยกขาดจากชุดตัวอย่าง 68 อัน · config ดีสุด rag=3, retry=2 · เฉลี่ย 5 รอบ · ฐานข้อมูล STS (dev)</div>
+        </div>
+      </div>
+      <div class="badges">
+        <span class="badge"><b>30</b> คำถาม</span>
+        <span class="badge"><b>5</b> รอบ/config</span>
+        <span class="badge"><b>2</b> โมเดล</span>
+        <span class="pageno">01 / 05</span>
+      </div>
+    </div>
+
+    <div class="body">
+      <div class="kpis">
+        <div class="kpi" style="--kc:var(--good)"><div class="lab">EX strict</div><div class="val" data-count="47" data-suffix="%">0%</div><div class="hint">ตรงเป๊ะทุกคอลัมน์</div></div>
+        <div class="kpi" style="--kc:var(--accent)"><div class="lab">EX relaxed</div><div class="val" data-count="76" data-suffix="%">0%</div><div class="hint">ให้อภัยคอลัมน์บรรยาย 1</div></div>
+        <div class="kpi" style="--kc:var(--accent)"><div class="lab">First-try</div><div class="val" data-count="44" data-suffix="%">0%</div><div class="hint">ผ่านโดยไม่ retry</div></div>
+        <div class="kpi" style="--kc:var(--good)"><div class="lab">Grain</div><div class="val" data-count="87" data-suffix="%">0%</div><div class="hint">จำนวนแถวถูก</div></div>
+        <div class="kpi" style="--kc:var(--warn)"><div class="lab">Latency p50</div><div class="val" data-count="6.6" data-suffix="s" data-dec="1">0s</div><div class="hint">ค่ากลาง/คำถาม</div></div>
+        <div class="kpi" style="--kc:var(--bad)"><div class="lab">Latency p95</div><div class="val" data-count="21.2" data-suffix="s" data-dec="1">0s</div><div class="hint">ตัวช้าสุด 5%</div></div>
+      </div>
+
+      <div class="body row-2" style="grid-template-columns: 1.15fr .85fr; gap: 18px;">
+        <div class="panel">
+          <p class="panel-title"><span class="dot"></span>EX แยกตามความยากของคำถาม<span class="panel-note">gpt-4o-mini · rag=3, retry=2</span></p>
+          <div class="chart-wrap" style="height: 230px;"><canvas id="c-source"></canvas></div>
+          <div class="legend">
+            <span><i style="background:var(--good)"></i>paraphrase — คำถามเดิมเขียนใหม่</span>
+            <span><i style="background:var(--warn)"></i>held_out — คำถามใหม่ ไม่มีตัวช่วย</span>
+            <span><i style="background:var(--bad)"></i>novel — combination ที่ไม่เคยสอน</span>
+          </div>
+        </div>
+        <div class="panel">
+          <p class="panel-title"><span class="dot"></span>EX strict — 2 โมเดล<span class="panel-note">config ดีสุด</span></p>
+          <div class="chart-wrap" style="height: 230px;"><canvas id="c-models"></canvas></div>
+          <p style="font-size:12px;color:var(--ink-3);margin:12px 0 0">headline เสมอกัน · deepseek รัน 1 รอบ (ไม่มี ±)</p>
+        </div>
+      </div>
+    </div>
+    <div class="src">source: eval/sts/COMPARISON.md · eval/sts/results_*.json</div>
+  </section>
+
+  <!-- ============ SLIDE 2 — ABLATION ============ -->
+  <section class="slide" id="s2">
+    <div class="head">
+      <div class="head-l">
+        <div class="rail" style="background:var(--good)"></div>
+        <div>
+          <div class="eyebrow">Ablation · gpt-4o-mini</div>
+          <h1>RAG few-shot คือตัวแปรชี้ขาด — retry แทบไม่ช่วย</h1>
+          <div class="sub">ปรับทีละตัวแปร: rag_top_k (ใส่ตัวอย่าง 3 อัน vs ไม่ใส่) × max_retries (ให้แก้ SQL เอง vs ไม่) · 4 config × 5 รอบ = 600 คำถาม</div>
+        </div>
+      </div>
+      <span class="pageno">02 / 05</span>
+    </div>
+
+    <div class="body" style="grid-template-columns: 1.3fr .9fr; gap: 22px;">
+      <div class="panel">
+        <p class="panel-title"><span class="dot"></span>EX strict + relaxed ต่อ config</p>
+        <div class="chart-wrap" style="height: 300px;"><canvas id="c-ablation"></canvas></div>
+        <div class="legend">
+          <span><i style="background:var(--accent)"></i>EX strict</span>
+          <span><i style="background:var(--accent-soft);border:1px solid var(--accent)"></i>EX relaxed</span>
+        </div>
+      </div>
+
+      <div class="body" style="align-content:start;gap:16px">
+        <div class="callout" style="--cl:var(--good)">
+          <h3><span class="tag">RAG 0 → 3</span> ตัวเปลี่ยนเกม</h3>
+          <div class="big-move" style="margin:10px 0 6px">
+            <span class="from">3%</span><span class="arrow">→</span><span class="to">47%</span>
+          </div>
+          <p>ตัวอย่าง 3 อันสอน join path ของ STS + กฎ "นักเรียนปัจจุบัน" ที่ schema เปล่า ๆ บอกไม่ได้ · relaxed 30% → 76%</p>
+        </div>
+        <div class="callout" style="--cl:var(--ink-3)">
+          <h3><span class="tag">retry 0 → 2</span> ไม่คุ้ม</h3>
+          <div class="big-move" style="margin:10px 0 6px">
+            <span class="to" style="color:var(--ink-2)">47%</span><span class="arrow">→</span><span class="to" style="color:var(--ink-2)">47%</span>
+          </div>
+          <p>ที่ rag=3 SQL รันผ่านอยู่แล้ว 88% — retry ไม่มีอะไรให้แก้ แต่กิน token + เวลา ~3 เท่า → <b>default ควรเป็น retry=0</b></p>
+        </div>
+      </div>
+    </div>
+    <div class="src">source: eval/sts/COMPARISON.md — ## Ablation — openai/gpt-4o-mini</div>
+  </section>
+
+  <!-- ============ SLIDE 3 — HEAD TO HEAD ============ -->
+  <section class="slide" id="s3">
+    <div class="head">
+      <div class="head-l">
+        <div class="rail" style="background:var(--alt)"></div>
+        <div>
+          <div class="eyebrow">Head-to-head · rag=3, retry=2</div>
+          <h1>gpt-4o-mini vs deepseek-v4-flash — headline เสมอกัน</h1>
+          <div class="sub">gpt-4o-mini รัน 5 รอบ (มี ±) · deepseek-v4-flash รัน 1 รอบ ผ่าน OpenRouter (ไม่มี ± + provider ค้างบางข้อ → per-question timeout 150s)</div>
+        </div>
+      </div>
+      <span class="pageno">03 / 05</span>
+    </div>
+
+    <div class="body" style="grid-template-columns: 1.05fr .95fr; gap: 22px;">
+      <div class="panel" style="padding-bottom:8px">
+        <p class="panel-title"><span class="dot" style="background:var(--alt)"></span>ตัวเลขเทียบกันตรง ๆ</p>
+        <table>
+          <thead><tr><th>metric</th><th>gpt-4o-mini</th><th>deepseek-v4</th></tr></thead>
+          <tbody>
+            <tr><td>EX strict</td><td><span class="chip n">47%</span></td><td><span class="chip g">50%</span></td></tr>
+            <tr><td>EX relaxed</td><td><span class="chip n">76%</span></td><td><span class="chip g">83%</span></td></tr>
+            <tr><td>first-try</td><td><span class="chip n">44%</span></td><td><span class="chip g">50%</span></td></tr>
+            <tr><td>grain</td><td><span class="chip n">87%</span></td><td><span class="chip g">97%</span></td></tr>
+            <tr><td>held_out</td><td><span class="chip g">48%</span></td><td><span class="chip a">40%</span></td></tr>
+            <tr><td>paraphrase</td><td><span class="chip g">70%</span></td><td><span class="chip a">50%</span></td></tr>
+            <tr><td>novel</td><td><span class="chip r">12%</span></td><td><span class="chip g">62%</span></td></tr>
+            <tr><td>p50 latency</td><td><span class="chip g">6.6s</span></td><td><span class="chip r">24.8s</span></td></tr>
+            <tr><td>p95 latency</td><td><span class="chip g">21.2s</span></td><td><span class="chip r">108.6s</span></td></tr>
+            <tr><td>timeout (150s)</td><td><span class="chip g">0/30</span></td><td><span class="chip a">1/30</span></td></tr>
+            <tr><td>ราคา in / out (1M)</td><td><span class="chip n">$.15/$.60</span></td><td><span class="chip g">$.05/$.16</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="body" style="align-content:start;gap:16px">
+        <div class="callout" style="--cl:var(--alt)">
+          <h3><span class="tag">deepseek ชนะ</span></h3>
+          <ul>
+            <li><b>novel 62% vs 12%</b> — จัดการ combination ใหม่ได้ดีกว่ามาก</li>
+            <li><b>grain 97% vs 87%</b> — JOIN แม่นกว่า</li>
+            <li>ราคาถูกกว่า ~3 เท่าต่อ token</li>
+          </ul>
+        </div>
+        <div class="callout" style="--cl:var(--good)">
+          <h3><span class="tag">gpt-4o-mini ชนะ</span></h3>
+          <ul>
+            <li><b>เร็วกว่า ~4 เท่า</b> (p50 6.6s vs 24.8s)</li>
+            <li><b>paraphrase 70% vs 50%</b></li>
+            <li>เสถียร — deepseek provider ค้างกลางสตรีม</li>
+          </ul>
+        </div>
+        <div class="callout" style="--cl:var(--warn)">
+          <h3><span class="tag">ยังไม่ final</span></h3>
+          <p>deepseek ต้องรัน 5 รอบเหมือน anchor + ใช้ provider ที่เสถียร (DeepSeek API ตรง) ถึงจะเทียบได้เต็มปาก</p>
+        </div>
+      </div>
+    </div>
+    <div class="src">source: eval/sts/COMPARISON.md — ## Model comparison · ## Ablation — deepseek</div>
+  </section>
+
+  <!-- ============ SLIDE 4 — ERROR ANALYSIS ============ -->
+  <section class="slide" id="s4">
+    <div class="head">
+      <div class="head-l">
+        <div class="rail" style="background:var(--bad)"></div>
+        <div>
+          <div class="eyebrow">Error analysis · gpt-4o-mini · 150 คำถาม</div>
+          <h1>จุดอ่อนหลักคือการเลือกคอลัมน์ ไม่ใช่ตรรกะ SQL</h1>
+          <div class="sub">แยกทุกข้อที่ไม่ผ่านตามสาเหตุ · config rag=3, retry=2 · รวม 5 รอบ = 150 คำถาม</div>
+        </div>
+      </div>
+      <span class="pageno">04 / 05</span>
+    </div>
+
+    <div class="body" style="grid-template-columns: .8fr 1.2fr; gap: 22px;">
+      <div class="panel">
+        <p class="panel-title"><span class="dot" style="background:var(--bad)"></span>การกระจายผลลัพธ์</p>
+        <div class="chart-wrap" style="height: 250px;"><canvas id="c-errors"></canvas></div>
+        <div class="legend">
+          <span><i style="background:var(--good)"></i>PASS 47%</span>
+          <span><i style="background:var(--warn)"></i>cols_only 29%</span>
+          <span><i style="background:var(--bad)"></i>wrong_result 11%</span>
+          <span><i style="background:var(--alt)"></i>no_sql 8%</span>
+          <span><i style="background:#7d8ba5"></i>อื่น ๆ 4%</span>
+        </div>
+      </div>
+
+      <div class="body" style="align-content:start;gap:16px">
+        <div class="callout" style="--cl:var(--warn)">
+          <h3><span class="tag">อันดับ 1 — cols_only</span> 29% ของทั้งหมด</h3>
+          <p>SQL คืน<b>ตัวเลขถูก จัดกลุ่มถูก</b> แต่มีคอลัมน์บรรยายเกิน/ต่างชื่อ (เช่น <code>school_name</code> แทน <code>school_id</code>) — สำหรับ dashboard ใช้ได้ แต่ตกการให้คะแนนแบบตรงเป๊ะ</p>
+        </div>
+        <div class="callout" style="--cl:var(--alt)">
+          <h3><span class="tag">no_sql 8%</span> = ข้อจำกัดของ harness</h3>
+          <p>ตอน retry=2 ระบบยิง LLM 3 เท่า → ชน OpenAI rate-limit → สร้าง SQL ไม่ได้ · ที่ retry=0 เหลือ <b>3%</b> — ไม่ใช่ความสามารถของโมเดล</p>
+        </div>
+        <div class="callout" style="--cl:var(--good)">
+          <h3><span class="tag">ทางแก้</span></h3>
+          <ul>
+            <li><b>เพิ่มตัวอย่าง novel ในชุด RAG</b> — จุดที่พังชัดสุด (12%) และ RAG แก้ได้</li>
+            <li><b>ปรับ prompt</b> ให้เลือกเฉพาะคอลัมน์ที่ถาม + ตั้ง default <code>rag=3, retry=0</code></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" style="margin-top:16px;padding:14px 20px;display:flex;flex-wrap:wrap;gap:24px;align-items:center">
+      <div><span class="lab" style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3)">ค่าใช้จ่ายรัน eval</span>
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:22px;font-weight:600;color:var(--ink);margin-top:4px">$1.60 <span style="font-size:13px;color:var(--ink-3)">(~56 บาท)</span></div>
+        <div style="font-size:11px;color:var(--ink-3)">gpt-4o-mini $1.53 · deepseek $0.07</div>
+      </div>
+      <div style="width:1px;align-self:stretch;background:var(--line)"></div>
+      <div><span class="lab" style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3)">ต้นทุนพัฒนาจริง</span>
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:22px;font-weight:600;color:var(--warn);margin-top:4px">&gt; $5</div>
+        <div style="font-size:11px;color:var(--ink-3);max-width:44ch">ตั้ง harness + แก้บั๊ก + วิเคราะห์ ใช้โมเดลใหญ่ (Claude Sonnet / GPT-5 class) ราคาสูงกว่า gpt-4o-mini ~20–50 เท่า/token</div>
+      </div>
+    </div>
+    <div class="src">source: eval/sts/COMPARISON.md — ## Cost · eval/sts/NOTES.md</div>
+  </section>
+
+  <!-- ============ SLIDE 5 — PHASE 2: AGENT ============ -->
+  <section class="slide" id="s5">
+    <div class="head">
+      <div class="head-l">
+        <div class="rail" style="background:var(--good)"></div>
+        <div>
+          <div class="eyebrow">Phase 2 · Conversational agent · gpt-4o-mini</div>
+          <h1>จาก 1-query pipeline สู่ agent — SQL เท่าเดิม แต่ถามกลับ/ปฏิเสธได้ครบ</h1>
+          <div class="sub">Benchmark สมดุลใหม่ 36 ข้อ (SQL 28 = 4×7 buckets · ถามกลับ 4 · ปฏิเสธ 4) · โมเดล/ฐานข้อมูลเดียวกัน ต่างกันแค่เอนจิน: agent loop 3 tools, stateless history, 8-step cap · single-run concurrency 1</div>
+        </div>
+      </div>
+      <div class="badges">
+        <span class="badge"><b>36</b> คำถาม</span>
+        <span class="badge"><b>3</b> tools</span>
+        <span class="badge"><b>8</b> step cap</span>
+        <span class="pageno">05 / 05</span>
+      </div>
+    </div>
+
+    <div class="body" style="grid-template-columns: 1.1fr .9fr; gap: 22px;">
+      <div class="panel">
+        <p class="panel-title"><span class="dot" style="background:var(--good)"></span>pipeline vs agent — ตัวชี้วัดชุดเดียวกัน</p>
+        <div class="chart-wrap" style="height: 280px;"><canvas id="c-phase2"></canvas></div>
+        <div class="legend">
+          <span><i style="background:#7d8ba5"></i>pipeline (before)</span>
+          <span><i style="background:var(--good)"></i>agent (after)</span>
+        </div>
+      </div>
+
+      <div class="body" style="align-content:start;gap:14px">
+        <div class="callout" style="--cl:var(--good)">
+          <h3><span class="tag">ชนะใหม่ 8/8</span> ที่ pipeline เคย 0/8</h3>
+          <div class="big-move" style="margin:8px 0 4px">
+            <span class="from">0/8</span><span class="arrow">→</span><span class="to">8/8</span>
+          </div>
+          <p>ถามกลับเมื่อคำถามกำกวม 4/4 · ปฏิเสธ PII/คำสั่งเขียนข้อมูล 4/4 — และ<b>ไม่มี over-clarification</b>: คำถาม SQL ทั้ง 28 ยังถูกตอบด้วย SQL ทุกข้อ</p>
+        </div>
+        <div class="callout" style="--cl:var(--warn)">
+          <h3><span class="tag">ราคาที่จ่าย</span> latency p50 ~4 เท่า</h3>
+          <div class="big-move" style="margin:8px 0 4px">
+            <span class="from">2.3s</span><span class="arrow">→</span><span class="to" style="color:var(--warn)">10.5s</span>
+          </div>
+          <p>agent ใช้เฉลี่ย 2.2 steps/คำถาม (get_schema → run_sql → final_answer) — trade-off เชิงโครงสร้าง ไม่ใช่คำถามยากขึ้น · p95 9.3s → 16.1s · budget exceeded 0 ข้อ</p>
+        </div>
+        <div class="callout" style="--cl:var(--accent)">
+          <h3><span class="tag">eval จับบั๊กได้</span> 2 ตัวที่ unit test มองไม่เห็น</h3>
+          <ul>
+            <li><b>tools ไม่เคยถูก bind ให้โมเดล</b> — mock หลอกในเทส โมเดลจริงพิมพ์ prose จนหมด 8 steps</li>
+            <li><b>Turn แรก history=[] หลุดไป pipeline เก่า</b> — เช็ค truthy แทน presence ของ field</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    <div class="src">source: eval/sts/BEFORE_AFTER.md · baseline_before.json / after_agent.json (รอบก่อนจูนเก็บใน after_agent_prefixrun.json)</div>
+  </section>
+
+</div>
+
+<div class="dots" id="dots"></div>
+<div class="nav">
+  <button id="prev" aria-label="สไลด์ก่อนหน้า">↑</button>
+  <button id="next" aria-label="สไลด์ถัดไป">↓</button>
+</div>
+
+<script>
+(function () {
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const css = getComputedStyle(document.documentElement);
+  const C = n => css.getPropertyValue(n).trim();
+  const ink2 = C("--ink-2"), ink3 = C("--ink-3"), line = C("--line-soft");
+  const good = C("--good"), warn = C("--warn"), bad = C("--bad"), accent = C("--accent"), alt = C("--alt");
+
+  Chart.defaults.font.family = "'IBM Plex Mono', monospace";
+  Chart.defaults.font.size = 11.5;
+  Chart.defaults.color = ink2;
+  Chart.defaults.animation = reduce ? false : { duration: 700, easing: "easeOutQuart" };
+
+  const pctAxis = {
+    grid: { color: line, drawTicks: false },
+    border: { display: false },
+    ticks: { callback: v => v + "%", stepSize: 25 },
+    min: 0, max: 100,
+  };
+  const catAxis = { grid: { display: false }, border: { display: false } };
+
+  const made = {};
+  function build(id, cfg) { if (made[id]) return; const el = document.getElementById(id); if (el) made[id] = new Chart(el, cfg); }
+
+  function charts() {
+    build("c-source", {
+      type: "bar",
+      data: { labels: ["paraphrase", "held_out", "novel"],
+        datasets: [{ data: [70, 48, 12], backgroundColor: [good, warn, bad], borderRadius: 6, barThickness: 46 }] },
+      options: { indexAxis: "y", plugins: { legend: { display: false },
+          tooltip: { callbacks: { label: c => "EX " + c.parsed.x + "%" } } },
+        scales: { x: { ...pctAxis }, y: { ...catAxis } } }
+    });
+
+    build("c-models", {
+      type: "bar",
+      data: { labels: ["gpt-4o-mini", "deepseek-v4"],
+        datasets: [{ data: [47, 50], backgroundColor: [accent, alt], borderRadius: 6, barThickness: 54 }] },
+      options: { indexAxis: "y", plugins: { legend: { display: false },
+          tooltip: { callbacks: { label: c => "EX strict " + c.parsed.x + "%" } } },
+        scales: { x: { ...pctAxis }, y: { ...catAxis } } }
+    });
+
+    build("c-ablation", {
+      type: "bar",
+      data: { labels: ["rag0 / re0", "rag0 / re2", "rag3 / re0", "rag3 / re2"],
+        datasets: [
+          { label: "EX strict", data: [3, 5, 47, 47], backgroundColor: accent, borderRadius: 5 },
+          { label: "EX relaxed", data: [30, 30, 73, 76], backgroundColor: "rgba(82,167,240,.22)", borderColor: accent, borderWidth: 1, borderRadius: 5 },
+        ] },
+      options: { plugins: { legend: { display: false },
+          tooltip: { callbacks: { label: c => c.dataset.label + " " + c.parsed.y + "%" } } },
+        scales: { x: { ...catAxis }, y: { ...pctAxis } } }
+    });
+
+    build("c-phase2", {
+      type: "bar",
+      data: { labels: ["EX strict", "EX relaxed", "grain", "ถามกลับ", "ปฏิเสธ"],
+        datasets: [
+          { label: "pipeline", data: [57.1, 75, 92.9, 0, 0], backgroundColor: "#7d8ba5", borderRadius: 5 },
+          { label: "agent", data: [53.6, 71.4, 92.9, 100, 100], backgroundColor: good, borderRadius: 5 },
+        ] },
+      options: { plugins: { legend: { display: false },
+          tooltip: { callbacks: { label: c => c.dataset.label + " " + c.parsed.y + "%" } } },
+        scales: { x: { ...catAxis }, y: { ...pctAxis } } }
+    });
+
+    build("c-errors", {
+      type: "doughnut",
+      data: { labels: ["PASS", "cols_only", "wrong_result", "no_sql", "อื่น ๆ"],
+        datasets: [{ data: [47, 29, 11, 8, 4], backgroundColor: [good, warn, bad, alt, "#7d8ba5"],
+          borderColor: C("--panel"), borderWidth: 3, hoverOffset: 6 }] },
+      options: { cutout: "62%", plugins: { legend: { display: false },
+        tooltip: { callbacks: { label: c => c.label + " " + c.parsed + "%" } } } }
+    });
+  }
+
+  // KPI count-up
+  function countUp(el) {
+    const target = parseFloat(el.dataset.count), dec = +(el.dataset.dec || 0), suf = el.dataset.suffix || "";
+    if (reduce) { el.textContent = target.toFixed(dec) + suf; return; }
+    const t0 = performance.now(), dur = 900;
+    (function step(now) {
+      const p = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - p, 3);
+      el.textContent = (target * e).toFixed(dec) + suf;
+      if (p < 1) requestAnimationFrame(step);
+    })(t0);
+  }
+
+  const io = new IntersectionObserver((entries) => {
+    entries.forEach(en => {
+      if (!en.isIntersecting) return;
+      if (en.target.id === "s1") { charts(); en.target.querySelectorAll(".kpi .val").forEach(countUp); }
+      if (en.target.id !== "s1") charts();
+    });
+  }, { threshold: .35 });
+  document.querySelectorAll(".slide").forEach(s => io.observe(s));
+
+  // deck nav
+  const slides = [...document.querySelectorAll(".slide")];
+  const dots = document.getElementById("dots");
+  slides.forEach(() => { const i = document.createElement("i"); dots.appendChild(i); });
+  const dotEls = [...dots.children];
+  let idx = 0;
+  const spy = new IntersectionObserver((es) => {
+    es.forEach(e => { if (e.isIntersecting) { idx = slides.indexOf(e.target); dotEls.forEach((d, i) => d.classList.toggle("on", i === idx)); } });
+  }, { threshold: .5 });
+  slides.forEach(s => spy.observe(s));
+  const go = i => slides[Math.max(0, Math.min(slides.length - 1, i))].scrollIntoView({ behavior: reduce ? "auto" : "smooth" });
+  document.getElementById("next").onclick = () => go(idx + 1);
+  document.getElementById("prev").onclick = () => go(idx - 1);
+  addEventListener("keydown", e => {
+    if (e.key === "ArrowDown" || e.key === "PageDown") { e.preventDefault(); go(idx + 1); }
+    if (e.key === "ArrowUp" || e.key === "PageUp") { e.preventDefault(); go(idx - 1); }
+  });
+})();
+</script>
