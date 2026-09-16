@@ -18,9 +18,13 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ANCHOR_MODEL = "openai/gpt-4o-mini"
 MODELS = [
     ANCHOR_MODEL,
-    # Enable once OPENROUTER_API_KEY is set / the account has credit:
+    # Needs OPENROUTER_API_KEY (+ account credit). Verify the exact slug at
+    # https://openrouter.ai/models before running.
+    # deepseek-v4-flash-0731: abandoned — its OpenRouter provider stalls mid-stream
+    #   (~1 question in 15), client timeout did not break it. See eval/sts/NOTES.md.
+    #   Prefer a direct-API provider (google / openai / zhipu) for a 2nd model.
+    # "openrouter/deepseek/deepseek-v4-flash-0731",
     # "openrouter/z-ai/glm-5.2:free",
-    # "openrouter/deepseek/deepseek-v4-flash",
     # "openrouter/qwen/qwen3-235b-a22b-2507",
 ]
 
