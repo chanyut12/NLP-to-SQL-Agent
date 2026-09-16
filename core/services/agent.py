@@ -295,7 +295,7 @@ async def run_agent_turn(
         max_limit = settings.MAX_SQL_LIMIT
 
     bundle = await engine_obj._prepare_context(
-        question=question, engine=db_engine, dialect=dialect)
+        question=question, engine=db_engine, dialect=dialect, agent_mode=True)
     session = _AgentSession(engine_obj, db_engine, dialect, bundle, max_limit,
                             question)
 

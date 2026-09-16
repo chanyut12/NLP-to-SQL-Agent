@@ -4,9 +4,10 @@
 (openai/gpt-4o-mini), datasource เดียวกัน — ต่างกันแค่เอนจินที่ตอบคำถาม:
 
 - **Before** (`baseline_before.json`): one-shot pipeline เดิม (`--engine pipeline`)
-- **After** (`after_agent.json`): conversational agent loop ตาม ADR 0006 (`--engine agent`)
-  — รอบทางการหลังปรับ system prompt (รอบก่อนปรับถูกเก็บไว้เป็น `after_agent_previous.json`
-  เพื่อเป็นหลักฐานของ iteration การ tune)
+- **After** (`after_agent_pre_latency.json`): conversational agent loop ตาม ADR 0006
+  (`--engine agent`) — รอบทางการหลังปรับ system prompt (ตัวเลขทั้งหมดในตารางด้านล่างอ้างรอบนี้)
+  `after_agent.json` ปัจจุบันคือรอบยืนยันหลังการทดลอง latency ถอยกลับ — ผลอยู่ใน noise band
+  เดียวกัน (ดูหัวข้อท้ายไฟล์)
 
 ผลลัพธ์ถูกให้คะแนนด้วย comparator ชุดเดียวกันทุกข้อ (`eval/scoring.py` — ย้ายจาก
 `eval/run_eval.py` แบบ verbatim) เพื่อให้เทียบกันได้โดยตรง
@@ -75,3 +76,39 @@ Agent แพ้ latency เฉลี่ย ~4× เพราะ 1 คำถา�
 - กติกา prompt ใหม่ ("ล่าสุด/ช่วงนี้ ไม่มีวันที่ = ถามกลับ") เขียนจากหลักฐานว่า
   28 คำถาม SQL ทุกข้อระบุ tier/ช่วงเวลาครบ แต่การป้องกัน over-clarification อาศัย
   ตัวอย่างใน prompt ไม่ใช่การพิสูจน์เชิงสถิติ — ควรขยายชุด ambiguous ต่อในอนาคต
+
+## การทดลองลด latency (หลัง #21) — สรุป: เป็นราคาโครงสร้างของ ADR 0006
+
+ทดลอง 3 รอบ gate เต็ม 36 ข้อ เพื่อลด p50 จาก ~10s ให้เหลือ ~5s:
+
+1. **ย้ายเนื้อหา dynamic ออกจาก system prompt** (เพื่อ OpenAI prefix caching) + กติกา
+   "ยิง `run_sql` + `final_answer` ใน step เดียวกัน" + ตัด Tier-3 LLM fallback ออกจาก
+   การเตรียม context ของ agent → **gate ล้ม**: clarification 1/4, refusal 3/4, EX~ 60.7%,
+   p50 ไม่ลด — การย้ายกติกาทำ recency หาย (สิ่งสุดท้ายที่โมเดลอ่านกลายเป็น schema summary)
+2. เติม reminder block ท้าย user message + บังคับ same-step กับ SQL (message ไม่อ้างตัวเลข)
+   → **gate ล้มซ้ำ**: clarification 3/4 สองรอบติด, EX~ หลุด band, **p50 ยัง 11.1s**
+3. **ถอยกลับ prompt เป๊ะ** (กู้ 8/8 + SQL parity) เก็บเฉพาะการตัด Tier-3 fallback
+   (`agent_mode`) → **gate ผ่าน**: 8/8, EX 50.0% / EX~ 67.9% / grain 89.3% (band ±1 จากรอบทางการ)
+
+ข้อเท็จจริงที่พิสูจน์ได้จากการทดลอง:
+
+- **latency บัญญัติโดยจำนวน step** — ~5s/step (1 step = 5.4s, 2 = 10.3s, 3 = 16.1s)
+- คำถาม SQL ทุกข้อใช้ 2 steps เพราะโมเดล**รอเห็นแถวผลก่อนเขียนข้อความสรุป** — สั่ง same-step
+  สองจุดในสองบล็อกก็ไม่เปลี่ยน (24/28 ยัง 2 steps) same-step ที่เกิดจริงคือคำถาม
+  clarification/refusal (1 step ~5s) ซึ่งโครงเดิมก็ทำได้อยู่แล้ว
+- ตัวเลข latency ในรอบทดลองอ่านไม่ได้เท่าไร (OpenAI 429 แทรกระหว่างรัน) แต่ข้อสรุปยึดที่
+  **ความสามารถทรุด 2/2 รอบโดย latency ไม่ลด** — เพียงพอสำหรับการถอยตามเกณฑ์ gate
+- ตัด schema pruning ออกเพื่อให้ prefix cache ข้ามคำถามได้ไม่เป็นทางเลือก: prefix หนัก
+  (examples + schema) เปลี่ยนทุกคำถามอยู่แล้ว cache ข้ามคำถามจึงไม่มีทางติด และการตัด
+  schema กระทบความแม่นยำโดยตรง
+
+**p50 ~10s ต่อคำถาม SQL จึงเป็นราคาโครงสร้างของสถาปัตยกรรม agent ตาม ADR 0006**
+(LLM เป็นผู้ควบคุม + refusal-first): ทางเดียวที่จะลง ~5s คือ (a) auto-finalize เมื่อ SQL
+สำเร็จ — คว่ำหลัก LLM-as-controller, (b) เปลี่ยนโมเดล — ทำ before/after เทียบไม่ได้,
+หรือ (c) streaming — ลด latency ที่รู้สึก ไม่ลดเวลาจริง ทั้งหมดเกินขอบเขตงานนี้และถูก
+ตัดสินใจไว้ชัดเจนตามเอกสารนี้
+
+สิ่งที่เก็บไว้จากการทดลอง: flag `agent_mode` — การเตรียม context ของ agent ไม่เรียก
+Tier-3 LLM table-guessing อีกต่อไป (fallback นั้นออกแบบไว้ให้ pipeline one-shot ซึ่ง
+กู้คืนไม่ได้ ส่วน agent กู้คืนเองด้วย `get_schema` tool) — สถาปัตยกรรมสอดคล้องขึ้นโดย
+ไม่แตะพฤติกรรมที่วัดผลได้

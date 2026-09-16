@@ -171,13 +171,20 @@ SQL:"""
         """Cleans and formats SQL from various LLM output formats."""
         return clean_sql_response(response, dialect)
 
-    async def _prepare_context(self, question: str, engine: Engine, dialect: str):
+    async def _prepare_context(self, question: str, engine: Engine, dialect: str,
+                               agent_mode: bool = False):
         """Shared retrieval prep for the one-shot chain and the agent loop.
 
         Schema fetch + RAG (re)index run under one lock so concurrent queries
         (and a concurrent /admin/refresh-schema) never double-index or race a
         half-built _schema_rag; then example RAG and schema formatting run in
         parallel. Returns a context bundle consumed by both entry points.
+
+        agent_mode: the caller is the conversational loop, which recovers a
+        schema-filter miss itself via the get_schema tool. smart_filter's
+        Tier-3 LLM table-guessing exists for the one-shot chain (which has no
+        recovery path) and is skipped here — in agent mode it would be a
+        duplicate, unbudgeted LLM call per Turn.
         """
         pruned = settings.SCHEMA_STRATEGY == "pruned"
 
@@ -247,7 +254,8 @@ SQL:"""
                 raw_schema,
                 question,
                 self._schema_rag,
-                self._llm,
+                # Tier-3 LLM guessing is a one-shot-chain recovery path only.
+                None if agent_mode else self._llm,
                 settings.SCHEMA_TOP_K,
             )
             schema_text = format_schema_for_prompt(filtered_schema)

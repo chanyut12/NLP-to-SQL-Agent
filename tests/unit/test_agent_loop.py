@@ -392,5 +392,32 @@ class TestToolBinding(unittest.TestCase):
         self.assertIn("self-contained", agent.AGENT_SYSTEM_PROMPT)
 
 
+class TestAgentModeContext(unittest.TestCase):
+    """The agent loop must request agent_mode=True so _prepare_context skips
+    smart_filter's Tier-3 LLM table-guessing — that fallback is a recovery path
+    for the one-shot chain, which cannot recover; the loop recovers via the
+    get_schema tool instead, so in agent mode the extra call is a duplicate,
+    unbudgeted LLM call per Turn (latency-grilling decision).
+    """
+
+    def test_agent_turn_requests_agent_mode_from_prepare_context(self):
+        captured = {}
+
+        async def prep(**kw):
+            captured.update(kw)
+            return SimpleNamespace(
+                sql_examples_text="(few-shot examples)",
+                all_tables=["schools"],
+                raw_tables={"schools": "schools(id, name)"},
+                rag_count=0,
+            )
+
+        llm = ScriptedLLM([_ai_final("clarification", "ต้องการช่วงเวลาใดครับ")])
+        eng = SimpleNamespace(_llm=llm, _prepare_context=prep)
+        turn = asyncio.run(run_agent_turn(eng, "q", None, "postgres"))
+        self.assertIsNone(turn.error)
+        self.assertTrue(captured.get("agent_mode"))
+
+
 if __name__ == "__main__":
     unittest.main()
