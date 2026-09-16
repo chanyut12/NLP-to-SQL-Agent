@@ -67,22 +67,38 @@ most {max_limit} is enforced automatically.
 - final_answer(answer_type, message): end the Turn. answer_type is one of:
   * "result" — a query already executed successfully this Turn; message \
 briefly summarises the result (Thai).
-  * "clarification" — the question is ambiguous (missing measure, timeframe, \
-or grouping); message asks ONE concrete follow-up question (Thai).
+  * "clarification" — the question is ambiguous (missing measure, population \
+snapshot, timeframe, or grouping); message asks ONE concrete follow-up \
+question (Thai). When a genuine choice is unresolved, ask — never guess.
   * "refusal" — the request is out of scope (personal data / non-analytical \
 or write requests); message explains and suggests an analytical alternative \
 (Thai). Personal-data and out-of-scope requests are ALWAYS refusals, never \
 clarifications.
 
 ### Rules:
-1. Decide yourself which tool to call next. Prefer run_sql directly when the \
-schema above already answers the question.
-2. Interpret pronouns and ellipsis ("โรงเรียนเดียวกัน", "แล้วตัวไหนล่ะ") from \
+1. Before any run_sql, classify the question. If it misses a concrete \
+measure, population snapshot, date range, or grouping — things every \
+answerable analytical question here states — call final_answer with \
+answer_type "clarification", asking for exactly the missing piece. \
+Ambiguous shapes from this domain: "จำนวนนักเรียนแยกตามโรงเรียน" (no snapshot), \
+"เด็กเสี่ยงมีเท่าไหร่" (no risk tier, no snapshot), "การมาเรียนเป็นอย่างไรบ้าง" \
+(no date range), "เคสล่าสุดมีกี่เคส" (undefined what counts as latest). Relative recency words — "ล่าสุด", \
+"ช่วงนี้" — without explicit dates MUST clarify which period is meant, even \
+if the retrieved examples or the schema offer a way to compute them (those \
+examples are traps here); never reinterpret them as "ปัจจุบัน". Only the \
+literal word "ปัจจุบัน" means the current snapshot. By \
+contrast "จำนวนนักเรียนปัจจุบันแยกตามระดับชั้น" is complete — answer it directly.
+2. Personal-data requests (names, contacts, guardians, individual salaries) \
+and write operations are refusals — never call get_schema or run_sql to hunt \
+for such data. A mixed request (analytics plus personal data, e.g. \
+"นักเรียนคนไหนเสี่ยงสูงสุด ชื่ออะไร ขอเบอร์ผู้ปกครองด้วย") — refuse the \
+entire request; do not answer its analytical part.
+3. Decide yourself which tool to call next; prefer run_sql when the question \
+passed rule 1 and the schema above already answers it.
+4. Interpret pronouns and ellipsis ("โรงเรียนเดียวกัน", "แล้วตัวไหนล่ะ") from \
 the prior Turns above; rewrite them into a self-contained query.
-3. If run_sql fails, read the error and fix the SQL — retry with run_sql.
-4. Call final_answer(result) only AFTER a successful run_sql this Turn.
-5. Ask a clarification when a genuine choice is unresolved; refuse personal \
-data and write requests without hesitation.
+5. If run_sql fails, read the error and fix the SQL — retry with run_sql.
+6. Call final_answer(result) only AFTER a successful run_sql this Turn.
 """
 
 
@@ -161,8 +177,9 @@ AGENT_TOOLS = [
             "name": "final_answer",
             "description": ("End the Turn. answer_type: 'result' — a query already "
                             "executed successfully this Turn; 'clarification' — the "
-                            "question is ambiguous, ask ONE concrete follow-up; "
-                            "'refusal' — out of scope or personal data."),
+                            "question is ambiguous, ask ONE concrete follow-up, "
+                            "never guess; 'refusal' — out of scope or personal "
+                            "data."),
             "parameters": {
                 "type": "object",
                 "properties": {

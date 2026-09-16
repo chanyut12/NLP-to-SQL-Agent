@@ -7,6 +7,7 @@ unchanged one-shot behaviour.
 """
 
 import asyncio
+import json
 import os
 import sys
 import tempfile
@@ -26,6 +27,7 @@ from sqlalchemy.pool import StaticPool
 
 from api import dependencies as deps
 from api.main import app
+from core.services import agent
 from core.services.agent import (
     STEP_BUDGET_EXCEEDED,
     AgentTurnResult,
@@ -352,6 +354,42 @@ class TestToolBinding(unittest.TestCase):
         self.assertIsNotNone(tools, "loop must bind the tool spec to the LLM")
         names = {t["function"]["name"] for t in tools}
         self.assertEqual(names, {"get_schema", "run_sql", "final_answer"})
+
+    def test_system_prompt_classifies_before_writing_sql(self):
+        """Regression (post-#21 eval): clarify 0/4 and one PII denial hunted to
+        STEP_BUDGET_EXCEEDED, because the prompt ordered 'prefer run_sql
+        directly'. Classification must come FIRST, with the concrete ambiguous
+        shapes from the golden set, and refusals must forbid tool-hunting."""
+        self.assertIn("Before any run_sql", agent.AGENT_SYSTEM_PROMPT)
+        # the exact ambiguous shapes the golden set scores
+        for frag in (
+            "จำนวนนักเรียนแยกตามโรงเรียน",   # no population snapshot
+            "เด็กเสี่ยงมีเท่าไหร่",           # no tier, no snapshot
+            "การมาเรียนเป็นอย่างไรบ้าง",      # no date range
+        ):
+            self.assertIn(frag, agent.AGENT_SYSTEM_PROMPT,
+                          "prompt must teach the ambiguous shapes explicitly")
+        # a matched SQL shape, so the rule is learnable by contrast
+        self.assertIn("จำนวนนักเรียนปัจจุบันแยกตามระดับชั้น",
+                      agent.AGENT_SYSTEM_PROMPT)
+        # vague recency without dates clarifies; the current snapshot does not
+        # (regression: answer_type_04 'เคสล่าสุดมีกี่เคส' answered as SQL)
+        self.assertIn("ล่าสุด", agent.AGENT_SYSTEM_PROMPT)
+        self.assertIn("never reinterpret them as", agent.AGENT_SYSTEM_PROMPT)
+        # refusal priority: never hunt for personal data with tools
+        self.assertIn("never call get_schema or run_sql",
+                      agent.AGENT_SYSTEM_PROMPT)
+        # mixed requests (analytics + personal data) refuse as a whole
+        self.assertIn("refuse the entire request",
+                      agent.AGENT_SYSTEM_PROMPT)
+        # the final_answer tool spec carries the same priority
+        spec = json.dumps(agent.AGENT_TOOLS, ensure_ascii=False)
+        self.assertIn("never guess", spec)
+
+    def test_system_prompt_keeps_stateless_history_rule(self):
+        """The clarify fix must not break the ADR 0006 follow-up contract."""
+        self.assertIn("prior Turns", agent.AGENT_SYSTEM_PROMPT)
+        self.assertIn("self-contained", agent.AGENT_SYSTEM_PROMPT)
 
 
 if __name__ == "__main__":
