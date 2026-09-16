@@ -26,13 +26,15 @@ STS DB (read-only role) → คืน rows + column metadata + chart config
 
 - **โฮสต์แยก**, เรียกแบบ **server-to-server เท่านั้น** (NestJS ถือ key, React ห้ามเรียกตรง)
 - **Sync + timeout** (~60s — self-correction retry ช้าได้), cap ผลลัพธ์ 500 แถวที่ service แล้ว
+- **Latency ที่ควรคาดหวัง (agent mode):** คำถาม SQL p50 ~10s / p95 ~17s · ถามกลับ/ปฏิเสธ
+  ~5s — ตัวเลขจริงจาก benchmark 36 ข้อ (`eval/sts/BEFORE_AFTER.md`); ตั้ง UI ให้รอได้ระดับนี้
 - Auth: header `X-API-Key: <API_KEY>` (บังคับเมื่อ service ตั้ง `API_KEY`)
 
 ### Endpoints ของ Python service
 
 | Method | Path | Body / คืน |
 |---|---|---|
-| `POST` | `/api/query` | `{ question: string, preferred_chart_type?: "bar"\|"line"\|"pie"\|"scatter" }` → **envelope** (ข้อ 1) |
+| `POST` | `/api/query` | `{ question: string, preferred_chart_type?: "bar"\|"line"\|"pie"\|"scatter", history?: PriorTurn[] }` → **envelope** (ข้อ 1 + 1.1) |
 | `GET` | `/api/health` | `{ status: "ok", datasource: boolean }` — ไม่ต้อง key |
 | `GET` | `/api/schema` | `{ tables: [{ name, columns: [{ name, type }] }] }` — ตารางเชิงวิเคราะห์ (ซ่อน backup/audit) |
 | `POST` | `/api/admin/refresh-schema` | `{ status: "ok" }` — เรียกหลัง migrate STS |
@@ -126,9 +128,61 @@ POST /api/query
 ```
 
 กติกาของ history (enforce โดย validation — ผิด = HTTP 422):
-- ไม่ส่ง `history` = โหมด one-shot เดิม ทำงานเหมือนก่อนทุกอย่าง (backward compatible)
+- **ไม่ส่ง `history` (หรือ null) = โหมด one-shot เดิม** ทำงานเหมือนก่อนทุกอย่าง (backward compatible)
+- **ส่ง `history: []` (อาร์เรย์ว่าง) = เข้าโหมด agent** — Turn แรกของ Session ส่งอาร์เรย์ว่าง
+  แบบนี้ (dispatch ตัดสินจาก "field มีอยู่" ไม่ใช่ "มีข้อมูล") — **แอปใหม่ควรส่ง history
+  ทุกครั้งเพื่อได้ความสามารถของ agent เต็มรูปแบบ** (ถามกลับ/ปฏิเสธ/ต่อเนื่อง)
 - result Turn ต้องมี `sql` · clarification/refusal Turn ห้ามมี `sql`
 - ห้ามส่ง `rows` กลับมา — payload อยู่ฝั่ง Consumer เท่านั้น
+
+**ใครเป็นเจ้าของ Session:** Python service ไม่เก็บอะไรเลย — Consumer (ระบบจริงคือ
+NestJS + React) เป็นผู้ถือประวัติ Turn แล้วส่งกลับมาทุก request. แนะนำ v1: **React เก็บ
+Turn ใน memory ของหน้า** แล้วส่งผ่าน NestJS (validate แล้ว forward ตรง) — การแชร์
+session ข้ามเครื่อง/กู้คืนหลังรีเฟรช (เก็บ Turn ฝั่ง NestJS) เป็นงานช่วงหลัง
+
+**ตัวอย่าง Session เต็ม 3 Turn (ถามกลับ → ตอบกลับ → คำถามต่อเนื่อง):**
+
+Turn 1 — คำถามกำกวม → agent ถามกลับ (ส่ง `history: []`):
+
+```json
+// request
+{ "question": "เด็กเสี่ยงมีเท่าไหร่", "history": [] }
+// response (ตัด field ที่ null ทิ้งเพื่อความกระชับ)
+{ "status": "ok", "answer_type": "clarification",
+  "message": "อยากทราบตามระดับความเสี่ยงใดครับ (สูง/กลาง/ต่ำ) และนับภาคเรียนใด",
+  "steps_used": 1, "sql": null, "rows": null, "row_count": 0, "error": null }
+```
+
+Turn 2 — ผู้ใช้ตอบกลับ → ได้ผล (React สะสม Turn 1 เข้า history):
+
+```json
+// request — ห้ามส่ง rows กลับมา; Turn clarification ห้ามมี sql
+{ "question": "เสี่ยงสูงภาคเรียนนี้ครับ",
+  "history": [
+    { "question": "เด็กเสี่ยงมีเท่าไหร่", "answer_type": "clarification",
+      "sql": null, "row_count": 0 }
+  ] }
+// response
+{ "status": "ok", "answer_type": "result", "sql": "SELECT ... LIMIT 500",
+  "rows": [ "..." ], "row_count": 12, "steps_used": 2, "error": null }
+```
+
+Turn 3 — คำถามต่อเนื่องที่อ้างผลเดิม (agent แก้สรรพนามจาก history):
+
+```json
+// request — result Turn ต้องแนบ sql จริงจาก envelope ของ Turn 2
+{ "question": "แล้วเฉพาะเสี่ยงสูงล่ะ",
+  "history": [
+    { "question": "เด็กเสี่ยงมีเท่าไหร่", "answer_type": "clarification",
+      "sql": null, "row_count": 0 },
+    { "question": "เสี่ยงสูงภาคเรียนนี้ครับ", "answer_type": "result",
+      "sql": "SELECT ... LIMIT 500", "row_count": 12 }
+  ] }
+```
+
+กฎการสะสมของ Consumer: **ทุก response ไม่ว่า answer_type ใด → ผนวกเป็น Turn ถัดไป**
+ของ history (result เอา `sql` + `row_count` จาก envelope, clarify/refuse ใส่ `sql: null`)
+— Turn ถามกลับ/ปฏิเสธ**ไม่ reset** session (ผู้ใช้แก้คำถามแล้วถามต่อได้)
 
 ### ตัวอย่างจริง
 
@@ -323,7 +377,21 @@ export class NlQueryController {
 ```
 
 **`NlQueryDto`**: `question: string` (`@IsString @MinLength(1) @MaxLength(500)`),
-`preferredChartType?: 'bar'|'line'|'pie'|'scatter'` (`@IsOptional @IsIn`)
+`preferredChartType?: 'bar'|'line'|'pie'|'scatter'` (`@IsOptional @IsIn`),
+`history?: PriorTurnDto[]` (`@IsOptional @IsArray @ValidateNested({ each: true })
+@Type(() => PriorTurnDto)`)
+
+```ts
+class PriorTurnDto {
+  @IsString() @MinLength(1) question: string;
+  @IsIn(['result', 'clarification', 'refusal']) answerType: 'result' | 'clarification' | 'refusal';
+  @IsOptional() @IsString() sql?: string | null;
+  @IsOptional() @IsInt() @Min(0) rowCount?: number | null;
+}
+```
+
+กติกา validate ฝั่ง NestJS ให้ตรงกับ Python (ผิด = Python ตอบ 422 อยู่ดี — ตรวจก่อน
+ประหยัด round-trip): result Turn ต้องมี `sql` · clarify/refuse ห้ามมี · `question` ห้ามว่าง
 
 ### 2.3 Service — `NlQueryService`
 
@@ -372,6 +440,13 @@ async query(dto: NlQueryDto, user: AuthenticatedRequestUser): Promise<QueryEnvel
         body: JSON.stringify({
           question: dto.question,
           preferred_chart_type: dto.preferredChartType ?? null,
+          // ส่งเสมอ (แม้ []) — อาร์เรย์ว่าง = agent mode; ระบบจริงเป็น agent-first
+          history: (dto.history ?? []).map((t) => ({
+            question: t.question,
+            answer_type: t.answerType,
+            sql: t.sql ?? null,
+            row_count: t.rowCount ?? null,
+          })),
         }),
         signal: ac.signal,
       });
@@ -394,6 +469,8 @@ async query(dto: NlQueryDto, user: AuthenticatedRequestUser): Promise<QueryEnvel
       sql: envelope.sql,
       status: envelope.status,
       errorCode: envelope.error?.code ?? null,
+      answerType: envelope.answer_type,
+      stepsUsed: envelope.steps_used,
       rowCount: envelope.row_count,
       retryCount: envelope.retry_count,
       elapsedMs: Date.now() - started,
@@ -432,6 +509,8 @@ TEXT_TO_SQL_TIMEOUT_MS=60000
 | `sql` | text null | เติมตอน complete |
 | `error_code` | varchar(32) null | `LLM_FAILED` / `EXEC_FAILED` (จาก envelope) |
 | `error_detail` | text null | ข้อความ error ตอน `fail()` (transport failure) |
+| `answer_type` | varchar(16) null | `result` / `clarification` / `refusal` (จาก envelope) |
+| `steps_used` | int null | จำนวน step ที่ agent ใช้ใน Turn นั้น |
 | `row_count` | int null | |
 | `retry_count` | int null | |
 | `elapsed_ms` | int null | round-trip ฝั่ง NestJS |
@@ -462,7 +541,8 @@ surface (thin proxy ~15 บรรทัด)
 src/features/nl-query/
 ├── types.ts              // QueryEnvelope, SemanticType, ... (จากข้อ 1)
 ├── api.ts                // askNlQuery(), fetchNlSchema()
-├── useNlQuery.ts         // hook
+├── useNlQuery.ts         // hook — จัดการ session: สะสม Turn + ส่ง history ทุกครั้ง
+├── session.ts            // ชนิด Turn ฝั่ง UI (UiTurn) — ให้ตรงกับ PriorTurnDto ของ backend
 ├── format.ts             // formatValue, humanizeHeader, toCSV, toMarkdown
 ├── QueryResult.tsx       // การ์ดผลลัพธ์: summary + tabs + big-number
 ├── ResultTable.tsx       // ตารางจัดรูป + sort + copy
@@ -490,12 +570,16 @@ React (5173) ↔ NestJS (3000) เป็น cross-origin → ต้องใช�
 const BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000';
 const PREFIX = import.meta.env.VITE_API_PREFIX ?? '/api';
 
-export async function askNlQuery(question: string, preferredChartType?: ChartType): Promise<QueryEnvelope> {
+export async function askNlQuery(
+  question: string,
+  history: UiTurn[] = [],                    // Turn แรกส่ง [] — เข้าโหมด agent
+  preferredChartType?: ChartType,
+): Promise<QueryEnvelope> {
   const res = await fetch(`${BASE}${PREFIX}/nl-query`, {
     method: 'POST',
     credentials: 'include',                    // ส่ง sts_session cookie ข้าม origin
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ question, preferredChartType }),
+    body: JSON.stringify({ question, preferredChartType, history }),
   });
   if (res.status === 401) throw new Error('เซสชันหมดอายุ');
   if (res.status === 403) throw new Error('ไม่มีสิทธิ์ใช้งานฟีเจอร์นี้');
@@ -507,19 +591,32 @@ export async function askNlQuery(question: string, preferredChartType?: ChartTyp
 ### 3.3 `useNlQuery.ts`
 
 ```ts
+/** Session อยู่ใน memory ของหน้า — service ไม่จำอะไร เราสะสม Turn แล้วส่งกลับทุกครั้ง */
 function useNlQuery() {
-  const [data, setData] = useState<QueryEnvelope | null>(null);
+  const [turns, setTurns] = useState<UiTurn[]>([]);
+  const [turnsLog, setTurnsLog] = useState<{ question: string; envelope: QueryEnvelope }[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const ask = useCallback(async (question: string, chart?: ChartType) => {
     setLoading(true); setError(null);
-    try { setData(await askNlQuery(question, chart)); }
-    catch (e) { setError((e as Error).message); setData(null); }
+    try {
+      const envelope = await askNlQuery(question, turns, chart);
+      setTurnsLog((log) => [...log, { question, envelope }]);
+      // สะสม Turn: result เอา sql+row_count จาก envelope, clarify/refuse ใส่ sql: null
+      setTurns((prev) => [...prev, {
+        question,
+        answerType: envelope.answer_type,
+        sql: envelope.answer_type === 'result' ? envelope.sql : null,
+        rowCount: envelope.row_count,
+      }]);
+      return envelope;
+    } catch (e) { setError((e as Error).message); return null; }
     finally { setLoading(false); }
-  }, []);
+  }, [turns]);
 
-  return { ask, data, loading, error, reset: () => setData(null) };
+  const reset = useCallback(() => { setTurns([]); setTurnsLog([]); setError(null); }, []);
+  return { ask, turnsLog, loading, error, reset };
 }
 ```
 
@@ -636,26 +733,54 @@ export function toMarkdown(rows: Record<string, unknown>[]): string {
 
 ```tsx
 export function NlQueryPage() {
-  const { ask, data, loading, error } = useNlQuery();
+  const { ask, turnsLog, loading, error, reset } = useNlQuery();
   const [q, setQ] = useState('');
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (q.trim() && !loading) { ask(q); setQ(''); }
+  };
+
   return (
     <div className="nlq-page">
       <h1>ถามข้อมูลด้วยภาษาไทย</h1>
-      <form onSubmit={(e) => { e.preventDefault(); if (q.trim()) ask(q); }}>
-        <input value={q} onChange={(e) => setQ(e.target.value)}
-               placeholder="เช่น จำนวนนักเรียนปัจจุบันแยกตามโรงเรียน" />
-        <button disabled={loading}>{loading ? 'กำลังค้นหา…' : 'ถาม'}</button>
-      </form>
+      {turnsLog.map((t, i) => (
+        <div key={i} className="nlq-turn">
+          <p className="nlq-q">{t.question}</p>
+          {t.envelope.answer_type === 'result' && t.envelope.status === 'ok'
+            && <QueryResult envelope={t.envelope} />}
+          {t.envelope.answer_type === 'clarification'
+            && <div className="nlq-clarify">🤔 {t.envelope.message}</div>}
+          {t.envelope.answer_type === 'refusal'
+            && <div className="nlq-refuse">🚫 {t.envelope.message}</div>}
+          {t.envelope.status === 'error'
+            && <Alert kind="warn">{t.envelope.error?.message}</Alert>}
+        </div>
+      ))}
       {error && <Alert kind="error">{error}</Alert>}
-      {data?.status === 'error' && <Alert kind="warn">{data.error?.message}</Alert>}
-      {data?.status === 'ok' && <QueryResult envelope={data} />}
+      <form onSubmit={submit}>
+        <input value={q} onChange={(e) => setQ(e.target.value)}
+               placeholder="เช่น จำนวนนักเรียนปัจจุบันแยกตามระดับชั้น" />
+        <button disabled={loading}>{loading ? 'กำลังค้นหา…' : 'ถาม'}</button>
+        {turnsLog.length > 0
+          && <button type="button" onClick={reset}>เริ่มบทสนทนาใหม่</button>}
+      </form>
     </div>
   );
 }
 ```
 
+กติกา UX ของบทสนทนา:
+- **การ์ดถามกลับ (clarification)** แสดง `message` ของ agent เป็นคำถาม — ผู้ใช้ตอบใน
+  ช่องพิมพ์เดิมได้เลย (ประวัติทำให้ agent เข้าใจบริบท) ไม่ต้องมี input พิเศษ
+- **การ์ดปฏิเสธ (refusal)** จบคำขอนั้น แต่ session ยังต่อได้ — แสดง `message` แล้วให้
+  พิมพ์คำถามใหม่ได้ตามปกติ
+- **latency ~10s ต่อคำถาม SQL เป็นค่าปกติ** (p95 ~17s — ตาม `eval/sts/BEFORE_AFTER.md`)
+  → ปุ่ม disabled + ข้อความ "กำลังค้นหา…" ต้องอยู่จน envelope กลับมาเสมอ ห้าม double-submit
+```
+
 ใช้ layout / `<Alert>` / `<Spinner>` ของ design system repo. เพิ่ม chip ตัวอย่างคำถาม
-(3-4 อัน) ถ้าอยากช่วย onboarding
+(3-4 อัน) ถ้าอยากช่วย onboarding — และปุ่ม "เริ่มบทสนทนาใหม่" ล้าง session เมื่อเปลี่ยนหัวข้อ
 
 ### 3.9 ฝังในหน้าอื่น (optional)
 
@@ -730,15 +855,22 @@ CORS: `CORS_ORIGINS=http://localhost:5173` ใน NestJS อนุญาตอ�
 # 1. Python ตรง ๆ — datasource: true
 curl http://localhost:8000/api/health
 
-# 2. Python query ตรง (ครั้งแรกช้า ~30s engine warm)
+# 2. Python query ตรงใน agent mode (ครั้งแรกช้า ~30s engine warm)
+#    "history": [] = agent mode (ตอบถูก/ถามกลับ/ปฏิเสธ) — ไม่ส่ง = one-shot pipeline เดิม
 curl -X POST http://localhost:8000/api/query -H 'Content-Type: application/json' \
-  -d '{"question":"จำนวนนักเรียนปัจจุบันแยกตามโรงเรียน"}'
+  -d '{"question":"จำนวนนักเรียนปัจจุบันแยกตามโรงเรียน","history":[]}'
 
-# 3. ผ่าน NestJS (ต้อง login ก่อน เอา cookie มา)
+# 2b. ทดสอบ capability ของ agent: คำถามกำกวม → clarification, ขอข้อมูลส่วนบุคคล → refusal
+curl -X POST http://localhost:8000/api/query -H 'Content-Type: application/json' \
+  -d '{"question":"เด็กเสี่ยงมีเท่าไหร่","history":[]}'      # → answer_type: clarification
+curl -X POST http://localhost:8000/api/query -H 'Content-Type: application/json' \
+  -d '{"question":"ขอเบอร์ผู้ปกครอง","history":[]}'          # → answer_type: refusal
+
+# 3. ผ่าน NestJS (ต้อง login ก่อน เอา cookie มา) — history ผ่าน DTO ของ §2.2
 curl -X POST http://localhost:3000/api/nl-query \
   -H 'Content-Type: application/json' -b 'sts_session=<cookie>' \
-  -d '{"question":"จำนวนนักเรียนปัจจุบันแยกตามโรงเรียน"}'
-# → ได้ envelope เดียวกับข้อ 2 + มีแถวใหม่ใน nl_query_log
+  -d '{"question":"จำนวนนักเรียนปัจจุบันแยกตามโรงเรียน","history":[]}'
+# → ได้ envelope เดียวกับข้อ 2 + มีแถวใหม่ใน nl_query_log (มี answer_type, steps_used)
 
 # 4. React: เปิด localhost:5173 → หน้า NlQueryPage → พิมพ์คำถาม
 ```
