@@ -777,7 +777,19 @@ export function NlQueryPage() {
   พิมพ์คำถามใหม่ได้ตามปกติ
 - **latency ~10s ต่อคำถาม SQL เป็นค่าปกติ** (p95 ~17s — ตาม `eval/sts/BEFORE_AFTER.md`)
   → ปุ่ม disabled + ข้อความ "กำลังค้นหา…" ต้องอยู่จน envelope กลับมาเสมอ ห้าม double-submit
-```
+
+กติกา a11y ของบทสนทนา (จำเป็นเพราะคำตอบมาช้า ~10s — screen reader ต้องรู้ว่ามาแล้ว):
+- **บริเวณประวัติ Turn ต้องเป็น live region**: `<div className="nlq-turns" aria-live="polite"
+  aria-relevant="additions">` — คำถามกลับ/ปฏิเสธ/ผลลัพธ์ทุกชนิดประกาศอัตโนมัติเมื่อ append
+  (`polite` ไม่ใช่ `assertive` — อย่าขัดจังหวะถ้าผู้ใช้กำลังอ่านอยู่)
+- **สถานะกำลังค้นหาต้องประกาศด้วย**: ใส่ `aria-live="polite"` บนข้อความ "กำลังค้นหา…" หรือใช้
+  `<Spinner role="status" aria-label="กำลังค้นหา…" />` ของ design system — ปุ่ม disabled
+  เฉย ๆ ไม่พอ เพราะ screen reader ไม่อ่านสิ่งที่ไม่เปลี่ยน focus
+- **อย่าย้าย focus ตอน envelope กลับมา**: ผู้ใช้ควรพิมพ์คำถามถัดไปต่อได้ทันที (โดยเฉพาะหลัง
+  การ์ดถามกลับ) — ให้ live region เป็นตัวประกาศ ยกเว้นกรณี error จาก network ค่อยย้าย focus
+  ไปที่ `<Alert kind="error">` เพื่อให้ผู้ใช้กด retry ได้ทันที
+- **ช่องพิมพ์มี label**: `<label htmlFor="nlq-input">` (หรือ `aria-label`) — placeholder
+  อย่างเดียวไม่ผ่านเกณฑ์ a11y
 
 ใช้ layout / `<Alert>` / `<Spinner>` ของ design system repo. เพิ่ม chip ตัวอย่างคำถาม
 (3-4 อัน) ถ้าอยากช่วย onboarding — และปุ่ม "เริ่มบทสนทนาใหม่" ล้าง session เมื่อเปลี่ยนหัวข้อ
