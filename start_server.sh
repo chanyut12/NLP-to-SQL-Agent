@@ -41,6 +41,27 @@ if [ -f ".env" ] && grep -q "^MODEL_PROVIDER=ollama" .env; then
     fi
 fi
 
+# ==============================================================================
+# Free port 8000: stop our launchd service automatically; refuse on strangers
+# ==============================================================================
+SERVICE_LABEL="com.chanyut.nlq-server"
+LISTENERS="$(lsof -ti :8000 2>/dev/null || true)"
+if [ -n "$LISTENERS" ]; then
+    if launchctl print "gui/$(id -u)/$SERVICE_LABEL" >/dev/null 2>&1; then
+        echo "🔁 Port 8000 busy — stopping launchd service '$SERVICE_LABEL' first..."
+        launchctl bootout "gui/$(id -u)/$SERVICE_LABEL" || true
+        sleep 2
+        if [ -n "$(lsof -ti :8000 2>/dev/null || true)" ]; then
+            echo "❌ Port 8000 still busy after stopping '$SERVICE_LABEL'"
+            exit 1
+        fi
+    else
+        echo "❌ Port 8000 is used by another process (PID: $LISTENERS)."
+        echo "   Stop it yourself, then re-run this script."
+        exit 1
+    fi
+fi
+
 echo "📡 Starting uvicorn on http://localhost:8000"
 echo "   API Docs: http://localhost:8000/docs"
 echo ""
@@ -48,6 +69,10 @@ echo "Watching directories:"
 echo "  - api/ (API routes and endpoints)"
 echo "  - core/ (business logic and services)"
 echo ""
+
+# Dev default: force API_KEY empty so the demo UI mounts at /. Exported vars
+# win over .env (dotenv does not override), so pass API_KEY=secret to lock it.
+export API_KEY="${API_KEY:-}"
 
 uv run uvicorn api.main:app \
     --reload \
