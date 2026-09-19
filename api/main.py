@@ -87,17 +87,24 @@ async def _rewarm_if_stale() -> bool:
         _rewarm_in_progress = False
 
 
-async def _warmup_maintenance_loop(interval: float = 300.0) -> None:
+async def _warmup_maintenance_loop(interval: float = None) -> None:
     """Periodically check warm-state staleness and rebuild in the background.
-    Runs for the process lifetime; cancelled on shutdown."""
-    while True:
-        try:
-            await _rewarm_if_stale()
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.warning("Warmup maintenance pass errored", exc_info=True)
+    Runs for the process lifetime; cancelled on shutdown. The interval is
+    configurable for testing via WARMUP_MAINTENANCE_INTERVAL_SECONDS."""
+    if interval is None:
+        interval = float(os.getenv("WARMUP_MAINTENANCE_INTERVAL_SECONDS", "300"))
+    # Sleep first: the startup warmup already runs at boot; checking before it
+    # finishes would start a duplicate rebuild.
+    try:
         await asyncio.sleep(interval)
+        while True:
+            try:
+                await _rewarm_if_stale()
+            except Exception:
+                logger.warning("Warmup maintenance pass errored", exc_info=True)
+            await asyncio.sleep(interval)
+    except asyncio.CancelledError:
+        raise
 
 
 @asynccontextmanager
