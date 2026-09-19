@@ -117,8 +117,10 @@
 
 ## ทางที่ยังไม่ได้ลอง (เรียงตามความคุ้มที่คาดไว้)
 
-1. **Streaming response** — ไม่ลดเวลาจริงแต่ลด perceived latency ฝั่ง UI/Consumer,
-   ไม่แตะ ADR 0006 (ถูกตัดจากเป้าหมาย p50 แต่เป็นทาง UX ที่ยังเปิด)
+1. ~~**Streaming response**~~ — **ทำแล้ว 2026-09-19**: SSE `POST /api/query/stream`
+   (Progress events ตาม grilling agreement) และงาน spec #27 ที่เหลือ (warm engine
+   ตอนสตาร์ท, re-warm เมื่อ schema เก่า, event-loop hygiene, prep_ms) — ผลวัดจริง
+   cold-start 9.3–10.7s → 3.5–3.7s อ่านได้ใน `LATENCY_DEEPENING_RESULTS.md`
 2. **ขยายชุด ambiguous ใน golden set** ก่อนจูน prompt รอบใดอีก — 4 ข้อไม่พอวัดเสถียรภาพ
    และเสี่ยง overfit ทุกครั้งที่แก้
 3. **Auto-finalize เมื่อ SQL สำเร็จ** — ทางเดียวที่จะได้ p50 ~5.5s จริง แต่**ต้องเขียน
