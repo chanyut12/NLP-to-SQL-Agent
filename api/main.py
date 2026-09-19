@@ -56,6 +56,50 @@ async def _run_startup_warmup() -> None:
         logger.warning("Startup warmup failed (non-fatal): %s", e)
 
 
+_rewarm_in_progress = False
+
+
+async def _rewarm_if_stale() -> bool:
+    """Rebuild the warm state if it went stale (TTL expiry or the admin
+    refresh flag) so no Question pays the rebuild cost (spec #27 / #29).
+    Returns True when a rebuild ran. A single guard prevents overlapping
+    maintenance rebuilds; the per-Question on-demand path is unaffected
+    and remains the safety net while a rebuild is in flight."""
+    global _rewarm_in_progress
+    engine = state_manager.nlp_engine
+    if engine is None or state_manager.db_engine is None:
+        return False
+    state = engine.warm_state() if hasattr(engine, "warm_state") else {"schema_cached": False}
+    if state.get("schema_cached", False):
+        return False
+    if _rewarm_in_progress:
+        return False
+    _rewarm_in_progress = True
+    try:
+        await _warm_engine(state_manager.db_engine, engine)
+        return True
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        logger.warning("Background re-warm failed (non-fatal): %s", e)
+        return False
+    finally:
+        _rewarm_in_progress = False
+
+
+async def _warmup_maintenance_loop(interval: float = 300.0) -> None:
+    """Periodically check warm-state staleness and rebuild in the background.
+    Runs for the process lifetime; cancelled on shutdown."""
+    while True:
+        try:
+            await _rewarm_if_stale()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.warning("Warmup maintenance pass errored", exc_info=True)
+        await asyncio.sleep(interval)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # On a platform with a short startup healthcheck (e.g. a Hugging Face Space),
@@ -68,11 +112,12 @@ async def lifespan(app: FastAPI):
         return
     preload_task = asyncio.create_task(_preload_nlp_engine())
     warmup_task = asyncio.create_task(_run_startup_warmup())
+    maintenance_task = asyncio.create_task(_warmup_maintenance_loop())
     app.state.preload_task = preload_task
     try:
         yield
     finally:
-        for task in (preload_task, warmup_task):
+        for task in (preload_task, warmup_task, maintenance_task):
             if not task.done():
                 task.cancel()
                 with suppress(asyncio.CancelledError):

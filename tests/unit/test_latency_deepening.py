@@ -125,11 +125,22 @@ class WarmableFakeEngine:
     def __init__(self):
         self.warm_calls = []
         self.warm_error = None
+        self.cached = False
+        self.block = None  # optional asyncio.Event to hold warm() open
 
     async def warm(self, db_engine):
         if self.warm_error:
             raise self.warm_error
+        if self.block is not None:
+            await self.block.wait()
         self.warm_calls.append(db_engine)
+        self.cached = True
+
+    def warm_state(self):
+        return {"schema_cached": self.cached, "warming": not self.cached}
+
+    def mark_stale(self):
+        self.cached = False
 
 
 class TestWarmEngine(_SetupBase):
@@ -336,7 +347,95 @@ class TestEventLoopHygiene(_SetupBase):
         self._assert_off_loop()
 
 
-# ---------------------------------------------------------- #31 visible timing
+# ------------------------------------------------------- #29 re-warm on staleness
+
+
+class TestRewarmOnStaleness(_SetupBase):
+    """#29: the background maintenance rebuilds warm state when it goes stale
+    (TTL expiry or the admin refresh flag) so no Question pays the rebuild."""
+
+    def _install(self, engine):
+        deps.state_manager.nlp_engine = engine
+        deps.state_manager.rewarm_in_progress = False
+        self._stub_db()
+        self.addCleanup(setattr, deps.state_manager, "rewarm_in_progress", False)
+
+    async def _rewarm(self):
+        from api.main import _rewarm_if_stale
+        return await _rewarm_if_stale()
+
+    def test_rebuilds_when_stale(self):
+        engine = WarmableFakeEngine()
+        self._install(engine)
+        self.assertTrue(asyncio.run(self._rewarm()))
+        self.assertEqual(len(engine.warm_calls), 1)
+        self.assertTrue(engine.warm_state()["schema_cached"])
+
+    def test_skips_when_fresh(self):
+        engine = WarmableFakeEngine()
+        engine.cached = True
+        self._install(engine)
+        self.assertFalse(asyncio.run(self._rewarm()))
+        self.assertEqual(engine.warm_calls, [])
+
+    def test_skips_when_engine_or_db_missing(self):
+        engine = WarmableFakeEngine()
+        self._install(engine)
+        deps.state_manager.nlp_engine = None
+        self.assertFalse(asyncio.run(self._rewarm()))
+        deps.state_manager.nlp_engine = engine
+        self._orig_db = deps.state_manager.db_engine
+        deps.state_manager.db_engine = None
+        self.addCleanup(self._restore_db)
+        self.assertFalse(asyncio.run(self._rewarm()))
+        self.assertEqual(engine.warm_calls, [])
+
+    def test_refresh_flag_leads_to_rebuild(self):
+        """/admin/refresh-schema marks the cache stale; the maintenance pass
+        then rebuilds — the endpoint keeps its mark-stale-only semantics."""
+        engine = WarmableFakeEngine()
+        self._install(engine)
+        self.assertTrue(asyncio.run(self._rewarm()))
+        engine.mark_stale()  # what refresh_schema's ts-reset makes warm_state report
+        self.assertTrue(asyncio.run(self._rewarm()))
+        self.assertEqual(len(engine.warm_calls), 2)
+
+    def test_overlapping_rewarm_runs_once(self):
+        engine = WarmableFakeEngine()
+        engine.block = asyncio.Event()
+        self._install(engine)
+
+        async def scenario():
+            first = asyncio.ensure_future(self._rewarm())
+            await asyncio.sleep(0.01)   # let the first pass take the guard
+            second = asyncio.ensure_future(self._rewarm())
+            await asyncio.sleep(0.01)
+            engine.block.set()          # release the blocked rebuild
+            return await asyncio.gather(first, second)
+
+        a, b = asyncio.run(scenario())
+        self.assertEqual([a, b], [True, False])
+        self.assertEqual(len(engine.warm_calls), 1)
+
+    def test_maintenance_loop_rebuilds_then_cancels_cleanly(self):
+        engine = WarmableFakeEngine()
+        self._install(engine)
+
+        async def scenario():
+            from api.main import _warmup_maintenance_loop
+            task = asyncio.ensure_future(_warmup_maintenance_loop(interval=0.01))
+            for _ in range(100):
+                await asyncio.sleep(0.01)
+                if engine.warm_calls:
+                    break
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+        asyncio.run(scenario())
+        self.assertEqual(len(engine.warm_calls), 1)
 
 
 class TestPrepTiming(_SetupBase):

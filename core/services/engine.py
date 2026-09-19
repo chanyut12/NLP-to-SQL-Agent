@@ -148,7 +148,8 @@ class NLPEngine:
         logger.info("Engine warm: schema introspected, schema-RAG indexed, schema text cached.")
 
     def warm_state(self) -> dict:
-        """Coarse operational signal for /api/health (spec #27 / #28)."""
+        """Coarse operational signal for /api/health and the background
+        re-warm check (spec #27 / #28 / #29)."""
         fresh = (
             self._schema_cache is not None
             and (time.time() - self._schema_cache_ts) < settings.SCHEMA_CACHE_TTL_SECONDS
