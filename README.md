@@ -80,9 +80,8 @@ setup.bat
 :: 3. แก้ไข .env — ตั้งค่า LLM provider
 ::    ใช้ Notepad หรือ VSCode เปิดไฟล์ .env
 
-:: 4. Start server
-venv\Scripts\activate
-uvicorn api.main:app --reload
+:: 4. Start server (dev — auto-reload)
+start_server.bat
 ```
 
 #### 🍎 macOS
@@ -98,9 +97,8 @@ chmod +x setup.sh && ./setup.sh
 # 3. แก้ไข .env — ตั้งค่า LLM provider
 nano .env  # หรือ open -e .env
 
-# 4. Start server
-source venv/bin/activate
-uvicorn api.main:app --reload
+# 4. Start server (dev — auto-reload, เคลียร์ port 8000 ให้เอง)
+./start_server.sh
 ```
 
 #### 🐧 Linux
@@ -116,9 +114,8 @@ chmod +x setup.sh && ./setup.sh
 # 3. แก้ไข .env — ตั้งค่า LLM provider
 nano .env
 
-# 4. Start server
-source venv/bin/activate
-uvicorn api.main:app --reload
+# 4. Start server (dev — auto-reload, เคลียร์ port 8000 ให้เอง)
+./start_server.sh
 ```
 
 ---
@@ -141,6 +138,34 @@ OLLAMA_MODEL=qwen2.5-coder:7b
 หลัง start server เปิดเบราว์เซอร์ที่ `http://localhost:8000`
 
 > **หมายเหตุ:** ครั้งแรกที่รัน ระบบจะ download embedding model (~500MB) อัตโนมัติ ต้องใช้ internet
+
+---
+
+### 🖥️ การรันเซิร์ฟเวอร์ (2 โหมด)
+
+| โหมด | คำสั่ง | เมื่อไหร่ควรใช้ |
+|---|---|---|
+| **Dev server** | `./start_server.sh` | แก้โค้ด `api/` หรือ `core/` — auto-reload เห็นผลทันที |
+| **Background service** (macOS) | `nlq-start` | ใช้งาน/เดโมทั่วไป — รันต่อเนื่อง พังรีสตาร์ทเอง ปิด terminal ไม่ตาย |
+
+**โหมด Dev (`start_server.sh`):**
+- **เคลียร์ port 8000 ให้เอง** — ถ้า launchd service ยึด port อยู่ จะปิดให้ก่อนแล้วสตาร์ทต่อ (ไม่ต้องพิมพ์ `launchctl` เอง); ถ้า process อื่นยึด จะหยุดพร้อมบอก PID
+- **บังคับ `API_KEY` ว่าง** → demo UI mount ที่ `http://localhost:8000` เสมอ (ไม่โดน `{"detail":"Not Found"}` ที่ root)
+- ถ้าอยากล็อก API จริง: `API_KEY=secret ./start_server.sh` — แล้ว `/` จะ 404 ตามดีไซน์ (UI ไม่ mount เมื่อ API_KEY set), ยิง `/api/*` พร้อม header `X-API-Key`
+
+**โหมด Service (macOS — launchd, plist ที่ `~/Library/LaunchAgents/com.chanyut.nlq-server.plist`):**
+
+| Alias | ทำอะไร |
+|---|---|
+| `nlq-start` | เปิดเซิร์ฟเวอร์เป็น background service (login แล้วเปิดเอง พังรีสตาร์ทเอง) |
+| `nlq-stop` | หยุด service |
+| `nlq-status` | สถานะ + HTTP code ของ UI |
+| `nlq-log` | ดู log สด (`/tmp/nlq_server.log`) |
+
+> alias ถูกเพิ่มใน `~/.zshrc` — terminal ใหม่ใช้ได้เลย (แท็บเดิมพิมพ์ `reload` ก่อนหนึ่งครั้ง)
+> สลับโหมดไม่ต้องแกะเอง: รัน `./start_server.sh` ตอน service ยึด port = สคริปต์ปิดให้เอง; พิมพ์ `nlq-start` ตอน dev server ปิดแล้ว = กลับโหมด service
+
+**URL ที่ใช้:** UI `http://localhost:8000` · API Docs `http://localhost:8000/docs` · Health `http://localhost:8000/api/health`
 
 ---
 
