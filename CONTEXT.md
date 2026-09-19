@@ -66,6 +66,14 @@ One exchange inside a Session: the end user's Question and the service's answer 
 The service answers the current Turn; earlier Turns are context it may use to interpret
 that Question.
 
+### Progress event
+A mid-Turn announcement, streamed to the Consumer while the service is still working on
+the current Turn, telling the end user what the agent is doing right now (which tool it
+is running, what it has produced so far). A Progress event is not part of the Session —
+it is never replayed into history — and it says nothing the final answer does not also
+say; it only moves what the final answer will contain into the waiting time. The final
+answer remains the single source of truth for the Turn.
+
 ### Visualization config
 The service's recommendation for how to chart a result: a chart type, which columns
 map to which axis / series role, a chart title and axis labels, the list of
