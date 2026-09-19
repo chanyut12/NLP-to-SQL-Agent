@@ -117,6 +117,7 @@ class AgentTurnResult:
     viz_config: Optional[dict] = None
     steps_used: int = 0
     rag_examples_count: int = 0
+    prep_ms: Optional[int] = None  # context-preparation duration (spec #27 / #31)
     error: Optional[str] = None  # error code, e.g. STEP_BUDGET_EXCEEDED
     error_message: Optional[str] = None
 
@@ -302,6 +303,7 @@ async def run_agent_turn(
     a broken listener must never break the Turn. None = exact legacy behaviour.
     """
     started = time.monotonic()
+    prep_started = time.monotonic()
     seq = 0
 
     def emit(event: str, **fields) -> None:
@@ -322,6 +324,7 @@ async def run_agent_turn(
 
     bundle = await engine_obj._prepare_context(
         question=question, engine=db_engine, dialect=dialect, agent_mode=True)
+    prep_ms = int((time.monotonic() - prep_started) * 1000)
     session = _AgentSession(engine_obj, db_engine, dialect, bundle, max_limit,
                             question)
 
@@ -348,7 +351,8 @@ async def run_agent_turn(
             ai_msg = await tool_llm.ainvoke(messages)
         except Exception as e:
             return AgentTurnResult(
-                error="LLM_FAILED", error_message=str(e), steps_used=steps)
+                error="LLM_FAILED", error_message=str(e), steps_used=steps,
+                prep_ms=prep_ms)
 
         tool_calls = getattr(ai_msg, "tool_calls", None) or []
         if not tool_calls:
@@ -397,6 +401,7 @@ async def run_agent_turn(
                     if out == "OK":
                         done = _build_final(session, args, bundle,
                                             preferred_chart_type, steps)
+                        done.prep_ms = prep_ms
                 else:
                     out = (f"ERROR: unknown tool '{name}'. "
                            f"Available tools: get_schema, run_sql, final_answer.")
@@ -422,6 +427,7 @@ async def run_agent_turn(
         error_message=(f"Agent exceeded its {AGENT_STEP_BUDGET}-step budget "
                        f"without a final answer."),
         steps_used=steps,
+        prep_ms=prep_ms,
     )
 
 

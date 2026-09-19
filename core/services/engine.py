@@ -42,6 +42,7 @@ class NLPEngine:
         self._all_tables_cache: list = None  # Cache for table list
         self._full_schema_text_cache: str = None  # Cache for full schema (retry path)
         self._schema_reindex: bool = False  # set by refresh_schema(), consumed under the lock
+        self._schema_warmed: bool = False  # set once the question-independent warm state is built (spec #27 / #28)
         self._schema_lock = asyncio.Lock()  # serialize schema fetch / RAG (re)index
         self._initialize_resources()
 
@@ -129,6 +130,30 @@ class NLPEngine:
         self._schema_cache_ts = 0.0
         self._schema_reindex = True
         logger.info("Schema marked stale; next query will re-introspect and re-index.")
+
+    async def warm(self, db_engine: Engine, dialect: str = "postgres") -> None:
+        """Build every question-independent piece of the context bundle so no
+        Question carries the cold-cache cost (spec #27 / #28): datasource
+        schema introspection, schema-RAG indexing and the formatted schema-text
+        cache. The question-dependent pieces (per-question retrieval, pruned
+        filtering) stay on the Question path. Must be called off the event
+        loop's hot path — the heavy work runs in worker threads inside
+        _prepare_context's lock section. Raises on failure: callers decide the
+        policy (startup warms log-and-continue; the per-Question path keeps
+        today's rebuild-on-demand fallback either way)."""
+        await self._prepare_context(
+            question="(warmup probe)", engine=db_engine, dialect=dialect,
+            agent_mode=True)
+        self._schema_warmed = True
+        logger.info("Engine warm: schema introspected, schema-RAG indexed, schema text cached.")
+
+    def warm_state(self) -> dict:
+        """Coarse operational signal for /api/health (spec #27 / #28)."""
+        fresh = (
+            self._schema_cache is not None
+            and (time.time() - self._schema_cache_ts) < settings.SCHEMA_CACHE_TTL_SECONDS
+        )
+        return {"schema_cached": bool(fresh), "warming": not self._schema_warmed}
 
     def _create_prompt_template(self) -> PromptTemplate:
         template = """You are an expert SQL analyst specialized in Thai language understanding.

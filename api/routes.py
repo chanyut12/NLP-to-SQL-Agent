@@ -258,7 +258,7 @@ async def _agent_envelope(
         return QueryResponse(
             status="error", request_id=request_id, question=request.question,
             answer_type="result", steps_used=result.steps_used,
-            elapsed_ms=elapsed_ms,
+            prep_ms=result.prep_ms, elapsed_ms=elapsed_ms,
             error=QueryError(code=code, message=result.error_message or code),
         )
 
@@ -267,7 +267,7 @@ async def _agent_envelope(
         return QueryResponse(
             status="ok", request_id=request_id, question=request.question,
             answer_type="result", message=None, steps_used=result.steps_used,
-            sql=result.sql,
+            prep_ms=result.prep_ms, sql=result.sql,
             columns=[ColumnInfo(**c) for c in (result.columns or [])],
             rows=rows, row_count=result.row_count, truncated=result.truncated,
             summary=ResultSummary(**(result.summary or {"row_count": result.row_count})),
@@ -278,7 +278,8 @@ async def _agent_envelope(
     return QueryResponse(
         status="ok", request_id=request_id, question=request.question,
         answer_type=result.answer_type, message=result.message,
-        steps_used=result.steps_used, sql=None, rows=[], row_count=0,
+        steps_used=result.steps_used, prep_ms=result.prep_ms,
+        sql=None, rows=[], row_count=0,
         elapsed_ms=elapsed_ms,
     )
 
@@ -375,7 +376,9 @@ async def get_history(
     status: str = None,
     state: GlobalStateManager = Depends(get_state_manager)
 ):
-    entries = state.history_manager.load_history(limit=limit, status_filter=status, dialect_filter=dialect)
+    entries = await asyncio.to_thread(
+        state.history_manager.load_history,
+        limit=limit, status_filter=status, dialect_filter=dialect)
     # Convert dataclass to Pydantic model
     history_items = [
         HistoryItem(
@@ -397,7 +400,8 @@ async def update_feedback(
     req: FeedbackRequest,
     state: GlobalStateManager = Depends(get_state_manager)
 ):
-    success = state.history_manager.update_feedback(
+    success = await asyncio.to_thread(
+        state.history_manager.update_feedback,
         log_id, 
         req.feedback, 
         feedback_text=req.feedback_text
@@ -408,7 +412,7 @@ async def update_feedback(
 
 @router.get("/favorites", response_model=FavoritesResponse)
 async def get_favorites(state: GlobalStateManager = Depends(get_state_manager)):
-    favs = state.history_manager.load_favorites()
+    favs = await asyncio.to_thread(state.history_manager.load_favorites)
     items = [
         FavoriteItem(
             favorite_id=f.favorite_id,
@@ -426,7 +430,8 @@ async def create_favorite(
     req: CreateFavoriteRequest,
     state: GlobalStateManager = Depends(get_state_manager)
 ):
-    fav = state.history_manager.save_favorite(
+    fav = await asyncio.to_thread(
+        state.history_manager.save_favorite,
         question=req.question,
         sql=req.sql,
         dialect=req.dialect,
@@ -447,7 +452,8 @@ async def delete_favorite(
     favorite_id: str,
     state: GlobalStateManager = Depends(get_state_manager)
 ):
-    success = state.history_manager.delete_favorite(favorite_id)
+    success = await asyncio.to_thread(
+        state.history_manager.delete_favorite, favorite_id)
     if not success:
         raise HTTPException(status_code=404, detail="Favorite not found")
     return {"status": "success"}

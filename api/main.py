@@ -29,6 +29,33 @@ async def _preload_nlp_engine():
         logger.warning("NLPEngine preload failed on startup: %s", e)
 
 
+async def _warm_engine(db_engine, engine) -> None:
+    """Build the question-independent warm state for one engine (spec #27/#28).
+    The engine's warm routine offloads its heavy work to worker threads."""
+    await engine.warm(db_engine)
+
+
+async def _run_startup_warmup() -> None:
+    """Startup warmup: schema introspection + schema-RAG indexing in the
+    background so the first Question never pays the cold-cache cost.
+    Best-effort: failures are logged; the per-Question on-demand path stays.
+    """
+    if state_manager.db_engine is None:
+        logger.info("Startup warmup skipped: no datasource configured.")
+        return
+    try:
+        engine = await asyncio.to_thread(state_manager.get_nlp_engine)
+    except Exception as e:
+        logger.warning("Startup warmup skipped (engine init failed): %s", e)
+        return
+    try:
+        await _warm_engine(state_manager.db_engine, engine)
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        logger.warning("Startup warmup failed (non-fatal): %s", e)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # On a platform with a short startup healthcheck (e.g. a Hugging Face Space),
@@ -40,14 +67,16 @@ async def lifespan(app: FastAPI):
         yield
         return
     preload_task = asyncio.create_task(_preload_nlp_engine())
+    warmup_task = asyncio.create_task(_run_startup_warmup())
     app.state.preload_task = preload_task
     try:
         yield
     finally:
-        if not preload_task.done():
-            preload_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await preload_task
+        for task in (preload_task, warmup_task):
+            if not task.done():
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
 
 
 # Hide the interactive API docs once a key is required (i.e. in a real deployment):
@@ -73,7 +102,13 @@ app.add_middleware(
 
 @app.get("/api/health")
 async def health_check():
-    return {"status": "ok", "datasource": state_manager.db_engine is not None}
+    body = {"status": "ok", "datasource": state_manager.db_engine is not None}
+    engine = state_manager.nlp_engine
+    if engine is not None and hasattr(engine, "warm_state"):
+        body.update(engine.warm_state())
+    else:
+        body.update({"schema_cached": False, "warming": True})
+    return body
 
 
 app.include_router(router, prefix="/api", dependencies=[Depends(require_api_key)])

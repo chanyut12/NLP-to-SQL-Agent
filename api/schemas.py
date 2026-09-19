@@ -80,6 +80,11 @@ class QueryResponse(BaseModel):
     # Thai text for clarifications/refusals; None when answer_type is result.
     message: Optional[str] = None
     steps_used: int = 1
+    # Context-preparation duration in ms (retrieval + schema filtering) —
+    # additive (spec #27/#31): Consumers must ignore unknown fields. Lets a
+    # Consumer separate the service's own work from the structural LLM step
+    # cost when explaining elapsed_ms.
+    prep_ms: Optional[int] = None
     sql: Optional[str] = None
     columns: List[ColumnInfo] = []
     rows: Optional[List[Dict[str, Any]]] = None

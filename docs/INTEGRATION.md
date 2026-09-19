@@ -94,6 +94,8 @@ interface QueryEnvelope {
   } | null;
   retry_count: number;
   elapsed_ms: number;
+  prep_ms?: number | null;         // ใหม่ (additive, spec #27): เวลา "เตรียมบริบท" ของ Turn นั้น (retrieval + schema filtering) หน่วย ms —
+                                   // elapsed_ms − prep_ms ≈ ราคาโครงสร้างของ LLM steps (~5s/step) ใช้ log/วิเคราะห์ latency
   error: { code: string; message: string } | null;
 }
 ```
@@ -103,6 +105,10 @@ interface QueryEnvelope {
 `STEP_BUDGET_EXCEEDED` (agent ใช้ครบ 8 step โดยไม่มี final answer — **ไม่มี SQL ให้ best-effort**,
 ADR 0006 decision #8) · *(PDPA phase จะเพิ่ม `PII_BLOCKED`)*
 **ผลว่าง** = `status:"ok"`, `row_count:0`, `error:null` (ไม่ใช่ error)
+
+> **Field `prep_ms` (additive, spec #27/#31):** ปรากฏใน envelope ทั้ง `/api/query` และ event สุดท้ายของ
+> `/api/query/stream` (ค่าเดียวกัน) — อาจเป็น `null` บน legacy path ที่ไม่มี agent loop ตามกติกาของเอกสารนี้
+> Consumer ต้อง**เมิน field ที่ไม่รู้จัก** จึงไม่ต้องแก้อะไร: field นี้ไว้อ่าน/log อย่างเดียว ห้ามใช้ตัดสิน logic
 
 ### 1.1 Request — การสนทนาต่อเนื่อง (history, ADR 0006)
 
