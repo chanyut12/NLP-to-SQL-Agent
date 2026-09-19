@@ -74,6 +74,15 @@ choice, and — for a high-cardinality category axis — a `top_n` cut beyond wh
 remaining categories should be folded into one "other" slice. Advisory only — the
 Consumer may ignore any of it.
 
+Axis-selection language (part of the config's meaning, not implementation):
+- An **axis label column** is a column that tells the reader *what each mark is*.
+  A column whose semantic type is `id` can never serve this role — an identifier
+  distinguishes rows but carries no meaning to a chart reader.
+- When a result carries an **identifier–name pair** (the id and the human-readable
+  name of the same entity), the name is the axis label column; the id is bookkeeping.
+- If a result offers no axis label column at all, the result is **not chartable**
+  regardless of how many numeric columns it has.
+
 ### Datasource
 The single relational database this service answers questions against. The service
 connects to it directly through a read-only account: it may run `SELECT` and read

@@ -1,9 +1,18 @@
 """
 Visualization Recommender System.
 Analyzes DataFrame content to suggest the best chart type.
+
+Axis-selection policy (ADR 0008, extending ADR 0004's semantic types): a column
+whose semantic type is `id` never labels a chart axis; identifier–name pairs
+resolve to the name; a result with no axis label column (name → category → text)
+is not chartable and renders as a table. Enforced inside the rule-based
+recommender AND as an exit guard on VizService.recommend so no recommender
+(including the disabled AI one) can emit an id axis.
 """
 import pandas as pd
 from typing import Tuple, Optional, List, Dict, Any
+
+from core.viz.column_meta import _column_info
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 
@@ -97,7 +106,29 @@ def recommend_chart(df: pd.DataFrame, question: str = "", preferred_chart_type: 
     """
     if df.empty:
         return "none", None, None
-        
+
+    # Semantic types per ADR 0004 — the axis policy's source of truth.
+    semantic = {c: _column_info(c, df[c])["semantic_type"] for c in df.columns}
+
+    # ADR 0008: ids never label an axis. Keep the legacy keyword heuristics for
+    # chart-type/time detection, but drop id columns from every candidate queue.
+    id_cols = {c for c, s in semantic.items() if s == "id"}
+    _LABEL_PRIORITY = {"name": 0, "category": 1, "text": 2}
+    axis_label_cols = sorted(
+        (c for c in df.columns if semantic[c] in _LABEL_PRIORITY),
+        key=lambda c: _LABEL_PRIORITY[semantic[c]],
+    )
+
+    def _axis_pick(current: Optional[str]) -> Optional[str]:
+        """Upgrade an axis pick to the policy's best label column, if any."""
+        if not axis_label_cols:
+            return current
+        if current is None or current in id_cols:
+            return axis_label_cols[0]
+        if current in axis_label_cols and current != axis_label_cols[0]:
+            return axis_label_cols[0]
+        return current
+
     # Identify column types
     numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
     object_cols = df.select_dtypes(include=['object', 'category', 'datetime']).columns.tolist()
@@ -124,19 +155,24 @@ def recommend_chart(df: pd.DataFrame, question: str = "", preferred_chart_type: 
                 numeric_cols.remove(d)
                 object_cols.insert(0, d) # Treat as dimension
 
-    # Priority 1: User preference from dropdown (highest priority)
+    # Non-id numeric candidates for the value axis (ADR 0008).
+    num_axis = [c for c in numeric_cols if c not in id_cols]
+
+    # Priority 1: User preference from dropdown (highest priority) — but the
+    # axis policy still rules: a preferred type with no label column falls
+    # through to auto, which yields a table under the policy.
     if preferred_chart_type and preferred_chart_type != 'auto':
-        if preferred_chart_type == 'pie' and object_cols and numeric_cols:
-            return "pie", object_cols[0], numeric_cols[0]
+        if preferred_chart_type == 'pie' and axis_label_cols and num_axis:
+            return "pie", axis_label_cols[0], num_axis[0]
         elif preferred_chart_type == 'scatter':
-            if len(numeric_cols) >= 2:
-                return "scatter", numeric_cols[0], numeric_cols[1]
-            elif object_cols and numeric_cols:
-                return "scatter", object_cols[0], numeric_cols[0]
-        elif preferred_chart_type == 'line' and object_cols and numeric_cols:
-            return "line", object_cols[0], numeric_cols[0]
-        elif preferred_chart_type == 'bar' and object_cols and numeric_cols:
-            return "bar", object_cols[0], numeric_cols[0]
+            if len(num_axis) >= 2:
+                return "scatter", num_axis[0], num_axis[1]
+            elif axis_label_cols and num_axis:
+                return "scatter", axis_label_cols[0], num_axis[0]
+        elif preferred_chart_type == 'line' and axis_label_cols and num_axis:
+            return "line", axis_label_cols[0], num_axis[0]
+        elif preferred_chart_type == 'bar' and axis_label_cols and num_axis:
+            return "bar", axis_label_cols[0], num_axis[0]
 
     # Priority 2: User Preference from question keywords
     q = question.lower()
@@ -168,24 +204,26 @@ def recommend_chart(df: pd.DataFrame, question: str = "", preferred_chart_type: 
     elif any(kw in q for kw in bar_keywords):
         user_pref = 'bar'
     
-    # Apply keyword preference
-    if user_pref == 'pie' and object_cols and numeric_cols:
-        return "pie", object_cols[0], numeric_cols[0]
-    elif user_pref == 'line' and object_cols and numeric_cols:
-        return "line", object_cols[0], numeric_cols[0]
+    # Apply keyword preference (axis policy still applies — ADR 0008)
+    if user_pref == 'pie' and axis_label_cols and num_axis:
+        return "pie", axis_label_cols[0], num_axis[0]
+    elif user_pref == 'line' and axis_label_cols and num_axis:
+        return "line", axis_label_cols[0], num_axis[0]
     elif user_pref == 'scatter':
-        if len(numeric_cols) >= 2:
-            return "scatter", numeric_cols[0], numeric_cols[1]
-        elif object_cols and numeric_cols:
-            return "scatter", object_cols[0], numeric_cols[0]
-    elif user_pref == 'bar' and object_cols and numeric_cols:
-        return "bar", object_cols[0], numeric_cols[0]
+        if len(num_axis) >= 2:
+            return "scatter", num_axis[0], num_axis[1]
+        elif axis_label_cols and num_axis:
+            return "scatter", axis_label_cols[0], num_axis[0]
+    elif user_pref == 'bar' and axis_label_cols and num_axis:
+        return "bar", axis_label_cols[0], num_axis[0]
         
     # Case 1: Time Series (Date/Month + Numeric) -> Line
     # Check if any object col looks like a date/month
     time_keywords = ['date', 'time', 'month', 'year', 'day', 'quarter', 'week', 'วันที่', 'เดือน', 'ปี']
     date_col = None
     for col in object_cols:
+        if col in id_cols:
+            continue
         if any(k in col.lower() for k in time_keywords):
             date_col = col
             break
@@ -193,19 +231,16 @@ def recommend_chart(df: pd.DataFrame, question: str = "", preferred_chart_type: 
     if date_col and numeric_cols:
         return "line", date_col, numeric_cols[0]
         
-    # Case 2: Ranking / Comparison (Category + Numeric) -> Bar
-    if object_cols and numeric_cols:
-        cat_col = object_cols[0] # Assume first categorical is the main grouping
-        val_col = numeric_cols[0] # First numeric is likely the metric (sorted above)
-        
-        # If too many categories, maybe bar is crowded, but usually bar is best for ranking
-        return "bar", cat_col, val_col
-        
-    # Case 3: Correlation (2 Numeric cols) -> Scatter
-    if len(numeric_cols) >= 2:
-        return "scatter", numeric_cols[0], numeric_cols[1]
-        
-    # Case 4: Single Value or just Table
+    # Case 2: Ranking / Comparison (Label + Numeric) -> Bar
+    cat_col = _axis_pick(object_cols[0]) if object_cols else None
+    if cat_col and cat_col not in id_cols and num_axis:
+        return "bar", cat_col, num_axis[0]
+
+    # Case 3: Correlation (2 non-id Numeric cols) -> Scatter
+    if len(num_axis) >= 2:
+        return "scatter", num_axis[0], num_axis[1]
+
+    # Case 4: no axis label column under the policy -> not chartable (ADR 0008)
     return "table", None, None
 
 _CHART_REASON_TH = {
@@ -283,6 +318,53 @@ def recommend_chart_with_series(
     return chart_type, x_col, y_col, series_col
 
 
+_NO_LABEL_REASON = "ไม่มีคอลัมน์ชื่อสำหรับเป็นแกน — แสดงเป็นตารางแทน (ลองถามให้แสดงชื่อมาด้วย)"
+
+
+def _enforce_axis_policy(config: Dict[str, Any], df: pd.DataFrame) -> Dict[str, Any]:
+    """ADR 0008 exit guard: whatever recommended the config, an id never labels
+    an axis, and a result without an axis label column is not chartable."""
+    chart_type = config.get("chart_type")
+    if chart_type in (None, "none", "table"):
+        return config
+
+    semantic = {c: _column_info(c, df[c])["semantic_type"] for c in df.columns}
+    id_cols = {c for c, s in semantic.items() if s == "id"}
+    label_cols = [
+        c for c in df.columns
+        if semantic[c] in ("name", "category", "text")
+    ]
+
+    def _fix(col: Optional[str]) -> Optional[str]:
+        if col not in id_cols:
+            return col
+        return label_cols[0] if label_cols else None
+
+    x_col = _fix(config.get("x_col"))
+    y_col = config.get("y_col")
+    if not x_col or not y_col or y_col in id_cols:
+        return {
+            "chart_type": "table",
+            "x_col": None,
+            "y_col": None,
+            "series_col": None,
+            "options": get_chart_options("table"),
+            "title": config.get("title") or "ผลลัพธ์",
+            "x_label": None,
+            "y_label": None,
+            "top_n": None,
+            "reason": _NO_LABEL_REASON,
+        }
+    if x_col != config.get("x_col") or y_col != config.get("y_col"):
+        config["x_col"] = x_col
+        config["y_col"] = y_col
+        config["x_label"] = humanize_label(x_col)
+        config["y_label"] = humanize_label(y_col)
+        config["reason"] = _CHART_REASON_TH.get(chart_type, config.get("reason", ""))
+    config["top_n"] = compute_top_n(df, chart_type, x_col)
+    return config
+
+
 class VizService:
     """
     Unified visualization recommendation service.
@@ -339,7 +421,7 @@ class VizService:
                 viz_config = recommend_chart_intelligent(df, question, self._llm)
                 viz_config["options"] = get_chart_options(viz_config.get("chart_type", "table"))
                 viz_config["series_col"] = None  # AI doesn't detect series yet
-                return viz_config
+                return _enforce_axis_policy(viz_config, df)
             except Exception:
                 pass  # Fall through to rule-based
 
@@ -354,7 +436,16 @@ class VizService:
             f"{y_label} ตาม {x_label}" if x_label and y_label else "ผลลัพธ์"
         )
 
-        return {
+        reason = _CHART_REASON_TH.get(chart_type, "")
+        if chart_type == "table" and x_col is None:
+            _has_label = any(
+                _column_info(c, df[c])["semantic_type"] in ("name", "category", "text")
+                for c in df.columns
+            )
+            if not _has_label:
+                reason = _NO_LABEL_REASON
+
+        config = {
             "chart_type": chart_type,
             "x_col": x_col,
             "y_col": y_col,
@@ -364,8 +455,9 @@ class VizService:
             "x_label": x_label,
             "y_label": y_label,
             "top_n": compute_top_n(df, chart_type, x_col),
-            "reason": _CHART_REASON_TH.get(chart_type, ""),
+            "reason": reason,
         }
+        return _enforce_axis_policy(config, df)
 
 
 def create_viz_service(llm=None, enable_intelligent: bool = False) -> VizService:
