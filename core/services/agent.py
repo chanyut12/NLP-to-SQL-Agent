@@ -21,8 +21,9 @@ failure — never best-effort SQL (ADR 0006 decision #8).
 import asyncio
 import json
 import logging
+import time
 from dataclasses import dataclass, field
-from typing import Any, List, Optional
+from typing import Any, Callable, List, Optional
 
 import pandas as pd
 
@@ -285,12 +286,37 @@ async def run_agent_turn(
     history: Optional[list] = None,
     max_limit: Optional[int] = None,
     preferred_chart_type: Optional[str] = None,
+    on_event: Optional[Callable[[dict], None]] = None,
 ) -> AgentTurnResult:
     """Run one conversational Turn with the LLM as the controller.
 
     engine_obj is the NLPEngine (or a test double) providing ``_llm``,
     ``_prepare_context(**kw)`` and ``_viz_service``.
+
+    on_event (optional, grilling agreement on perceived latency): receives
+    Progress event dicts as the loop hits milestones — turn_started, sql_planned
+    (the SQL exists the moment the model wrote it), sql_ok (row count),
+    sql_failed, tool (get_schema/final_answer), turn_done. Events say nothing
+    the final envelope would not; they are not part of the Session and are
+    never replayed into history. Exceptions from the observer are swallowed —
+    a broken listener must never break the Turn. None = exact legacy behaviour.
     """
+    started = time.monotonic()
+    seq = 0
+
+    def emit(event: str, **fields) -> None:
+        nonlocal seq
+        if on_event is None:
+            return
+        seq += 1
+        payload = {"event": event, "seq": seq,
+                   "elapsed_ms": int((time.monotonic() - started) * 1000),
+                   **fields}
+        try:
+            on_event(payload)
+        except Exception:
+            logger.warning("Progress-event observer raised; ignored", exc_info=True)
+
     if max_limit is None:
         max_limit = settings.MAX_SQL_LIMIT
 
@@ -308,6 +334,7 @@ async def run_agent_turn(
         max_limit=max_limit,
     )
     messages: List[dict] = [{"role": "system", "content": system}]
+    emit("turn_started", question=question)
 
     llm = engine_obj._llm
     # The model cannot call tools it never sees: bind the spec once per Turn.
@@ -351,9 +378,19 @@ async def run_agent_turn(
             call_id = tc.get("id") or f"call_{i}"
             try:
                 if name == "get_schema":
+                    emit("tool", tool="get_schema")
                     out = await session.tool_get_schema(args.get("table_name", ""))
                 elif name == "run_sql":
+                    emit("sql_planned", sql=args.get("sql", ""))
                     out = await session.tool_run_sql(args.get("sql", ""))
+                    if out.startswith(_SAFETY_REJECTION_PREFIX) or out.startswith(
+                            "EXECUTION_ERROR:"):
+                        emit("sql_failed")
+                    else:
+                        try:
+                            emit("sql_ok", row_count=json.loads(out).get("row_count"))
+                        except Exception:
+                            emit("sql_ok")
                 elif name == "final_answer":
                     out = await session.tool_final_answer(
                         args.get("answer_type", ""), args.get("message", ""))
@@ -375,8 +412,11 @@ async def run_agent_turn(
 
         messages.extend(tool_outputs)
         if done is not None:
+            emit("turn_done", answer_type=done.answer_type,
+                 row_count=done.row_count)
             return done
 
+    emit("turn_done", answer_type="error", error=STEP_BUDGET_EXCEEDED)
     return AgentTurnResult(
         error=STEP_BUDGET_EXCEEDED,
         error_message=(f"Agent exceeded its {AGENT_STEP_BUDGET}-step budget "

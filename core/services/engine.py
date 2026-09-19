@@ -290,6 +290,7 @@ SQL:"""
         history: list = None,
         max_limit: int = None,
         preferred_chart_type: str = None,
+        on_event=None,
     ):
         """Conversational Turn entry point (ADR 0006): the function-calling
         agent loop with the LLM as controller. Retrieval runs before the loop,
@@ -300,6 +301,7 @@ SQL:"""
             self, question, engine, dialect=dialect,
             history=history, max_limit=max_limit,
             preferred_chart_type=preferred_chart_type,
+            on_event=on_event,
         )
 
     async def query_database(

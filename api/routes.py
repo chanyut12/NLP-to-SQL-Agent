@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi.responses import StreamingResponse
 from api.schemas import (
     QueryRequest, QueryResponse, QueryError, ResultSummary,
     SchemaResponse, TableInfo, ColumnInfo,
@@ -210,6 +211,19 @@ async def _agent_query(
         history=[t.model_dump() for t in request.history],
         preferred_chart_type=request.preferred_chart_type,
     )
+    return await _agent_envelope(request, request_id, start_time, result, dialect)
+
+
+async def _agent_envelope(
+    request: QueryRequest,
+    request_id: str,
+    start_time: float,
+    result: AgentTurnResult,
+    dialect: str,
+) -> QueryResponse:
+    """Shared envelope builder for /query and /query/stream: elapsed timing,
+    the same file-logging trail, and the answer-type dispatch. The stream's
+    final SSE event is exactly this envelope."""
     duration = time.time() - start_time
     elapsed_ms = int(duration * 1000)
 
@@ -267,6 +281,75 @@ async def _agent_query(
         steps_used=result.steps_used, sql=None, rows=[], row_count=0,
         elapsed_ms=elapsed_ms,
     )
+
+@router.post("/query/stream")
+async def query_data_stream(
+    request: QueryRequest,
+    state: GlobalStateManager = Depends(get_state_manager),
+    engine: NLPEngine = Depends(get_nlp_engine),
+):
+    """SSE variant of /query (grilling agreement on perceived latency): same
+    request contract, same auth, but Progress events stream to the Consumer
+    while the agent works, and the final SSE event is the standard envelope —
+    the same object the legacy endpoint returns. Opt-in; /api/query untouched.
+    The stream always runs the agent loop; omitting ``history`` means a first
+    Turn (empty history), not legacy one-shot mode."""
+    if not state.db_engine:
+        raise HTTPException(status_code=503, detail="Datasource unavailable")
+
+    request_id = str(uuid.uuid4())
+    dialect = {"postgresql": "postgres"}.get(
+        state.db_engine.dialect.name, state.db_engine.dialect.name
+    )
+    start_time = time.time()
+    loop = asyncio.get_running_loop()
+    queue: asyncio.Queue = asyncio.Queue()
+
+    def on_event(payload: dict) -> None:
+        # The turn and this queue share one event loop; put_nowait is the
+        # ordering-correct hand-off (a loop.call_soon_threadsafe schedule would
+        # race the turn_done sentinel and drop trailing events).
+        queue.put_nowait(payload)
+
+    history = [t.model_dump() for t in (request.history or [])]
+
+    async def _run_turn():
+        try:
+            return await engine.agent_query_database(
+                question=request.question,
+                engine=state.db_engine,
+                dialect=dialect,
+                history=history,
+                preferred_chart_type=request.preferred_chart_type,
+                on_event=on_event,
+            )
+        finally:
+            await queue.put(None)  # sentinel: no more progress events
+
+    async def _generate():
+        task = asyncio.create_task(_run_turn())
+        try:
+            while True:
+                payload = await queue.get()
+                if payload is None:
+                    break
+                yield (f"event: progress\n"
+                       f"data: {json.dumps(payload, ensure_ascii=False)}\n\n")
+            try:
+                result = await task
+            except Exception as e:
+                yield (f"event: error\n"
+                       f"data: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n")
+                return
+            envelope = await _agent_envelope(request, request_id, start_time, result, dialect)
+            yield f"event: envelope\ndata: {envelope.model_dump_json()}\n\n"
+        finally:
+            if not task.done():
+                task.cancel()
+
+    return StreamingResponse(
+        _generate(), media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 @router.get("/schema", response_model=SchemaResponse)
 async def get_schema(state: GlobalStateManager = Depends(get_state_manager)):

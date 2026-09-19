@@ -279,6 +279,54 @@ Turn 3 — คำถามต่อเนื่องที่อ้างผล
 
 ---
 
+### 1.2 Progress streaming — `POST /api/query/stream` (SSE, opt-in)
+
+**ทางเลือกเสริมของ §1** — request ชุดเดียวกันทุกอย่าง (auth header รวมถึง) แต่ตอบเป็น
+Server-Sent Events (`text/event-stream`) แทน JSON เดียว: ผู้ใช้เห็นความคืบหน้าจริงของ
+agent ระหว่างรอ (คำถาม SQL ปกติ ~10s) แทน spinner นิ่ง — โดย **event สุดท้ายคือ envelope
+ชุดเดียวกับ §1 ทุก field** (Consumer เขียนโค้ดรับ envelope ชุดเดียวใช้ได้ทั้งสอง endpoint)
+
+```
+POST /api/query/stream          → Content-Type: text/event-stream
+(และ cache ห้าม buffer: ตั้ง header X-Accel-Buffering: no ที่ proxy ด้วยถ้ามี)
+```
+
+**รูปแบบ event (3 ชนิด):**
+
+```
+event: progress
+data: {"event": "turn_started", "seq": 1, "elapsed_ms": 0, "question": "…"}
+
+event: progress
+data: {"event": "sql_planned", "seq": 3, "elapsed_ms": 5200, "sql": "SELECT …"}
+
+event: progress
+data: {"event": "sql_ok", "seq": 4, "elapsed_ms": 6100, "row_count": 42}
+
+event: envelope
+data: { …envelope §1 ฉบับเต็ม… }
+```
+
+- **`progress`** — เหตุการณ์กลางทาง: `turn_started` → `tool` (get_schema) →
+  `sql_planned` (SQL โผล่ทันทีที่โมเดลเขียนเสร็จ — จุดที่ UI ควรโชว์ SQL เป็นสิ่งแรก) →
+  `sql_ok` (มีจำนวนแถวแล้ว) หรือ `sql_failed` → `turn_done` ทุก event มี `seq`
+  (เพิ่มขึ้นเรื่อย ๆ) และ `elapsed_ms` (วินาทีตั้งแต่เริ่ม Turn)
+- **`envelope`** — event สุดท้ายเสมอ = envelope ชุดเดียวกับ §1 (result / clarification /
+  refusal / error ก็ส่งตรงนี้) — **ห้ามใช้ progress เป็นคำตอบ** มันไม่ใช่ส่วนของ Session
+  และห้ามผนวกเข้า history
+- **`error`** — เกิดเฉพาะเมื่อ stream พังกลางทาง (turn ล้มโดยไม่ได้ envelope) —
+  ถือว่า Turn นั้นล้มเหลว ไม่มี envelope
+
+**ข้อแตกต่างเดียวจาก §1:** endpoint นี้รัน agent loop เสมอ — ไม่ส่ง `history` เลย
+= Turn แรกของ session (ไม่ใช่ legacy one-shot เหมือน `POST /api/query`)
+
+**แนวทาง UI (React):** ใช้ fetch ปกติ + อ่าน stream (หรือ EventSource ที่ POST ผ่าน
+proxy ของ NestJS — NestJS ควร relay SSE ตรง ๆ: pass-through body + headers ชุดเดิม)
+โชว์การ์ด progress ตาม event: `sql_planned` → การ์ด "🛠 SQL ที่สร้าง" (โค้ด SQL แบบ
+ที่โชว์ใน envelope อยู่แล้ว), `sql_ok` → บรรทัด "⏱ ได้ผล N แถว" จน envelope มาแทนที่
+
+---
+
 ## 2. NestJS Design (`sts-backend`)
 
 > **Adjustments confirmed against the real `sts-backend` codebase** (read-only
