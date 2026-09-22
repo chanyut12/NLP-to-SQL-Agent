@@ -70,6 +70,10 @@ interface QueryEnvelope {
     type: string;                     // python type name (int/str/float…)
     numeric: boolean;
     semantic_type: SemanticType;
+    collapsible?: boolean;            // ADR 0009: true = id column ของคู่ identifier–name
+                                      // (เช่น school_id เมื่อมี school_name ในผลเดียวกัน) —
+                                      // Consumer ยุบ/ซ่อนได้ โดยข้อมูลใน rows ยังครบ;
+                                      // field นี้เป็น additive และไม่มีวันมาคู่กับ semantic_type อื่นที่ไม่ใช่ 'id'
   }[];
   rows: Record<string, unknown>[] | null;
   row_count: number;
@@ -201,7 +205,7 @@ Turn 3 — คำถามต่อเนื่องที่อ้างผล
   "question": "จำนวนนักเรียนปัจจุบันแยกตามโรงเรียน",
   "sql": "SELECT s.school_id, s.school_name, COUNT(DISTINCT e.person_uuid) AS student_count FROM ... GROUP BY 1, 2 LIMIT 500",
   "columns": [
-    { "name": "school_id", "type": "int", "numeric": true, "semantic_type": "id" },
+    { "name": "school_id", "type": "int", "numeric": true, "semantic_type": "id", "collapsible": true },
     { "name": "school_name", "type": "str", "numeric": false, "semantic_type": "name" },
     { "name": "student_count", "type": "int", "numeric": true, "semantic_type": "count" }
   ],

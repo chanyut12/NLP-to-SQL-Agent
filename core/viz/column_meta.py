@@ -19,6 +19,10 @@ import pandas as pd
 # against the lowercased column name.
 _DATE_RE = re.compile(r"(date|datetime|timestamp|_at$|_on$|วันที่)", re.I)
 _ID_RE = re.compile(r"(^id$|_id$|^uuid$|_uuid$|รหัส)", re.I)
+# Entity-label pairing (ADR 0009, extending ADR 0008's identifier-name rule):
+# a name-like column pairs with an id column when the id name minus its id
+# suffix appears as a prefix of the name column name (school_id -> school_name).
+_ID_SUFFIX_RE = re.compile(r"(?i)_?id$|_?uuid$|รหัส")
 _PERCENT_RE = re.compile(r"(rate|pct|percent|อัตรา|ร้อยละ|เปอร์เซ)", re.I)
 _GPA_RE = re.compile(r"(gpax?|grade_point|เกรดเฉลี่ย)", re.I)
 _COUNT_RE = re.compile(r"(count|_cnt$|^cnt|num_|_num$|total|จำนวน|ยอด|amount)", re.I)
@@ -61,14 +65,46 @@ def _semantic_type(name: str, series: pd.Series) -> str:
     return "category" if distinct <= _CATEGORY_MAX_DISTINCT else "text"
 
 
-def _column_info(name: str, series: pd.Series) -> dict[str, Any]:
+def _column_info(name: str, series: pd.Series,
+                 collapsible: bool = False) -> dict[str, Any]:
     sample = next((v for v in series if v is not None and not _is_nan(v)), None)
-    return {
+    info = {
         "name": str(name),
         "type": type(sample).__name__ if sample is not None else "unknown",
         "numeric": bool(pd.api.types.is_numeric_dtype(series)),
         "semantic_type": _semantic_type(name, series),
     }
+    if collapsible:
+        info["collapsible"] = True
+    return info
+
+
+def _entity_label_pairs(df: pd.DataFrame) -> dict[str, str]:
+    """Map each id column that has a paired label column to that label's name.
+
+    Deterministic (ADR 0004): name fragments and column order only. An id
+    column `school_id` pairs with the first name-typed column whose name starts
+    with the id's stem (`school_name`). Pairing is exclusive — an id pairs with
+    at most one label and a label with at most one id.
+    """
+    typed = {c: _semantic_type(c, df[c]) for c in df.columns}
+    label_cols = [c for c, t in typed.items() if t == "name"]
+    taken: set[str] = set()
+    pairs: dict[str, str] = {}
+    for col, t in typed.items():
+        if t != "id" or col in pairs:
+            continue
+        stem = _ID_SUFFIX_RE.sub("", col).strip("_")
+        if not stem:
+            continue
+        for label in label_cols:
+            if label in taken:
+                continue
+            if label.lower().startswith(stem.lower()):
+                pairs[col] = label
+                taken.add(label)
+                break
+    return pairs
 
 
 def _is_nan(v: Any) -> bool:
@@ -124,7 +160,10 @@ def describe_result(
             "single_value": False,
         }
 
-    columns = [_column_info(c, df[c]) for c in df.columns]
+    # ADR 0009: when a result carries an identifier-name pair, the id column is
+    # bookkeeping the Consumer may collapse — marked in metadata, never dropped.
+    pairs = _entity_label_pairs(df)
+    columns = [_column_info(c, df[c], collapsible=(c in pairs)) for c in df.columns]
 
     aggregates: dict[str, dict[str, float]] = {}
     for col in columns:

@@ -100,6 +100,11 @@ passed rule 1 and the schema above already answers it.
 the prior Turns above; rewrite them into a self-contained query.
 5. If run_sql fails, read the error and fix the SQL — retry with run_sql.
 6. Call final_answer(result) only AFTER a successful run_sql this Turn.
+7. Entity label rule: a result grouped by or filtered to one entity must \
+include that entity's readable label column (its name) next to the \
+measures — never the id alone; select the id only when the user asks for \
+the code itself. The label column is never a person's name — person \
+identifiers stay out of results per rule 2.
 """
 
 

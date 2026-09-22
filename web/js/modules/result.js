@@ -205,9 +205,12 @@ function buildTabs(card, viz, chartId, rows, columns) {
 }
 
 function buildTable(rows, columns) {
-    const cols = columns && columns.length
+    let cols = columns && columns.length
         ? columns
         : Object.keys(rows[0]).map((name) => ({ name, numeric: false, semantic_type: 'text' }));
+    // ADR 0009: collapsible id columns are bookkeeping next to their label —
+    // the demo table shows the label alone (rows still carry both).
+    cols = cols.filter((c) => !c.collapsible);
 
     const scroll = document.createElement('div');
     scroll.className = 'result-table-scroll';

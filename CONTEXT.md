@@ -45,6 +45,17 @@ What the service returns for one Question: either a **Result** (SQL with its res
 column metadata, summary and visualization config — see Export), a **Clarification**, or
 a **Refusal**.
 
+### Entity label
+The human-readable name of a non-person entity the result is grouped by (a school, a
+classroom, a product) — as opposed to its identifier. The service treats the Entity
+label as part of the Answer itself, not decoration: whenever a Question asks for a
+count or measure per entity, the result carries the entity's label column alongside
+(or instead of) its id, because a result the reader cannot parse is not a good answer
+even when the numbers are right. Person names stay outside this guarantee — they are
+personal data and belong to the Refusal rules. When both the id and the label of the
+same entity appear in one result, the id is bookkeeping: the Consumer may collapse it
+and show the label alone.
+
 ### Clarification
 An Answer that asks the end user to narrow or restate the Question instead of producing
 SQL.

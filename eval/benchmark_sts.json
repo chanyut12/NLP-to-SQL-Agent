@@ -41,7 +41,7 @@
       "source_tag": "held_out",
       "category": "not_exists_groupby",
       "question": "จำนวนเคสที่ยังไม่มีประวัติการพิจารณาแยกตามโรงเรียน",
-      "gold_sql": "SELECT case_row.school_id, COUNT(DISTINCT case_row.id)::int AS case_count FROM cases case_row WHERE case_row.deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM case_reviews review WHERE review.case_id = case_row.id) GROUP BY case_row.school_id ORDER BY case_count DESC, case_row.school_id ASC"
+      "gold_sql": "SELECT case_row.school_id, school.name AS school_name, COUNT(DISTINCT case_row.id)::int AS case_count FROM cases case_row  JOIN schools school ON school.id = case_row.school_id WHERE case_row.deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM case_reviews review WHERE review.case_id = case_row.id) GROUP BY case_row.school_id, school.name ORDER BY case_count DESC, case_row.school_id ASC"
     },
     {
       "id": "student_average_term_gpa_by_grade",
@@ -55,7 +55,7 @@
       "source_tag": "held_out",
       "category": "summary_groupby",
       "question": "สรุปจำนวนห้องและจำนวนนักเรียนเฉลี่ยต่อห้องของแต่ละโรงเรียนปัจจุบัน",
-      "gold_sql": "WITH classroom_counts AS (SELECT classroom.school_id, classroom.id AS classroom_id, COUNT(DISTINCT enrollment.person_uuid)::int AS student_count FROM student_term enrollment JOIN student_current_enrollment_resolution current_enrollment ON current_enrollment.person_uuid = enrollment.person_uuid AND current_enrollment.selected_student_uuid = enrollment.student_uuid AND current_enrollment.resolution_state = 'ACTIVE' JOIN school_classrooms classroom ON classroom.id = enrollment.classroom_id AND classroom.school_id = enrollment.\"SchoolID_Onec\" WHERE enrollment.deleted_at IS NULL AND classroom.deleted_at IS NULL AND classroom.classroom_status = 'ACTIVE' GROUP BY classroom.school_id, classroom.id) SELECT school_id, COUNT(*)::int AS occupied_classroom_count, ROUND(AVG(student_count), 1) AS average_students_per_classroom, MIN(student_count)::int AS minimum_students_per_classroom, MAX(student_count)::int AS maximum_students_per_classroom FROM classroom_counts GROUP BY school_id ORDER BY average_students_per_classroom DESC, school_id ASC"
+      "gold_sql": "WITH classroom_counts AS (SELECT classroom.school_id, school.name AS school_name, classroom.id AS classroom_id, COUNT(DISTINCT enrollment.person_uuid)::int AS student_count FROM student_term enrollment JOIN student_current_enrollment_resolution current_enrollment ON current_enrollment.person_uuid = enrollment.person_uuid AND current_enrollment.selected_student_uuid = enrollment.student_uuid AND current_enrollment.resolution_state = 'ACTIVE' JOIN school_classrooms classroom ON classroom.id = enrollment.classroom_id AND classroom.school_id = enrollment.\"SchoolID_Onec\" JOIN schools school ON school.id = classroom.school_id WHERE enrollment.deleted_at IS NULL AND classroom.deleted_at IS NULL AND classroom.classroom_status = 'ACTIVE' GROUP BY classroom.school_id, school.name, classroom.id) SELECT school_id, school_name, COUNT(*)::int AS occupied_classroom_count, ROUND(AVG(student_count), 1) AS average_students_per_classroom, MIN(student_count)::int AS minimum_students_per_classroom, MAX(student_count)::int AS maximum_students_per_classroom FROM classroom_counts GROUP BY school_id, school_name ORDER BY average_students_per_classroom DESC, school_id ASC"
     },
     {
       "id": "student_current_count_by_grade",
@@ -108,7 +108,7 @@
       "source_tag": "paraphrase",
       "category": "not_exists_groupby",
       "question": "เคสที่ยังไม่ได้มอบหมายงานเลย มีกี่เคสต่อโรงเรียน",
-      "gold_sql": "SELECT case_row.school_id, COUNT(DISTINCT case_row.id)::int AS case_count FROM cases case_row WHERE case_row.deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM tasks task WHERE task.case_id = case_row.id AND task.deleted_at IS NULL) GROUP BY case_row.school_id ORDER BY case_count DESC, case_row.school_id ASC",
+      "gold_sql": "SELECT case_row.school_id, school.name AS school_name, COUNT(DISTINCT case_row.id)::int AS case_count FROM cases case_row  JOIN schools school ON school.id = case_row.school_id WHERE case_row.deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM tasks task WHERE task.case_id = case_row.id AND task.deleted_at IS NULL) GROUP BY case_row.school_id, school.name ORDER BY case_count DESC, case_row.school_id ASC",
       "gold_from": "cases_without_tasks_by_school"
     },
     {
@@ -124,7 +124,7 @@
       "source_tag": "paraphrase",
       "category": "average_groupby",
       "question": "คะแนน risk เฉลี่ยของเด็กปัจจุบันในแต่ละ ร.ร.",
-      "gold_sql": "SELECT risk.school_id, COUNT(DISTINCT enrollment.person_uuid)::int AS profiled_student_count, ROUND(AVG(risk.risk_score), 2) AS average_risk_score, MAX(risk.profile_calculated_at) AS data_as_of FROM student_risk_profiles risk JOIN student_term enrollment ON enrollment.student_uuid = risk.student_uuid JOIN student_current_enrollment_resolution current_enrollment ON current_enrollment.person_uuid = enrollment.person_uuid AND current_enrollment.selected_student_uuid = enrollment.student_uuid AND current_enrollment.resolution_state = 'ACTIVE' WHERE enrollment.deleted_at IS NULL GROUP BY risk.school_id ORDER BY average_risk_score DESC, risk.school_id ASC",
+      "gold_sql": "SELECT risk.school_id, school.name AS school_name, COUNT(DISTINCT enrollment.person_uuid)::int AS profiled_student_count, ROUND(AVG(risk.risk_score), 2) AS average_risk_score, MAX(risk.profile_calculated_at) AS data_as_of FROM student_risk_profiles risk JOIN student_term enrollment ON enrollment.student_uuid = risk.student_uuid JOIN student_current_enrollment_resolution current_enrollment ON current_enrollment.person_uuid = enrollment.person_uuid AND current_enrollment.selected_student_uuid = enrollment.student_uuid AND current_enrollment.resolution_state = 'ACTIVE'  JOIN schools school ON school.id = risk.school_id WHERE enrollment.deleted_at IS NULL GROUP BY risk.school_id, school.name ORDER BY average_risk_score DESC, risk.school_id ASC",
       "gold_from": "risk_current_average_score_by_school"
     },
     {
@@ -140,7 +140,7 @@
       "source_tag": "paraphrase",
       "category": "freshness_groupby",
       "question": "ข้อมูล risk ของแต่ละโรงเรียน อัปเดตล่าสุดเมื่อไหร่ เก่าสุดเมื่อไหร่",
-      "gold_sql": "SELECT risk.school_id, MIN(risk.profile_calculated_at) AS oldest_profile_calculated_at, MAX(risk.profile_calculated_at) AS newest_profile_calculated_at, COUNT(*)::int AS profile_count FROM student_risk_profiles risk GROUP BY risk.school_id ORDER BY newest_profile_calculated_at ASC, risk.school_id ASC",
+      "gold_sql": "SELECT risk.school_id, school.name AS school_name, MIN(risk.profile_calculated_at) AS oldest_profile_calculated_at, MAX(risk.profile_calculated_at) AS newest_profile_calculated_at, COUNT(*)::int AS profile_count FROM student_risk_profiles risk  JOIN schools school ON school.id = risk.school_id GROUP BY risk.school_id, school.name ORDER BY newest_profile_calculated_at ASC, risk.school_id ASC",
       "gold_from": "risk_profile_freshness_by_school"
     },
     {
