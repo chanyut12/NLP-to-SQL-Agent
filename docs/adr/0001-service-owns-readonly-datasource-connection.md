@@ -48,4 +48,4 @@ behaviours depend on executing the query inside the service:
   a Consumer is the only way in. See `docs/API.md`.
 - If STS ever needs real multi-tenant scope or PII controls, this decision is
   revisited: execution would move behind the NestJS-owned gateway described in
-  `TEXT_TO_SQL_STS_GUIDE.md` and this service would become generate-only.
+  `docs/guides/TEXT_TO_SQL_STS_GUIDE.md` and this service would become generate-only.

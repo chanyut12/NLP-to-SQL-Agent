@@ -113,7 +113,7 @@ of schools, enrollment, attendance, student risk profiles, follow-up cases, and
 assistance tasks (100+ tables). Its authoritative semantics — table grain, canonical
 join paths, status dictionaries, the "current student" rule, attendance
 source-of-truth, academic-year vs calendar-year — are defined in
-`TEXT_TO_SQL_STS_GUIDE.md`. The bundled `classicmodels` / receipts schema is only
+`docs/guides/TEXT_TO_SQL_STS_GUIDE.md`. The bundled `classicmodels` / receipts schema is only
 sample data from earlier development.
 
 STS holds real personal data (names, citizen IDs, contacts, addresses, home-visit

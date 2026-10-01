@@ -2,11 +2,11 @@
 status: accepted
 ---
 
-# Adopt only the prompt-and-examples layer of TEXT_TO_SQL_STS_GUIDE.md
+# Adopt only the prompt-and-examples layer of docs/guides/TEXT_TO_SQL_STS_GUIDE.md
 
 ## Context
 
-A collaborator supplied `TEXT_TO_SQL_STS_GUIDE.md`, a full implementation contract
+A collaborator supplied `docs/guides/TEXT_TO_SQL_STS_GUIDE.md` (originally at repo root), a full implementation contract
 for running Text-to-SQL against the real STS (Student Tracking System) PostgreSQL
 database. It specifies far more than a prompt: a cheap routing model, a structured
 `decision: query | clarify | deny` output, a 23-step deterministic AST validation

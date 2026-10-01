@@ -1,5 +1,5 @@
 <!--
-STS (Student Tracking System) prompt hints — Tier-1 adoption of TEXT_TO_SQL_STS_GUIDE.md
+STS (Student Tracking System) prompt hints — Tier-1 adoption of docs/guides/TEXT_TO_SQL_STS_GUIDE.md
 sections 4-7 and 10. PostgreSQL only. Aggregate analytical questions.
 The full scope-enforcement / PII gateway in the guide is out of scope here
 (see docs/adr/0002-sts-guide-tier-1-adoption.md).
