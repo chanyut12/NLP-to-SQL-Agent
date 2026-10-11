@@ -23,7 +23,7 @@ class TestBuild(unittest.TestCase):
     def test_describes_tables_populations_filters_and_grouping(self):
         d = build_turn_digest(SQL, ROWS, COLS, 1, NOTES)
         self.assertEqual(d["tables"], ["case_risk_signals", "cases"])
-        self.assertIn("NOT the cause of risk", d["populations"]["case_risk_signals"])
+        self.assertIn("opened cases only", d["populations"]["case_risk_signals"])
         self.assertEqual(d["filters"], ["cases.status = 'OPEN'", "cases.school_id = 3"])
         self.assertEqual(d["group_by"], ["crs.signal_reason"])
         self.assertEqual(d["top_rows"], ROWS)

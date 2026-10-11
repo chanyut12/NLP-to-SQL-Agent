@@ -36,7 +36,8 @@ class TestFormat(unittest.TestCase):
         notes = load_table_notes("sts")
         out = format_table_notes("case_risk_signals", notes, "id, case_id, signal_reason")
         self.assertIn("Population", out)
-        self.assertIn("NOT the cause of risk for all at-risk students", out)
+        self.assertIn("signal_source_code", out)
+        self.assertIn("opened cases only", out)
         self.assertIn("All columns: id, case_id, signal_reason", out)
 
     def test_degrades_without_notes(self):
