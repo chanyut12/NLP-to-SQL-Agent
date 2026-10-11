@@ -77,7 +77,13 @@ class QueryResponse(BaseModel):
     # pipeline only ever produces "result"; the vocabulary ships with the
     # envelope so Consumers can dispatch on it before the agent loop lands.
     answer_type: Literal["result", "clarification", "refusal"] = "result"
-    # Thai text for clarifications/refusals; None when answer_type is result.
+    # Thai text carrying the Answer's readable part: the clarification
+    # question, the refusal explanation, or (since the grilled “every Answer
+    # speaks” decision, Oct 2026) a 2–3-sentence Thai summary of a result —
+    # the same text the agent puts in final_answer's message. A Consumer shows
+    # it as a chat bubble beside the table/chart. Advisory like the rest of
+    # the presentation fields, but the service always tries to fill it for
+    # every non-error Answer.
     message: Optional[str] = None
     steps_used: int = 1
     # Context-preparation duration in ms (retrieval + schema filtering) —

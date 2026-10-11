@@ -21,6 +21,7 @@ failure — never best-effort SQL (ADR 0006 decision #8).
 import asyncio
 import json
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, List, Optional
@@ -29,11 +30,26 @@ import pandas as pd
 
 from core.config import settings
 from core.domain.sql_safety import SQLSafetyError, validate_and_sanitize_sql
+from core.services.answer_grounding import (
+    drop_ungrounded_sentences,
+    fallback_message,
+    ungrounded_numbers,
+)
 
 logger = logging.getLogger(__name__)
 
-AGENT_STEP_BUDGET = 8
+AGENT_STEP_BUDGET = int(os.getenv("AGENT_STEP_BUDGET", "8"))
 STEP_BUDGET_EXCEEDED = "STEP_BUDGET_EXCEEDED"
+
+# ADR 0010 / ticket #35: mechanical loop guards.
+MAX_PROBES_AFTER_EMPTY = 2  # run_sql calls allowed after a successful 0-row query
+_DUPLICATE_PREFIX = "DUPLICATE_SQL"
+_EXPLORATION_PREFIX = "EXPLORATION_LIMIT"
+
+
+def _normalize_sql(sql: str) -> str:
+    """Whitespace/case/trailing-semicolon-insensitive key for duplicate detection."""
+    return " ".join((sql or "").strip().rstrip(";").split()).lower()
 
 ANSWER_TYPES = ("result", "clarification", "refusal")
 
@@ -66,8 +82,13 @@ the datasource. Safety validation runs inside the tool — write operations and 
 forbidden tables are rejected and the reason is returned to you. A LIMIT of at \
 most {max_limit} is enforced automatically.
 - final_answer(answer_type, message): end the Turn. answer_type is one of:
-  * "result" — a query already executed successfully this Turn; message \
-briefly summarises the result (Thai).
+  * "result" — a query already executed successfully this Turn; message is
+a short Thai paragraph (2–3 sentences) that: (1) answers the question in
+words, including any "why/why-not" part when the rows support it (e.g. the
+top entity and what stands out about it), (2) notes one salient fact from
+the result (largest/smallest/total), and (3) stays strictly inside what the
+rows show — never invent a reason the data does not contain. The Consumer
+displays this message as a chat bubble next to the table/chart.
   * "clarification" — the question is ambiguous (missing measure, population \
 snapshot, timeframe, or grouping); message asks ONE concrete follow-up \
 question (Thai). When a genuine choice is unresolved, ask — never guess.
@@ -105,6 +126,12 @@ include that entity's readable label column (its name) next to the \
 measures — never the id alone; select the id only when the user asks for \
 the code itself. The label column is never a person's name — person \
 identifiers stay out of results per rule 2.
+8. Follow-up filters ("ช่วยกรองเฉพาะ X", "เฉพาะ X", "แล้วของ X ล่ะ") modify the \
+IMMEDIATELY PREVIOUS Turn: re-run that Turn's query with the new filter added \
+and keep its output shape (same measure, same breakdown columns). If the \
+previous Turn broke a measure down by reason/category (e.g. "สาเหตุ…"), the \
+answer must list those reasons with their counts — never collapse it into one \
+total, and never switch to the measure of an earlier Turn.
 """
 
 
@@ -221,6 +248,11 @@ class _AgentSession:
         self.executed_df: Optional[pd.DataFrame] = None
         self.executed_truncated: bool = False
         self.schema_queries: list = []
+        self.seen_sql: dict = {}          # normalized SQL -> tool output (ticket #35)
+        self.empty_seen: bool = False     # a query executed OK with 0 rows
+        self.probes_after_empty: int = 0
+        self.turn_rows: list = []         # rows of every successful run_sql (grounding, ticket #36)
+        self.grounding_repaired: bool = False
 
     # --- tool: get_schema -----------------------------------------------------
     async def tool_get_schema(self, table_name: str) -> str:
@@ -237,6 +269,20 @@ class _AgentSession:
 
     # --- tool: run_sql --------------------------------------------------------
     async def tool_run_sql(self, sql: str) -> str:
+        key = _normalize_sql(sql)
+        if key in self.seen_sql:
+            # Same statement already ran this Turn: never hit the datasource twice.
+            return (f"{_DUPLICATE_PREFIX}: this exact query already ran this Turn; "
+                    f"its result was: {self.seen_sql[key]} — do not repeat it. "
+                    f"Answer with final_answer, or change the approach.")
+        if self.empty_seen and self.probes_after_empty >= MAX_PROBES_AFTER_EMPTY:
+            return (f"{_EXPLORATION_PREFIX}: an earlier query returned 0 rows and "
+                    f"you have already used {MAX_PROBES_AFTER_EMPTY} follow-up "
+                    f"queries. Stop probing: call final_answer(result) now and "
+                    f"state plainly what the data shows (including that no matching "
+                    f"rows exist).")
+        if self.empty_seen:
+            self.probes_after_empty += 1
         try:
             safe = validate_and_sanitize_sql(
                 sql, dialect=self.dialect, max_limit=self.max_limit,
@@ -248,16 +294,50 @@ class _AgentSession:
         try:
             df = await asyncio.to_thread(pd.read_sql, safe.sql, self.db_engine)
         except Exception as e:
-            return f"EXECUTION_ERROR: {str(e)}"
+            err = f"EXECUTION_ERROR: {str(e)}"
+            self.seen_sql[key] = err
+            return err
         self.executed_sql = safe.sql
         self.executed_df = df
         self.executed_rows = df.to_dict(orient="records")
+        self.turn_rows.append(self.executed_rows)
         self.executed_truncated = len(df) >= self.max_limit
         preview = df.head(20).to_dict(orient="records")
-        return json.dumps(
-            {"row_count": len(df), "truncated": self.executed_truncated,
-             "rows_preview": preview},
-            ensure_ascii=False, default=str)
+        payload = {"row_count": len(df), "truncated": self.executed_truncated,
+                   "rows_preview": preview}
+        if len(df) == 0:
+            self.empty_seen = True
+            payload["note"] = (
+                "0 rows. An empty result is a valid answer when the join and "
+                "filter are correct — call final_answer(result) and say that no "
+                f"matching data exists. At most {MAX_PROBES_AFTER_EMPTY} more "
+                "exploratory queries are allowed.")
+        out = json.dumps(payload, ensure_ascii=False, default=str)
+        self.seen_sql[key] = out
+        return out
+
+    # --- grounding (ADR 0010 / ticket #36) ------------------------------------
+    def _user_text(self, history) -> str:
+        parts = [self.question] + [t.get("question", "") for t in (history or [])]
+        return " ".join(parts)
+
+    def ground_message(self, message: str, history) -> Optional[str]:
+        """None when the message is grounded. Otherwise the repair instruction
+        (first time) — the caller turns a second failure into a deterministic
+        message via `grounded_fallback`."""
+        bad = ungrounded_numbers(message, self.turn_rows, self._user_text(history))
+        if not bad:
+            return None
+        shown = ", ".join(f"{b:g}" for b in sorted(set(bad))[:6])
+        return (f"ERROR: the message states numbers that are not in this Turn's "
+                f"result rows: {shown}. State only figures shown by the rows you "
+                f"retrieved (or run another query to get them); do not quote or "
+                f"compare with figures from earlier Turns. Call final_answer "
+                f"again.")
+
+    def grounded_fallback(self, message: str, history) -> str:
+        kept = drop_ungrounded_sentences(message, self.turn_rows, self._user_text(history))
+        return kept or fallback_message(len(self.executed_rows or []))
 
     # --- tool: final_answer ---------------------------------------------------
     async def tool_final_answer(self, answer_type: str, message: str = "") -> str:
@@ -341,7 +421,17 @@ async def run_agent_turn(
         schema_summary=_schema_summary(bundle),
         max_limit=max_limit,
     )
-    messages: List[dict] = [{"role": "system", "content": system}]
+    # Providers disagree on whether a messages array may hold ONLY a system
+    # message: OpenAI accepts it, Zhipu rejects it with HTTP 400 code 1214
+    # ("The messages parameter is illegal") — found live (Oct 2026) when
+    # MODEL_PROVIDER switched to GLM-5.3-Flash and every Turn died at step 1
+    # with LLM_FAILED. The question keeps its system-prompt section (prompt
+    # stability for the existing provider) AND travels as the user turn, so
+    # the array is valid for every OpenAI-compatible provider.
+    messages: List[dict] = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": question},
+    ]
     emit("turn_started", question=question)
 
     llm = engine_obj._llm
@@ -395,6 +485,8 @@ async def run_agent_turn(
                     if out.startswith(_SAFETY_REJECTION_PREFIX) or out.startswith(
                             "EXECUTION_ERROR:"):
                         emit("sql_failed")
+                    elif out.startswith((_DUPLICATE_PREFIX, _EXPLORATION_PREFIX)):
+                        pass  # guard reply, nothing ran — no progress event
                     else:
                         try:
                             emit("sql_ok", row_count=json.loads(out).get("row_count"))
@@ -403,6 +495,14 @@ async def run_agent_turn(
                 elif name == "final_answer":
                     out = await session.tool_final_answer(
                         args.get("answer_type", ""), args.get("message", ""))
+                    if out == "OK" and args.get("answer_type") == "result":
+                        repair = session.ground_message(args.get("message", ""), history)
+                        if repair and not session.grounding_repaired:
+                            session.grounding_repaired = True
+                            out = repair
+                        elif repair:
+                            args["message"] = session.grounded_fallback(
+                                args.get("message", ""), history)
                     if out == "OK":
                         done = _build_final(session, args, bundle,
                                             preferred_chart_type, steps)
@@ -421,6 +521,12 @@ async def run_agent_turn(
             })
 
         messages.extend(tool_outputs)
+        if done is None and AGENT_STEP_BUDGET > 3 and steps == AGENT_STEP_BUDGET - 2:
+            messages.append({"role": "system", "content":
+                             "Only 2 steps remain in this Turn. Do not explore "
+                             "further: call final_answer now with what the data "
+                             "shows (or a clarification if the question cannot "
+                             "be answered)."})
         if done is not None:
             emit("turn_done", answer_type=done.answer_type,
                  row_count=done.row_count)

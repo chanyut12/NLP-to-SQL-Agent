@@ -35,7 +35,9 @@ class Settings:
     # Zhipu AI (GLM) Settings (OpenAI-compatible)
     ZHIPU_API_KEY = os.getenv("ZHIPU_API_KEY", "")
     ZHIPU_MODEL = os.getenv("ZHIPU_MODEL", "glm-4-flash")
-
+    # General PaaS endpoint. The Coding Plan endpoint (api.z.ai/api/coding/paas/v4) is for
+    # coding-plan keys only; set ZHIPU_BASE_URL to it if you switch back to a Coding Plan.
+    ZHIPU_BASE_URL = os.getenv("ZHIPU_BASE_URL", "https://api.z.ai/api/paas/v4")
     # ===========================================================================
     # RAG Configuration (การดึงตัวอย่าง SQL ที่ใกล้เคียง)
     # ===========================================================================

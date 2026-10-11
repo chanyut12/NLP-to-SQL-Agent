@@ -90,7 +90,7 @@ class NLPEngine:
                 model=settings.ZHIPU_MODEL,
                 temperature=0,
                 api_key=settings.ZHIPU_API_KEY,
-                base_url="https://api.z.ai/api/coding/paas/v4",
+                base_url=settings.ZHIPU_BASE_URL,
                 max_retries=settings.LLM_MAX_RETRIES,
                 timeout=settings.LLM_TIMEOUT_SECONDS,
             )

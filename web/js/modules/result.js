@@ -47,6 +47,13 @@ function renderNonResult(env) {
  * @param {Object} env - the /api/query response envelope (status === "ok")
  */
 export function renderResult(env) {
+    // 0. The agent's Thai summary (grilled "every Answer speaks"): a
+    //    2–3-sentence paragraph answering the question in words. Reads like a
+    //    chat reply — it goes BEFORE the SQL bubble so the narrative comes first.
+    if (env.message) {
+        appendMessage(escapeHtml(env.message), false);
+    }
+
     // 1. The generated SQL stays in a chat bubble.
     let sqlHtml = `<strong>Generated SQL:</strong><pre><code class="language-sql">${escapeHtml(env.sql)}</code></pre>`;
     if (env.retry_count > 0) {

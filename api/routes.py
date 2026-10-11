@@ -264,9 +264,12 @@ async def _agent_envelope(
 
     if result.answer_type == "result":
         rows = result.rows or []
+        # Grilled decision (Oct 2026): every Answer carries a readable Thai
+        # message — the agent's final_answer already produces it for "result"
+        # (the prompt requires it), so stop dropping it at the envelope.
         return QueryResponse(
             status="ok", request_id=request_id, question=request.question,
-            answer_type="result", message=None, steps_used=result.steps_used,
+            answer_type="result", message=result.message, steps_used=result.steps_used,
             prep_ms=result.prep_ms, sql=result.sql,
             columns=[ColumnInfo(**c) for c in (result.columns or [])],
             rows=rows, row_count=result.row_count, truncated=result.truncated,

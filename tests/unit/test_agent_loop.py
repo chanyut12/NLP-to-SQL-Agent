@@ -16,6 +16,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 os.environ["API_KEY"] = "test-secret"
+os.environ["AGENT_STEP_BUDGET"] = "8"  # tests assert the documented default, not a dev .env override
 os.environ["DATABASE_URL"] = ""
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
@@ -158,7 +159,7 @@ class TestFollowUpResolution(AgentLoopBase):
     def test_followup_with_history_resolves_prior_turn(self):
         self._wire([
             _ai_tool("run_sql", sql="SELECT id, name FROM schools WHERE id = 1"),
-            _ai_final("result"),
+            _ai_final("result", "โรงเรียนเดียวกันเข้าเงื่อนไขเสี่ยงสูง 1 แห่งในภาคเรียนนี้"),
         ])
         r = client.post("/api/query",
                         json={"question": "โรงเรียนเดียวกันแต่เฉพาะเสี่ยงสูง",
@@ -167,7 +168,10 @@ class TestFollowUpResolution(AgentLoopBase):
         self.assertEqual(r.status_code, 200)
         body = r.json()
         self.assertEqual(body["answer_type"], "result")
-        self.assertIsNone(body["message"])
+        # Grilled "every Answer speaks": a result's message now reaches the
+        # envelope instead of being dropped.
+        self.assertEqual(body["message"],
+                         "โรงเรียนเดียวกันเข้าเงื่อนไขเสี่ยงสูง 1 แห่งในภาคเรียนนี้")
         self.assertEqual(body["steps_used"], 2)
         self.assertIn("SELECT", body["sql"])
         # history reached the model: the prior question and SQL are in the prompt
@@ -230,6 +234,108 @@ class TestStepBudget(AgentLoopBase):
         self.assertEqual(body["steps_used"], 8)
         self.assertIsNone(body["sql"])
         self.assertEqual(len(self.llm.prompts), 8)
+
+
+class TestMechanicalLoopGuards(AgentLoopBase):
+    """Ticket #35 / ADR 0010: guards in code, not prompt rules."""
+
+    def _ask(self, script):
+        self._wire(script)
+        return client.post("/api/query",
+                           json={"question": "กรองเฉพาะโรงเรียนที่ไม่มี", "history": HISTORY},
+                           headers={"X-API-Key": "test-secret"}).json()
+
+    def _tool_outputs(self):
+        return [m["content"] if isinstance(m, dict) else m.content
+                for m in self.llm.prompts[-1]
+                if (isinstance(m, dict) and m.get("role") == "tool")
+                or isinstance(m, ToolMessage)]
+
+    def test_duplicate_sql_does_not_hit_the_datasource_twice(self):
+        sql = "SELECT id, name FROM schools"
+        with mock.patch("core.services.agent.pd.read_sql",
+                        wraps=agent.pd.read_sql) as spy:
+            body = self._ask([
+                _ai_tool("run_sql", sql=sql),
+                _ai_tool("run_sql", sql="  select id, name  from schools ;"),
+                _ai_final("result", "มี 1 โรงเรียน"),
+            ])
+        self.assertEqual(body["answer_type"], "result")
+        self.assertEqual(spy.call_count, 1)
+        self.assertTrue(any(o.startswith("DUPLICATE_SQL") for o in self._tool_outputs()))
+
+    def test_empty_result_carries_a_steer_to_final_answer(self):
+        body = self._ask([
+            _ai_tool("run_sql", sql="SELECT id FROM schools WHERE id = 99"),
+            _ai_final("result", "ไม่พบข้อมูล"),
+        ])
+        self.assertEqual(body["answer_type"], "result")
+        out = [o for o in self._tool_outputs() if '"row_count": 0' in o][0]
+        self.assertIn("final_answer", json.loads(out)["note"])
+
+    def test_probing_after_an_empty_result_is_capped(self):
+        body = self._ask([
+            _ai_tool("run_sql", sql="SELECT id FROM schools WHERE id = 99"),
+            _ai_tool("run_sql", sql="SELECT id FROM schools WHERE id = 98"),
+            _ai_tool("run_sql", sql="SELECT id FROM schools WHERE id = 97"),
+            _ai_tool("run_sql", sql="SELECT id FROM schools WHERE id = 96"),
+            _ai_final("result", "ไม่พบข้อมูล"),
+        ])
+        self.assertEqual(body["answer_type"], "result")
+        self.assertTrue(any(o.startswith("EXPLORATION_LIMIT") for o in self._tool_outputs()))
+        self.assertEqual(body["steps_used"], 5)
+
+    def test_warns_when_two_steps_remain(self):
+        self._ask([_ai_tool("get_schema", table_name="schools")] * 8)
+        warned = [m for m in self.llm.prompts[-1]
+                  if isinstance(m, dict) and m.get("role") == "system"
+                  and "Only 2 steps remain" in m.get("content", "")]
+        self.assertEqual(len(warned), 1)
+
+    def test_prompt_no_longer_carries_the_empty_result_rule(self):
+        self._ask([_ai_final("clarification", "ขอช่วงเวลา")])
+        system = self.llm.prompts[0][0]["content"]
+        self.assertNotIn("Empty results are answers", system)
+
+
+class TestGroundingInLoop(AgentLoopBase):
+    """Ticket #36: numbers in the final message must come from this Turn's rows."""
+
+    def _ask(self, script):
+        self._wire(script)
+        return client.post("/api/query",
+                           json={"question": "มีโรงเรียนกี่แห่ง", "history": HISTORY},
+                           headers={"X-API-Key": "test-secret"}).json()
+
+    def test_grounded_message_passes_untouched(self):
+        body = self._ask([_ai_tool("run_sql", sql="SELECT id, name FROM schools"),
+                          _ai_final("result", "มี 1 โรงเรียน")])
+        self.assertEqual(body["message"], "มี 1 โรงเรียน")
+        self.assertEqual(body["steps_used"], 2)
+
+    def test_foreign_number_triggers_one_repair_step(self):
+        body = self._ask([_ai_tool("run_sql", sql="SELECT id, name FROM schools"),
+                          _ai_final("result", "มี 1 โรงเรียน แต่กรุงเทพฯ สูงสุด 76 คน"),
+                          _ai_final("result", "มี 1 โรงเรียน")])
+        self.assertEqual(body["message"], "มี 1 โรงเรียน")
+        self.assertEqual(body["steps_used"], 3)
+        errs = [m["content"] for m in self.llm.prompts[-1]
+                if isinstance(m, dict) and m.get("role") == "tool"
+                and "not in this Turn" in m["content"]]
+        self.assertEqual(len(errs), 1)
+        self.assertIn("76", errs[0])
+
+    def test_second_violation_is_replaced_by_a_deterministic_message(self):
+        body = self._ask([_ai_tool("run_sql", sql="SELECT id, name FROM schools"),
+                          _ai_final("result", "กรุงเทพฯ สูงสุด 76 คน"),
+                          _ai_final("result", "กรุงเทพฯ สูงสุด 76 คน")])
+        self.assertEqual(body["answer_type"], "result")
+        self.assertNotIn("76", body["message"])
+        self.assertIn("1", body["message"])
+
+    def test_clarification_and_refusal_are_not_grounded_against_rows(self):
+        body = self._ask([_ai_final("clarification", "ต้องการข้อมูลปี 2569 หรือ 2570")])
+        self.assertEqual(body["answer_type"], "clarification")
 
 
 class TestSafetyInsideRunSql(AgentLoopBase):
@@ -417,6 +523,38 @@ class TestAgentModeContext(unittest.TestCase):
         turn = asyncio.run(run_agent_turn(eng, "q", None, "postgres"))
         self.assertIsNone(turn.error)
         self.assertTrue(captured.get("agent_mode"))
+
+
+class TestProviderPortableMessages(unittest.TestCase):
+    """Regression (found live, Oct 2026): the loop opened with a system-only
+    messages array. OpenAI accepts that shape; Zhipu rejects it with HTTP 400
+    code 1214 ("The messages parameter is illegal"), so the moment
+    MODEL_PROVIDER became GLM-5.3-Flash every Turn failed at step 1 with
+    LLM_FAILED. The question now also travels as a user turn, so the array is
+    valid for every OpenAI-compatible provider.
+    """
+
+    def test_every_call_carries_a_non_system_turn_with_the_question(self):
+        question = "จำนวนนักเรียนแยกโรงเรียน"
+        llm = ScriptedLLM([_ai_final("refusal", "คำขอนี้อยู่นอกขอบเขต")])
+        eng = _make_engine(None, llm)
+
+        turn = asyncio.run(run_agent_turn(eng, question, None, "postgres"))
+
+        self.assertIsNone(turn.error)
+        self.assertTrue(llm.prompts, "the loop must have called the LLM")
+        for i, prompt in enumerate(llm.prompts):
+            roles = [m["role"] for m in prompt]
+            self.assertIn("system", roles)
+            self.assertTrue(
+                any(m["role"] == "user" for m in prompt),
+                f"call {i} sent a system-only array — rejected by Zhipu (1214)",
+            )
+        first = llm.prompts[0]
+        self.assertTrue(
+            any(m["role"] == "user" and question in m["content"] for m in first),
+            "the user turn must carry the question",
+        )
 
 
 if __name__ == "__main__":

@@ -62,7 +62,11 @@ interface QueryEnvelope {
   //   result        — มี sql/rows ให้แสดงผลตามปกติ
   //   clarification — message คือคำถามกลับ 1 ข้อ (sql/rows = null, row_count = 0)
   //   refusal       — message คือคำอธิบายการปฏิเสธ + ทางเลือก (sql/rows = null)
-  message: string | null;             // ข้อความ user-facing สำหรับ clarification/refusal
+  message: string | null;             // ข้อความ user-facing ของทุก answer_type (grilled "every Answer
+                                      // speaks", ต.ค. 2569): clarification = คำถามกลับ, refusal = คำอธิบาย,
+                                      // result = ย่อหน้าไทย 2–3 ประโยค ตอบคำถามเป็นข้อความเล่า +
+                                      // ข้อสังเกตสำคัญ 1 อย่างจาก rows (รวมท่อน "เพราะอะไร" ถ้า rows รองรับ)
+                                      // — แสดงเป็น chat bubble คู่ตาราง/กราฟ
   steps_used: number;                 // จำนวน step ที่ agent ใช้ใน Turn นี้ (1 ในโหมด one-shot)
   sql: string | null;
   columns: {

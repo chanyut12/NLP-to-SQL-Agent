@@ -43,7 +43,13 @@ and references such as "โรงเรียนเดียวกัน" — an
 ### Answer
 What the service returns for one Question: either a **Result** (SQL with its result rows,
 column metadata, summary and visualization config — see Export), a **Clarification**, or
-a **Refusal**.
+a **Refusal**. Every kind of Answer carries a readable Thai **message**: the
+Result's message is a short paragraph that answers the Question in words —
+including any "why" part the rows support — and points out one salient fact,
+so the conversation reads like a chat, not a bare table. Every kind of Answer carries a readable Thai **message**: the
+Result's message is a short paragraph that answers the Question in words —
+including any "why" part the rows support — and points out one salient fact,
+so the conversation reads like a chat, not a bare table.
 
 ### Entity label
 The human-readable name of a non-person entity the result is grouped by (a school, a
