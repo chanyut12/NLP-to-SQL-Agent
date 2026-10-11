@@ -1,0 +1,128 @@
+"""Axis-selection policy tests (ADR 0008) at the single production seam.
+
+Every test drives VizService.recommend — the same entry point the engine uses —
+with a plain DataFrame in and a viz config out. No LLM, no DB. Prior art:
+tests/unit/test_column_meta.py (DataFrame in, dict out, no I/O).
+"""
+import pandas as pd
+import pytest
+
+from core.viz.viz_recommender import VizService
+
+
+def svc() -> VizService:
+    # Production rule-based configuration: no LLM, intelligent off.
+    return VizService()
+
+
+def df_id_name_metric() -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "student_id": [101, 102, 103],
+            "student_name": ["แดง", "มะลิ", "ปอนด์"],
+            "attendance_count": [12, 8, 15],
+        }
+    )
+
+
+class TestIdNeverLabelsAnAxis:
+    @pytest.mark.parametrize("preferred", [None, "bar", "pie", "line", "scatter"])
+    def test_id_name_metric_uses_name_as_axis(self, preferred):
+        cfg = svc().recommend(
+            df_id_name_metric(), "จำนวนการขาดเรียนแยกตามนักเรียน", preferred
+        )
+        assert cfg["x_col"] == "student_name"
+        assert cfg["x_col"] != "student_id"
+
+    def test_name_preferred_over_category(self):
+        df = pd.DataFrame(
+            {
+                "room_id": [1, 2],
+                "room_name": ["ห้อง A", "ห้อง B"],
+                "room_type": ["ทั่วไป", "พิเศษ"],
+                "count": [5, 7],
+            }
+        )
+        cfg = svc().recommend(df, "จำนวนแยกตามห้อง")
+        assert cfg["x_col"] == "room_name"
+
+    def test_category_falls_back_when_no_name(self):
+        df = pd.DataFrame(
+            {
+                "room_id": [1, 2, 3],
+                "room_type": ["ทั่วไป", "พิเศษ", "ทั่วไป"],
+                "count": [5, 7, 2],
+            }
+        )
+        cfg = svc().recommend(df, "จำนวนแยกตามประเภทห้อง")
+        assert cfg["x_col"] == "room_type"
+
+    def test_time_axis_still_wins_for_line(self):
+        df = pd.DataFrame({"month": [1, 2, 3], "count": [5, 7, 2]})
+        cfg = svc().recommend(df, "จำนวนรายเดือน")
+        assert cfg["chart_type"] == "line"
+        assert cfg["x_col"] == "month"
+
+
+class TestNotChartable:
+    def test_id_only_plus_metric_becomes_table(self):
+        df = pd.DataFrame({"student_id": [101, 102], "attendance_count": [12, 8]})
+        cfg = svc().recommend(df, "จำนวนการขาดเรียนต่อนักเรียน")
+        assert cfg["chart_type"] == "table"
+        assert "ชื่อ" in (cfg.get("reason") or "")
+
+    def test_id_only_axis_label_cleared(self):
+        df = pd.DataFrame({"student_id": [101, 102], "attendance_count": [12, 8]})
+        cfg = svc().recommend(df, "จำนวนการขาดเรียนต่อนักเรียน")
+        assert cfg["x_col"] is None
+        assert cfg["x_label"] is None
+
+
+class TestRegression:
+    def test_plain_category_metric_bar_unchanged(self):
+        df = pd.DataFrame({"class_name": ["ม.1", "ม.2"], "count": [30, 25]})
+        cfg = svc().recommend(df, "จำนวนนักเรียนแยกตามห้อง")
+        assert cfg["chart_type"] == "bar"
+        assert cfg["x_col"] == "class_name"
+
+    def test_top_n_computed_on_new_axis(self):
+        n = 20
+        df = pd.DataFrame(
+            {
+                "student_id": range(100, 100 + n),
+                "student_name": [f"นักเรียน{i:02d}" for i in range(n)],
+                "count": list(range(n)),
+            }
+        )
+        cfg = svc().recommend(df, "จำนวนแยกตามนักเรียน", "bar")
+        assert cfg["x_col"] == "student_name"
+        assert cfg["top_n"] == 12
+
+
+class TestExitGuard:
+    """The policy is a guard, not a suggestion path (ADR 0008 decision 4):
+    even a config produced by the (currently disabled) AI recommender must
+    come out compliant."""
+
+    @staticmethod
+    def fake_llm_returning(x_col: str):
+        class FakeLLM:
+            def invoke(self, *_args, **_kwargs):
+                return (
+                    '{"chart_type": "bar", "title": "t", "x_col": "%s", '
+                    '"y_col": "attendance_count", "reason": "r"}' % x_col
+                )
+
+        return FakeLLM()
+
+    def test_guard_fixes_id_axis_from_ai_path(self):
+        s = VizService(llm=self.fake_llm_returning("student_id"), enable_intelligent=True)
+        cfg = s.recommend(df_id_name_metric(), "จำนวนการขาดเรียนแยกตามนักเรียน")
+        assert cfg["x_col"] == "student_name"
+        assert cfg["x_label"] == "student name"
+
+    def test_guard_falls_back_to_table_when_no_name(self):
+        s = VizService(llm=self.fake_llm_returning("student_id"), enable_intelligent=True)
+        df = pd.DataFrame({"student_id": [101, 102], "attendance_count": [12, 8]})
+        cfg = s.recommend(df, "จำนวนการขาดเรียนต่อนักเรียน")
+        assert cfg["chart_type"] == "table"

@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, Body
+from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi.responses import StreamingResponse
 from api.schemas import (
-    ConnectRequest, ConnectResponse, QueryRequest, QueryResponse,
+    QueryRequest, QueryResponse, QueryError, ResultSummary,
     SchemaResponse, TableInfo, ColumnInfo,
     HistoryResponse, HistoryItem,
     FavoritesResponse, FavoriteItem, CreateFavoriteRequest,
@@ -8,10 +9,13 @@ from api.schemas import (
 )
 from api.dependencies import get_state_manager, get_nlp_engine, GlobalStateManager
 from core.services.engine import NLPEngine
+from core.services.agent import AgentTurnResult
 from core.domain.schema_utils import get_database_schema
+from core.viz.column_meta import describe_result
+from core.profiles import load_table_notes
+from core.services.turn_digest import build_turn_digest
 from core.utils.sql_metrics import parse_sql_metrics
 from core.config import settings
-from sqlalchemy import inspect
 import uuid
 import json
 import csv
@@ -103,20 +107,6 @@ def log_query_to_file(
 
     return log_id
 
-@router.post("/connect", response_model=ConnectResponse)
-async def connect_database(
-    request: ConnectRequest,
-    state: GlobalStateManager = Depends(get_state_manager)
-):
-    try:
-        config_dict = request.config.dict()
-        state.connect_db(request.config.db_type, config_dict)
-        # Preload NLP engine at connect time so first query is not delayed by lazy init.
-        await asyncio.to_thread(state.get_nlp_engine)
-        return ConnectResponse(status="success", message=f"Connected to {request.config.database}")
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
 @router.post("/query", response_model=QueryResponse)
 async def query_data(
     request: QueryRequest,
@@ -124,93 +114,265 @@ async def query_data(
     engine: NLPEngine = Depends(get_nlp_engine)
 ):
     if not state.db_engine:
-        raise HTTPException(status_code=400, detail="Database not connected. Please call /connect first.")
-    
+        raise HTTPException(status_code=503, detail="Datasource unavailable")
+
+    request_id = str(uuid.uuid4())
+    # The datasource is fixed at deploy time; its own dialect is authoritative,
+    # not whatever the client sent.
+    dialect = {"postgresql": "postgres"}.get(
+        state.db_engine.dialect.name, state.db_engine.dialect.name
+    )
     start_time = time.time()
+
+    # ADR 0006 (dispatch refined in #21): the PRESENCE of the history field —
+    # even an empty list, which is how a session's first Turn arrives — selects
+    # the function-calling agent loop. Omitting the field (or null) keeps the
+    # legacy one-shot behaviour, so existing Consumers don't break.
+    if request.history is not None:
+        return await _agent_query(
+            request, state, engine, dialect, request_id, start_time)
+
     try:
         sql, data, error, retry_count, viz_config, rag_examples_count = await engine.query_database(
             question=request.question,
             engine=state.db_engine,
-            dialect=request.dialect if request.dialect else "sqlite",
+            dialect=dialect,
             preferred_chart_type=request.preferred_chart_type
         )
-        duration = time.time() - start_time
-
-        status = "Success" if not error else "Error"
-        if retry_count > 0 and not error:
-            status += f" (Retry {retry_count})"
-
-        # Derive model name from active provider
-        provider = settings.MODEL_PROVIDER
-        if provider == "openai":
-            model_name = settings.OPENAI_MODEL
-        elif provider == "google":
-            model_name = settings.GOOGLE_MODEL
-        else:
-            model_name = settings.OLLAMA_MODEL
-
-        # SQL structural metrics
-        dialect_str = request.dialect or "sqlite"
-        metrics = parse_sql_metrics(sql or "", dialect=dialect_str)
-        result_row_count = len(data) if data is not None else -1
-
-        # Log to file
-        log_id = await asyncio.to_thread(
-            log_query_to_file,
-            question=request.question,
-            sql=sql or "",
-            status=status,
-            error_msg=error or "",
-            duration=duration,
-            dialect=request.dialect,
-            retry_count=retry_count,
-            tables_used=metrics.tables_used,
-            join_count=metrics.join_count,
-            has_aggregation=metrics.has_aggregation,
-            has_subquery=metrics.has_subquery,
-            has_group_by=metrics.has_group_by,
-            result_row_count=result_row_count,
-            rag_examples_count=rag_examples_count,
-            model_name=model_name,
-        )
-        
-        if error:
-            return QueryResponse(sql=sql or "", error=error, retry_count=retry_count, log_id=log_id)
-            
-        return QueryResponse(
-            sql=sql, 
-            data=data, 
-            retry_count=retry_count, 
-            log_id=log_id,
-            visualization=viz_config
-        )
-        
     except Exception as e:
         duration = time.time() - start_time
         await asyncio.to_thread(
-            log_query_to_file,
-            request.question,
-            "",
-            "Error",
-            str(e),
-            duration,
-            request.dialect
+            log_query_to_file, request.question, "", "Error", str(e), duration, dialect
         )
-        raise HTTPException(status_code=500, detail=str(e))
+        return QueryResponse(
+            status="error", request_id=request_id, question=request.question,
+            elapsed_ms=int(duration * 1000),
+            error=QueryError(code="EXEC_FAILED", message=str(e)),
+        )
+
+    duration = time.time() - start_time
+    elapsed_ms = int(duration * 1000)
+
+    # --- File logging (demo UI history; NestJS keeps its own record) ---
+    status_str = "Success" if not error else "Error"
+    if retry_count > 0 and not error:
+        status_str += f" (Retry {retry_count})"
+    provider = settings.MODEL_PROVIDER
+    model_name = {
+        "openai": settings.OPENAI_MODEL, "google": settings.GOOGLE_MODEL,
+        "openrouter": settings.OPENROUTER_MODEL, "zhipu": settings.ZHIPU_MODEL,
+    }.get(provider, settings.OLLAMA_MODEL)
+    metrics = parse_sql_metrics(sql or "", dialect=dialect)
+    await asyncio.to_thread(
+        log_query_to_file,
+        question=request.question, sql=sql or "", status=status_str,
+        error_msg=error or "", duration=duration, dialect=dialect,
+        retry_count=retry_count, tables_used=metrics.tables_used,
+        join_count=metrics.join_count, has_aggregation=metrics.has_aggregation,
+        has_subquery=metrics.has_subquery, has_group_by=metrics.has_group_by,
+        result_row_count=len(data) if data is not None else -1,
+        rag_examples_count=rag_examples_count, model_name=model_name,
+    )
+
+    # --- Envelope ---
+    if error:
+        code = "EXEC_FAILED" if sql else "LLM_FAILED"
+        return QueryResponse(
+            status="error", request_id=request_id, question=request.question,
+            sql=sql or None, retry_count=retry_count, elapsed_ms=elapsed_ms,
+            error=QueryError(code=code, message=error),
+        )
+
+    rows = data or []
+    truncated = len(rows) >= settings.MAX_SQL_LIMIT
+    col_dicts, summary_dict = await asyncio.to_thread(describe_result, rows, truncated)
+    return QueryResponse(
+        status="ok", request_id=request_id, question=request.question,
+        sql=sql,
+        columns=[ColumnInfo(**c) for c in col_dicts],
+        rows=rows, row_count=len(rows), truncated=truncated,
+        summary=ResultSummary(**summary_dict),
+        visualization=viz_config, retry_count=retry_count, elapsed_ms=elapsed_ms,
+    )
+
+
+async def _agent_query(
+    request: QueryRequest,
+    state: GlobalStateManager,
+    engine: NLPEngine,
+    dialect: str,
+    request_id: str,
+    start_time: float,
+) -> QueryResponse:
+    """One conversational Turn (ADR 0006): the LLM-driven agent loop with
+    history supplied by the Consumer. Builds the extended envelope."""
+    result: AgentTurnResult = await engine.agent_query_database(
+        question=request.question,
+        engine=state.db_engine,
+        dialect=dialect,
+        history=[t.model_dump() for t in request.history],
+        preferred_chart_type=request.preferred_chart_type,
+    )
+    return await _agent_envelope(request, request_id, start_time, result, dialect)
+
+
+async def _agent_envelope(
+    request: QueryRequest,
+    request_id: str,
+    start_time: float,
+    result: AgentTurnResult,
+    dialect: str,
+) -> QueryResponse:
+    """Shared envelope builder for /query and /query/stream: elapsed timing,
+    the same file-logging trail, and the answer-type dispatch. The stream's
+    final SSE event is exactly this envelope."""
+    duration = time.time() - start_time
+    elapsed_ms = int(duration * 1000)
+
+    # --- File logging (same trail as the one-shot path) ---
+    provider = settings.MODEL_PROVIDER
+    model_name = {
+        "openai": settings.OPENAI_MODEL, "google": settings.GOOGLE_MODEL,
+        "openrouter": settings.OPENROUTER_MODEL, "zhipu": settings.ZHIPU_MODEL,
+    }.get(provider, settings.OLLAMA_MODEL)
+    if result.error:
+        status_str = "Error"
+    elif result.answer_type == "result":
+        status_str = "Success"
+    else:
+        status_str = f"Success ({result.answer_type.title()})"
+    await asyncio.to_thread(
+        log_query_to_file,
+        question=request.question, sql=result.sql or "", status=status_str,
+        error_msg=result.error_message or result.error or "",
+        duration=duration, dialect=dialect,
+        # steps beyond the first are the loop's self-corrections
+        retry_count=max(0, result.steps_used - 1),
+        tables_used=[], join_count=0, has_aggregation=False,
+        has_subquery=False, has_group_by=False,
+        result_row_count=(result.row_count if result.answer_type == "result" else -1),
+        rag_examples_count=result.rag_examples_count, model_name=model_name,
+    )
+
+    if result.error:
+        code = result.error if result.error in (
+            "STEP_BUDGET_EXCEEDED", "LLM_FAILED") else "LLM_FAILED"
+        return QueryResponse(
+            status="error", request_id=request_id, question=request.question,
+            answer_type="result", steps_used=result.steps_used,
+            prep_ms=result.prep_ms, elapsed_ms=elapsed_ms,
+            error=QueryError(code=code, message=result.error_message or code),
+        )
+
+    if result.answer_type == "result":
+        rows = result.rows or []
+        # Grilled decision (Oct 2026): every Answer carries a readable Thai
+        # message — the agent's final_answer already produces it for "result"
+        # (the prompt requires it), so stop dropping it at the envelope.
+        return QueryResponse(
+            status="ok", request_id=request_id, question=request.question,
+            answer_type="result", message=result.message, steps_used=result.steps_used,
+            prep_ms=result.prep_ms, sql=result.sql,
+            turn_digest=build_turn_digest(
+                result.sql, rows, result.columns, result.row_count,
+                load_table_notes(settings.DOMAIN_PROFILE)),
+            columns=[ColumnInfo(**c) for c in (result.columns or [])],
+            rows=rows, row_count=result.row_count, truncated=result.truncated,
+            summary=ResultSummary(**(result.summary or {"row_count": result.row_count})),
+            visualization=result.viz_config, elapsed_ms=elapsed_ms,
+        )
+
+    # Clarification / Refusal: an Answer without a query behind it.
+    return QueryResponse(
+        status="ok", request_id=request_id, question=request.question,
+        answer_type=result.answer_type, message=result.message,
+        steps_used=result.steps_used, prep_ms=result.prep_ms,
+        sql=None, rows=[], row_count=0,
+        elapsed_ms=elapsed_ms,
+    )
+
+@router.post("/query/stream")
+async def query_data_stream(
+    request: QueryRequest,
+    state: GlobalStateManager = Depends(get_state_manager),
+    engine: NLPEngine = Depends(get_nlp_engine),
+):
+    """SSE variant of /query (grilling agreement on perceived latency): same
+    request contract, same auth, but Progress events stream to the Consumer
+    while the agent works, and the final SSE event is the standard envelope —
+    the same object the legacy endpoint returns. Opt-in; /api/query untouched.
+    The stream always runs the agent loop; omitting ``history`` means a first
+    Turn (empty history), not legacy one-shot mode."""
+    if not state.db_engine:
+        raise HTTPException(status_code=503, detail="Datasource unavailable")
+
+    request_id = str(uuid.uuid4())
+    dialect = {"postgresql": "postgres"}.get(
+        state.db_engine.dialect.name, state.db_engine.dialect.name
+    )
+    start_time = time.time()
+    loop = asyncio.get_running_loop()
+    queue: asyncio.Queue = asyncio.Queue()
+
+    def on_event(payload: dict) -> None:
+        # The turn and this queue share one event loop; put_nowait is the
+        # ordering-correct hand-off (a loop.call_soon_threadsafe schedule would
+        # race the turn_done sentinel and drop trailing events).
+        queue.put_nowait(payload)
+
+    history = [t.model_dump() for t in (request.history or [])]
+
+    async def _run_turn():
+        try:
+            return await engine.agent_query_database(
+                question=request.question,
+                engine=state.db_engine,
+                dialect=dialect,
+                history=history,
+                preferred_chart_type=request.preferred_chart_type,
+                on_event=on_event,
+            )
+        finally:
+            await queue.put(None)  # sentinel: no more progress events
+
+    async def _generate():
+        task = asyncio.create_task(_run_turn())
+        try:
+            while True:
+                payload = await queue.get()
+                if payload is None:
+                    break
+                yield (f"event: progress\n"
+                       f"data: {json.dumps(payload, ensure_ascii=False)}\n\n")
+            try:
+                result = await task
+            except Exception as e:
+                yield (f"event: error\n"
+                       f"data: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n")
+                return
+            envelope = await _agent_envelope(request, request_id, start_time, result, dialect)
+            yield f"event: envelope\ndata: {envelope.model_dump_json()}\n\n"
+        finally:
+            if not task.done():
+                task.cancel()
+
+    return StreamingResponse(
+        _generate(), media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 @router.get("/schema", response_model=SchemaResponse)
 async def get_schema(state: GlobalStateManager = Depends(get_state_manager)):
     if not state.db_engine:
-        raise HTTPException(status_code=400, detail="Database not connected")
-    
+        raise HTTPException(status_code=503, detail="Datasource unavailable")
     try:
-        inspector = inspect(state.db_engine)
-        tables = []
-        for table_name in inspector.get_table_names():
-            columns = []
-            for col in inspector.get_columns(table_name):
-                columns.append(ColumnInfo(name=col['name'], type=str(col['type'])))
-            tables.append(TableInfo(name=table_name, columns=columns))
+        # Same view: denylisted junk/PII objects hidden, views included.
+        raw = await asyncio.to_thread(get_database_schema, state.db_engine)
+        tables = [
+            TableInfo(name=name, columns=[
+                ColumnInfo(name=c["name"], type=str(c["type"])) for c in cols
+            ])
+            for name, cols in raw["tables"].items()
+        ]
         return SchemaResponse(tables=tables)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -222,7 +384,9 @@ async def get_history(
     status: str = None,
     state: GlobalStateManager = Depends(get_state_manager)
 ):
-    entries = state.history_manager.load_history(limit=limit, status_filter=status, dialect_filter=dialect)
+    entries = await asyncio.to_thread(
+        state.history_manager.load_history,
+        limit=limit, status_filter=status, dialect_filter=dialect)
     # Convert dataclass to Pydantic model
     history_items = [
         HistoryItem(
@@ -244,7 +408,8 @@ async def update_feedback(
     req: FeedbackRequest,
     state: GlobalStateManager = Depends(get_state_manager)
 ):
-    success = state.history_manager.update_feedback(
+    success = await asyncio.to_thread(
+        state.history_manager.update_feedback,
         log_id, 
         req.feedback, 
         feedback_text=req.feedback_text
@@ -255,7 +420,7 @@ async def update_feedback(
 
 @router.get("/favorites", response_model=FavoritesResponse)
 async def get_favorites(state: GlobalStateManager = Depends(get_state_manager)):
-    favs = state.history_manager.load_favorites()
+    favs = await asyncio.to_thread(state.history_manager.load_favorites)
     items = [
         FavoriteItem(
             favorite_id=f.favorite_id,
@@ -273,7 +438,8 @@ async def create_favorite(
     req: CreateFavoriteRequest,
     state: GlobalStateManager = Depends(get_state_manager)
 ):
-    fav = state.history_manager.save_favorite(
+    fav = await asyncio.to_thread(
+        state.history_manager.save_favorite,
         question=req.question,
         sql=req.sql,
         dialect=req.dialect,
@@ -294,11 +460,15 @@ async def delete_favorite(
     favorite_id: str,
     state: GlobalStateManager = Depends(get_state_manager)
 ):
-    success = state.history_manager.delete_favorite(favorite_id)
+    success = await asyncio.to_thread(
+        state.history_manager.delete_favorite, favorite_id)
     if not success:
         raise HTTPException(status_code=404, detail="Favorite not found")
     return {"status": "success"}
 
-@router.get("/health")
-async def health_check():
+
+@router.post("/admin/refresh-schema")
+async def refresh_schema(engine: NLPEngine = Depends(get_nlp_engine)):
+    """Drop the cached datasource schema. Call after a migration on the datasource."""
+    engine.refresh_schema()
     return {"status": "ok"}

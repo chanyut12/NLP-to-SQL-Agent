@@ -149,7 +149,7 @@ uvicorn api.main:app --reload --reload-dir api --reload-dir core --host 0.0.0.0 
 | `start_server.sh` | Script สำหรับ Mac/Linux พร้อม reload-dir ที่ถูกต้อง |
 | `start_server.bat` | Script สำหรับ Windows |
 | `.env.example` | Template สำหรับ environment variables |
-| `QUICK_START.md` | คู่มือการใช้งานฉบับย่อ |
+| `docs/guides/QUICK_START.md` | คู่มือการใช้งานฉบับย่อ |
 | `docs/TROUBLESHOOTING_RELOAD_LOOP.md` | เอกสารนี้ |
 
 ---

@@ -1,0 +1,28 @@
+{
+  "reason": "ADR 0007 golden quota: count-shape surplus (ticket #16)",
+  "retired": [
+    {
+      "id": "paraphrase_01",
+      "source_tag": "paraphrase",
+      "category": "count_groupby",
+      "question": "แต่ละโรงเรียนตอนนี้มีนักเรียนอยู่กี่คน",
+      "gold_sql": "SELECT school.id AS school_id, school.name AS school_name, COUNT(DISTINCT enrollment.person_uuid)::int AS student_count FROM student_term enrollment JOIN student_current_enrollment_resolution current_enrollment ON current_enrollment.person_uuid = enrollment.person_uuid AND current_enrollment.selected_student_uuid = enrollment.student_uuid AND current_enrollment.resolution_state = 'ACTIVE' JOIN schools school ON school.id = enrollment.\"SchoolID_Onec\" WHERE enrollment.deleted_at IS NULL AND school.school_status = 'ACTIVE' GROUP BY school.id, school.name ORDER BY student_count DESC, school.id ASC",
+      "gold_from": "student_current_count_by_school"
+    },
+    {
+      "id": "paraphrase_07",
+      "source_tag": "paraphrase",
+      "category": "count_filter_groupby",
+      "question": "รวมวันที่เด็กมาสายของแต่ละ ร.ร. ตั้งแต่ 1 มิถุนายน ถึง 31 สิงหาคม 2026",
+      "gold_sql": "SELECT school.id AS school_id, school.name AS school_name, COUNT(*)::int AS late_student_day_count FROM attendance_day day JOIN student_term enrollment ON enrollment.student_uuid = day.student_uuid JOIN schools school ON school.id = enrollment.\"SchoolID_Onec\" WHERE day.\"AttendanceStatus\" = 3 AND day.\"AttendanceDate\" >= '2026-06-01'::date AND day.\"AttendanceDate\" < '2026-09-01'::date AND enrollment.deleted_at IS NULL GROUP BY school.id, school.name ORDER BY late_student_day_count DESC, school.id ASC",
+      "gold_from": "attendance_late_days_by_school_in_date_range"
+    },
+    {
+      "id": "novel_01",
+      "source_tag": "novel",
+      "category": "count_filter_groupby",
+      "question": "จำนวนนักเรียนปัจจุบันที่ขาดเรียนติดต่อกันเกิน 3 วัน แยกตามโรงเรียน",
+      "gold_sql": "SELECT school.id AS school_id, school.name AS school_name, COUNT(DISTINCT enrollment.person_uuid)::int AS student_count FROM student_risk_profiles risk JOIN student_term enrollment ON enrollment.student_uuid = risk.student_uuid JOIN student_current_enrollment_resolution ce ON ce.person_uuid = enrollment.person_uuid AND ce.selected_student_uuid = enrollment.student_uuid AND ce.resolution_state = 'ACTIVE' JOIN schools school ON school.id = risk.school_id WHERE enrollment.deleted_at IS NULL AND risk.consecutive_absent_days > 3 GROUP BY school.id, school.name ORDER BY student_count DESC, school.id ASC"
+    }
+  ]
+}

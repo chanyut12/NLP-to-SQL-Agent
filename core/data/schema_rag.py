@@ -6,6 +6,7 @@ with Thai-English mapping support for improved Local LLM accuracy.
 """
 
 import asyncio
+import threading
 from typing import List, Dict, Optional, Any, Set
 import logging
 from sentence_transformers import SentenceTransformer
@@ -14,69 +15,11 @@ from sqlalchemy import Engine, inspect
 
 from core.utils.common import generate_stable_id
 from core.utils.embedding import load_sentence_transformer
+from core.profiles import load_schema_mappings
 
 
 logger = logging.getLogger(__name__)
 
-
-# =============================================================================
-# Thai-English Mapping Dictionary
-# =============================================================================
-
-THAI_SCHEMA_MAPPINGS: Dict[str, List[str]] = {
-    # Sales & Revenue
-    "ยอดขาย": ["total_price", "priceEach", "quantityOrdered", "sales", "amount", "price"],
-    "ยอด": ["total", "sum", "amount", "price"],
-    "ราคา": ["price", "priceEach", "buyPrice", "MSRP", "amount"],
-    "รายได้": ["revenue", "sales", "income", "total"],
-    
-    # Customers
-    "ลูกค้า": ["customers", "customerName", "customerNumber", "customer"],
-    "คนซื้อ": ["customers", "customerName", "buyer"],
-    "ผู้ซื้อ": ["customers", "customerName", "buyer"],
-    
-    # Products
-    "สินค้า": ["products", "productName", "productCode", "productLine", "product"],
-    "ผลิตภัณฑ์": ["products", "productName", "productLine"],
-    "หมวดหมู่": ["productLine", "category", "productlines"],
-    "ประเภท": ["productLine", "category", "type", "productlines"],
-    
-    # Orders
-    "ออเดอร์": ["orders", "orderNumber", "orderDate", "order"],
-    "คำสั่งซื้อ": ["orders", "orderNumber", "order"],
-    "สั่งซื้อ": ["orders", "orderNumber", "orderDate"],
-    "ใบสั่งซื้อ": ["orders", "orderNumber"],
-    "รายละเอียดออเดอร์": ["orderdetails", "orderNumber", "quantityOrdered"],
-    
-    # Employees
-    "พนักงาน": ["employees", "employeeNumber", "firstName", "lastName", "employee"],
-    "เซลส์": ["employees", "salesRepEmployeeNumber", "sales"],
-    "พนักงานขาย": ["employees", "salesRepEmployeeNumber"],
-    
-    # Payments
-    "ชำระเงิน": ["payments", "paymentDate", "amount", "payment"],
-    "จ่ายเงิน": ["payments", "amount", "payment"],
-    "การชำระ": ["payments", "paymentDate"],
-    
-    # Office
-    "สาขา": ["offices", "officeCode", "city", "country"],
-    "สำนักงาน": ["offices", "officeCode"],
-    
-    # Time
-    "ปี": ["year", "orderDate", "paymentDate"],
-    "เดือน": ["month", "orderDate", "paymentDate"],
-    "วันที่": ["date", "orderDate", "paymentDate", "requiredDate", "shippedDate"],
-    
-    # Aggregation keywords
-    "รวม": ["SUM", "total", "amount"],
-    "เฉลี่ย": ["AVG", "average"],
-    "นับ": ["COUNT", "total"],
-    "จำนวน": ["COUNT", "quantity", "quantityOrdered", "quantityInStock"],
-    "มากที่สุด": ["MAX", "DESC", "top"],
-    "สูงสุด": ["MAX", "DESC", "top"],
-    "น้อยที่สุด": ["MIN", "ASC", "bottom"],
-    "ต่ำสุด": ["MIN", "ASC", "bottom"],
-}
 
 
 class SchemaRAG:
@@ -85,13 +28,14 @@ class SchemaRAG:
     Uses ChromaDB for semantic search of relevant tables/columns.
     """
     
-    COLLECTION_NAME = "schema_metadata_v1"
-    
     def __init__(
         self,
         model_name: str = None,
         persist_directory: Optional[str] = "schema_rag_db",
-        embedder: Optional[SentenceTransformer] = None
+        embedder: Optional[SentenceTransformer] = None,
+        embedding_cache: Optional[Dict[str, list]] = None,
+        embedding_lock: Optional[threading.Lock] = None,
+        profile: str = "default",
     ):
         """
         Initialize the Schema RAG store.
@@ -100,11 +44,17 @@ class SchemaRAG:
             model_name: Sentence transformer model for embeddings
             persist_directory: Directory to persist ChromaDB
             embedder: Optional shared SentenceTransformer instance
+            embedding_cache: Optional shared embedding cache dict
         """
         from core.config import settings
         self.model_name = model_name or settings.EMBEDDING_MODEL
         self.persist_directory = persist_directory
+        self.collection_name = f"schema_metadata_{profile}"
+        # Thai-term -> table/column name fragments, per domain profile.
+        self.thai_mappings = load_schema_mappings(profile)
         self._embedder = embedder
+        self._embedding_cache = embedding_cache if embedding_cache is not None else {}
+        self._embedding_cache_lock = embedding_lock or threading.Lock()
         self._client = None
         self._collection = None
         self._indexed_tables: Set[str] = set()
@@ -115,6 +65,19 @@ class SchemaRAG:
             logger.info("Loading schema embedding model: %s", self.model_name)
             self._embedder = load_sentence_transformer(self.model_name)
         return self._embedder
+
+    def _cached_encode(self, text: str) -> list:
+        with self._embedding_cache_lock:
+            hit = self._embedding_cache.get(text)
+        if hit is not None:
+            return hit
+        emb = self._get_embedder().encode(text).tolist()
+        with self._embedding_cache_lock:
+            self._embedding_cache[text] = emb
+            if len(self._embedding_cache) > 500:
+                for k in list(self._embedding_cache.keys())[:200]:
+                    self._embedding_cache.pop(k, None)
+        return emb
     
     def _get_collection(self):
         """Get or create the ChromaDB collection."""
@@ -127,7 +90,7 @@ class SchemaRAG:
                 self._client = chromadb.Client()
             
             self._collection = self._client.get_or_create_collection(
-                name=self.COLLECTION_NAME,
+                name=self.collection_name,
                 metadata={"description": "Database schema for semantic retrieval"}
             )
         return self._collection
@@ -143,7 +106,7 @@ class SchemaRAG:
         table_lower = table_name.lower()
         cols_lower = [c.lower() for c in columns]
         
-        for thai_word, english_terms in THAI_SCHEMA_MAPPINGS.items():
+        for thai_word, english_terms in self.thai_mappings.items():
             for eng_term in english_terms:
                 eng_lower = eng_term.lower()
                 # Check if mapping matches table name
@@ -168,9 +131,15 @@ class SchemaRAG:
             engine: SQLAlchemy engine
             force_reindex: If True, re-index even if already indexed
         """
+        from core.domain.schema_utils import is_denylisted
+
         inspector = inspect(engine)
-        table_names = inspector.get_table_names()
-        
+        table_names = [t for t in inspector.get_table_names() if not is_denylisted(t)]
+        try:
+            table_names += [v for v in inspector.get_view_names() if not is_denylisted(v)]
+        except Exception:
+            pass
+
         # Check if already indexed
         collection = self._get_collection()
         if not force_reindex and collection.count() > 0:
@@ -258,10 +227,8 @@ class SchemaRAG:
             logger.warning("Schema not indexed. Returning all tables.")
             return list(self._indexed_tables)
         
-        embedder = self._get_embedder()
-        # E5 models require 'query: ' prefix for search queries
         text_to_embed = f"query: {question}"
-        query_embedding = embedder.encode(text_to_embed).tolist()
+        query_embedding = self._cached_encode(text_to_embed)
         
         results = collection.query(
             query_embeddings=[query_embedding],
@@ -304,7 +271,7 @@ class SchemaRAG:
         mapped_tables: Set[str] = set()
         question_lower = question.lower()
         
-        for thai_word, english_terms in THAI_SCHEMA_MAPPINGS.items():
+        for thai_word, english_terms in self.thai_mappings.items():
             if thai_word in question:
                 for term in english_terms:
                     term_lower = term.lower()
@@ -369,10 +336,19 @@ class SchemaRAG:
 
 def create_schema_rag(
     persist_directory: Optional[str] = "schema_rag_db",
-    embedder: Optional[SentenceTransformer] = None
+    embedder: Optional[SentenceTransformer] = None,
+    embedding_cache: Optional[Dict[str, list]] = None,
+    embedding_lock: Optional[threading.Lock] = None,
+    profile: str = "default",
 ) -> SchemaRAG:
     """Create and return a SchemaRAG instance."""
-    return SchemaRAG(persist_directory=persist_directory, embedder=embedder)
+    return SchemaRAG(
+        persist_directory=persist_directory,
+        embedder=embedder,
+        embedding_cache=embedding_cache,
+        embedding_lock=embedding_lock,
+        profile=profile,
+    )
 
 
 # =============================================================================
@@ -411,10 +387,9 @@ def expand_tables_with_relationships(
 # =============================================================================
 
 if __name__ == "__main__":
-    # Test Thai mapping
-    rag = create_schema_rag()
-    
-    # Test without DB
-    print("Thai Mapping Test:")
-    for thai_word in ["ลูกค้า", "ยอดขาย", "สินค้า", "ออเดอร์"]:
-        print(f"  {thai_word} → {THAI_SCHEMA_MAPPINGS.get(thai_word, [])}")
+    # Test Thai mapping for a given profile
+    import sys
+    rag = create_schema_rag(profile=sys.argv[1] if len(sys.argv) > 1 else "sts")
+    print(f"Thai mappings ({len(rag.thai_mappings)}):")
+    for thai_word, terms in list(rag.thai_mappings.items())[:8]:
+        print(f"  {thai_word} → {terms}")

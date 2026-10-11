@@ -1,0 +1,191 @@
+"""Deterministic column typing and result summary for the query envelope.
+
+No LLM involvement — see docs/adr/0004-deterministic-column-metadata.md. Everything
+here is derived from the result's pandas dtypes and its column names, so it is cheap
+and reproducible.
+
+`describe_result(rows, truncated)` is the single entry point used by the API layer.
+"""
+
+from __future__ import annotations
+
+import math
+import re
+from typing import Any
+
+import pandas as pd
+
+# Column-name fragments, checked in priority order. Matched case-insensitively
+# against the lowercased column name.
+_DATE_RE = re.compile(r"(date|datetime|timestamp|_at$|_on$|วันที่)", re.I)
+_ID_RE = re.compile(r"(^id$|_id$|^uuid$|_uuid$|รหัส)", re.I)
+# Entity-label pairing (ADR 0009, extending ADR 0008's identifier-name rule):
+# a name-like column pairs with an id column when the id name minus its id
+# suffix appears as a prefix of the name column name (school_id -> school_name).
+_ID_SUFFIX_RE = re.compile(r"(?i)_?id$|_?uuid$|รหัส")
+_PERCENT_RE = re.compile(r"(rate|pct|percent|อัตรา|ร้อยละ|เปอร์เซ)", re.I)
+_GPA_RE = re.compile(r"(gpax?|grade_point|เกรดเฉลี่ย)", re.I)
+_COUNT_RE = re.compile(r"(count|_cnt$|^cnt|num_|_num$|total|จำนวน|ยอด|amount)", re.I)
+_NAME_RE = re.compile(r"(^name$|_name$|fullname|full_name|title|ชื่อ)", re.I)
+
+# semantic_type vocabulary (closed set, see ADR 0004):
+#   count | number | percent | gpa | date | id | category | name | text
+_CATEGORY_MAX_DISTINCT = 40
+
+
+def _semantic_type(name: str, series: pd.Series) -> str:
+    n = str(name).strip().lower()
+    is_numeric = pd.api.types.is_numeric_dtype(series)
+    is_datetime = pd.api.types.is_datetime64_any_dtype(series)
+
+    if is_datetime or _DATE_RE.search(n):
+        return "date"
+    if _ID_RE.search(n):
+        return "id"
+
+    if is_numeric:
+        if _PERCENT_RE.search(n):
+            return "percent"
+        if _GPA_RE.search(n):
+            return "gpa"
+        if _COUNT_RE.search(n):
+            return "count"
+        # Unlabelled numeric: integers read as counts, non-integers as plain numbers.
+        non_null = series.dropna()
+        if not non_null.empty and (non_null % 1 == 0).all():
+            return "count"
+        return "number"
+
+    if _NAME_RE.search(n):
+        return "name"
+    try:
+        distinct = int(series.nunique(dropna=True))
+    except TypeError:
+        return "text"  # unhashable cells (JSONB / array columns)
+    return "category" if distinct <= _CATEGORY_MAX_DISTINCT else "text"
+
+
+def _column_info(name: str, series: pd.Series,
+                 collapsible: bool = False) -> dict[str, Any]:
+    sample = next((v for v in series if v is not None and not _is_nan(v)), None)
+    info = {
+        "name": str(name),
+        "type": type(sample).__name__ if sample is not None else "unknown",
+        "numeric": bool(pd.api.types.is_numeric_dtype(series)),
+        "semantic_type": _semantic_type(name, series),
+    }
+    if collapsible:
+        info["collapsible"] = True
+    return info
+
+
+def _entity_label_pairs(df: pd.DataFrame) -> dict[str, str]:
+    """Map each id column that has a paired label column to that label's name.
+
+    Deterministic (ADR 0004): name fragments and column order only. An id
+    column `school_id` pairs with the first name-typed column whose name starts
+    with the id's stem (`school_name`). Pairing is exclusive — an id pairs with
+    at most one label and a label with at most one id.
+    """
+    typed = {c: _semantic_type(c, df[c]) for c in df.columns}
+    label_cols = [c for c, t in typed.items() if t == "name"]
+    taken: set[str] = set()
+    pairs: dict[str, str] = {}
+    for col, t in typed.items():
+        if t != "id" or col in pairs:
+            continue
+        stem = _ID_SUFFIX_RE.sub("", col).strip("_")
+        if not stem:
+            continue
+        for label in label_cols:
+            if label in taken:
+                continue
+            if label.lower().startswith(stem.lower()):
+                pairs[col] = label
+                taken.add(label)
+                break
+    return pairs
+
+
+def _is_nan(v: Any) -> bool:
+    return isinstance(v, float) and math.isnan(v)
+
+
+def _finite(v: Any) -> float | None:
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if math.isfinite(f) else None
+
+
+def _coerce_numeric_objects(df: pd.DataFrame) -> None:
+    """In place: turn object columns that are entirely numeric into a numeric dtype.
+
+    `pd.read_sql` hands back PostgreSQL NUMERIC/DECIMAL as object-dtype Decimals,
+    which `is_numeric_dtype` would otherwise reject. Date strings stay untouched
+    (they coerce to NaN, so the column isn't fully numeric).
+    """
+    for name in df.columns:
+        if df[name].dtype != object:
+            continue
+        original_non_null = df[name].notna().sum()
+        if original_non_null == 0:
+            continue
+        coerced = pd.to_numeric(df[name], errors="coerce")
+        if coerced.notna().sum() == original_non_null:
+            df[name] = coerced
+
+
+def describe_result(
+    rows: list[dict[str, Any]] | None, truncated: bool
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Return (columns, summary) for a result set.
+
+    columns: one {name, type, numeric, semantic_type} per column, in column order.
+    summary: {row_count, truncated, numeric_aggregates, single_value}.
+             numeric_aggregates maps each non-id numeric column to
+             {sum, min, max, mean}; values that are not finite are dropped.
+             single_value is True when the result is one row and one numeric column.
+    """
+    rows = rows or []
+    df = pd.DataFrame(rows)
+    _coerce_numeric_objects(df)
+
+    if df.empty:
+        return [], {
+            "row_count": len(rows),
+            "truncated": truncated,
+            "numeric_aggregates": {},
+            "single_value": False,
+        }
+
+    # ADR 0009: when a result carries an identifier-name pair, the id column is
+    # bookkeeping the Consumer may collapse — marked in metadata, never dropped.
+    pairs = _entity_label_pairs(df)
+    columns = [_column_info(c, df[c], collapsible=(c in pairs)) for c in df.columns]
+
+    aggregates: dict[str, dict[str, float]] = {}
+    for col in columns:
+        if not col["numeric"] or col["semantic_type"] == "id":
+            continue
+        series = df[col["name"]].dropna()
+        if series.empty:
+            continue
+        stats = {
+            "sum": _finite(series.sum()),
+            "min": _finite(series.min()),
+            "max": _finite(series.max()),
+            "mean": _finite(series.mean()),
+        }
+        aggregates[col["name"]] = {k: v for k, v in stats.items() if v is not None}
+
+    single_value = len(df) == 1 and len(df.columns) == 1 and bool(columns[0]["numeric"])
+
+    summary = {
+        "row_count": len(df),
+        "truncated": truncated,
+        "numeric_aggregates": aggregates,
+        "single_value": single_value,
+    }
+    return columns, summary

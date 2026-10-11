@@ -11,6 +11,35 @@ import re
 if TYPE_CHECKING:
     from core.schema_rag import SchemaRAG
 
+_SIMPLE_IDENT = re.compile(r"^[a-z_][a-z0-9_]*$")
+
+
+def quote_ident(name: str) -> str:
+    """Double-quote an identifier that PostgreSQL would otherwise fold to
+    lower-case (mixed case, e.g. "SchoolID_Onec", "AttendanceStatus")."""
+    return name if _SIMPLE_IDENT.match(name) else f'"{name}"'
+
+# Objects that are never useful for analytical Text-to-SQL: migration/backfill
+# snapshots, reconcile scratch tables, and identity/audit/config stores.
+_DENYLIST_RE = re.compile(
+    r"(backup|backfill|_bak\b|reconcile|remediation|demo_provenance|_seed_|"
+    r"standardization|migration_20\d{2})",
+    re.IGNORECASE,
+)
+_DENYLIST_EXACT = {
+    "araid_identity_records", "araid_profiles", "audit_log", "system_settings",
+    "schema_migrations", "_prisma_migrations",
+    # STS: token/hash-only tables the read-only role cannot SELECT at all
+    # (no analytical value; see docs/DEPLOYMENT.md §1).
+    "task_links", "classroom_attendance_links",
+    "teacher_line_group_invitations", "pii_export_requests",
+}
+
+
+def is_denylisted(name: str) -> bool:
+    return name in _DENYLIST_EXACT or bool(_DENYLIST_RE.search(name))
+
+
 def get_database_schema(engine: Engine) -> Dict[str, Any]:
     """
     Retrieve structured schema from the database INCLUDING foreign key relationships.
@@ -27,19 +56,31 @@ def get_database_schema(engine: Engine) -> Dict[str, Any]:
     tables_schema = {}
     all_foreign_keys = []
 
-    table_names = inspector.get_table_names()
+    # Views matter for STS: student_current_enrollment_resolution, attendance_day,
+    # attendance_effective_records, ... are the sanctioned query surfaces.
+    try:
+        view_names = set(inspector.get_view_names())
+    except Exception:
+        view_names = set()
+    table_names = [
+        t for t in list(inspector.get_table_names()) + sorted(view_names)
+        if not is_denylisted(t)
+    ]
+
+    # Batch reflection: one round trip per metadata kind instead of ~3 per table.
+    # Over a distant connection pooler this is the difference between ~5 s and
+    # minutes for a 100-table schema. Falls back to per-table on any failure.
+    cols_by_name, pk_by_name, fk_by_name = _reflect_all(inspector, table_names)
+
     for table in table_names:
         columns = []
         try:
-            # Get column info
-            cols_info = inspector.get_columns(table)
+            cols_info = cols_by_name.get(table)
+            if not cols_info:
+                continue
 
-            # Get primary keys
-            pk_info = inspector.get_pk_constraint(table)
-            pk_cols = set(pk_info.get("constrained_columns", []))
-
-            # Get foreign keys
-            fk_info = inspector.get_foreign_keys(table)
+            pk_cols = set((pk_by_name.get(table) or {}).get("constrained_columns", []))
+            fk_info = fk_by_name.get(table) or []
             fk_lookup = {}  # {src_col: "referred_table.referred_col"}
             for fk in fk_info:
                 for src_col, ref_col in zip(
@@ -71,7 +112,44 @@ def get_database_schema(engine: Engine) -> Dict[str, Any]:
         "foreign_keys": all_foreign_keys,
     }
 
-def format_schema_for_prompt(schema_data: Dict[str, Any], max_tables: int = 10) -> str:
+
+def _reflect_all(inspector, table_names):
+    """Return ({table: columns}, {table: pk_constraint}, {table: [fk]}).
+
+    Uses SQLAlchemy 2.0 batch reflection (one query per kind); on any failure
+    (old SQLAlchemy, dialect without batch support) falls back to per-table
+    reflection with the same per-table error tolerance as before.
+    """
+    try:
+        from sqlalchemy.engine import ObjectKind
+
+        def _by_name(multi):
+            return {name: value for (_schema, name), value in multi.items()}
+
+        return (
+            _by_name(inspector.get_multi_columns(filter_names=table_names, kind=ObjectKind.ANY)),
+            _by_name(inspector.get_multi_pk_constraint(filter_names=table_names, kind=ObjectKind.ANY)),
+            _by_name(inspector.get_multi_foreign_keys(filter_names=table_names, kind=ObjectKind.ANY)),
+        )
+    except Exception:
+        cols, pks, fks = {}, {}, {}
+        for t in table_names:
+            try:
+                cols[t] = inspector.get_columns(t)
+            except Exception:
+                continue
+            try:
+                pks[t] = inspector.get_pk_constraint(t)
+            except Exception:
+                pass
+            try:
+                fks[t] = inspector.get_foreign_keys(t)
+            except Exception:
+                pass
+        return cols, pks, fks
+
+
+def format_schema_for_prompt(schema_data: Dict[str, Any], max_tables: Optional[int] = None) -> str:
     """
     Format schema into a string compatible with the prompt.
     Supports both new format (with FK info) and legacy format (flat dict).
@@ -93,7 +171,9 @@ def format_schema_for_prompt(schema_data: Dict[str, Any], max_tables: int = 10) 
         fks = []
 
     lines = []
-    table_names = list(tables.keys())[:max_tables]
+    table_names = list(tables.keys())
+    if max_tables is not None:
+        table_names = table_names[:max_tables]
 
     for table in table_names:
         lines.append(f"Table: {table}")
@@ -103,8 +183,9 @@ def format_schema_for_prompt(schema_data: Dict[str, Any], max_tables: int = 10) 
             if col.get("pk"):
                 suffix += " [PK]"
             if col.get("fk"):
-                suffix += f" [FK -> {col['fk']}]"
-            lines.append(f"  - {col['name']} ({col['type']}){suffix}")
+                ref_t, _, ref_c = col["fk"].partition(".")
+                suffix += f" [FK -> {ref_t}.{quote_ident(ref_c)}]" if ref_c else f" [FK -> {col['fk']}]"
+            lines.append(f"  - {quote_ident(col['name'])} ({col['type']}){suffix}")
         lines.append("")  # Empty line between tables
 
     # Consolidated FK section — เฉพาะ FK ที่เกี่ยวกับ tables ที่แสดง
@@ -117,8 +198,8 @@ def format_schema_for_prompt(schema_data: Dict[str, Any], max_tables: int = 10) 
         lines.append("Foreign Key Relationships:")
         for fk in relevant_fks:
             lines.append(
-                f"  - {fk['from_table']}.{fk['from_column']} -> "
-                f"{fk['to_table']}.{fk['to_column']}"
+                f"  - {fk['from_table']}.{quote_ident(fk['from_column'])} -> "
+                f"{fk['to_table']}.{quote_ident(fk['to_column'])}"
             )
         lines.append("")
 

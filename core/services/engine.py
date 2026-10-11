@@ -1,5 +1,7 @@
+import time
 import pandas as pd
 import asyncio
+from types import SimpleNamespace
 from langchain_community.utilities import SQLDatabase
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
@@ -17,6 +19,7 @@ from core.domain.schema_utils import (
 )
 from core.data.schema_rag import create_schema_rag, SchemaRAG
 from core.config import settings
+from core.profiles import load_hints as load_profile_hints, examples_path as profile_examples_path
 from core.viz.viz_recommender import create_viz_service, VizService
 from core.utils.common import clean_sql_response
 
@@ -33,17 +36,25 @@ class NLPEngine:
         self._viz_service: VizService = None
         self._current_engine: Engine = None  # Track for schema indexing
         self._schema_cache: dict = None  # Cache for database schema
+        self._schema_cache_ts: float = 0.0  # When _schema_cache was fetched
         self._schema_text_cache: str = None  # Cache for formatted schema text
         self._join_hints_cache: str = None   # Cache for join hints
         self._all_tables_cache: list = None  # Cache for table list
+        self._full_schema_text_cache: str = None  # Cache for full schema (retry path)
+        self._schema_reindex: bool = False  # set by refresh_schema(), consumed under the lock
+        self._schema_warmed: bool = False  # set once the question-independent warm state is built (spec #27 / #28)
+        self._schema_lock = asyncio.Lock()  # serialize schema fetch / RAG (re)index
         self._initialize_resources()
 
     def _initialize_resources(self):
         """Initialize LLM, Prompt, and RAG Store."""
         logger.info(f"Initializing NLPEngine with provider: {settings.MODEL_PROVIDER}")
         
-        # 1. Setup RAG Store
-        self._example_store = create_example_store(examples_path="thai_sql_examples.json")
+        # 1. Setup RAG Store (few-shot examples for the active domain profile)
+        self._example_store = create_example_store(
+            examples_path=profile_examples_path(settings.DOMAIN_PROFILE),
+            profile=settings.DOMAIN_PROFILE,
+        )
 
         # 2. Setup LLM
         if settings.MODEL_PROVIDER == "openai":
@@ -54,7 +65,9 @@ class NLPEngine:
             self._llm = ChatOpenAI(
                 model=settings.OPENAI_MODEL,
                 temperature=0,
-                api_key=settings.OPENAI_API_KEY
+                api_key=settings.OPENAI_API_KEY,
+                max_retries=settings.LLM_MAX_RETRIES,
+                timeout=settings.LLM_TIMEOUT_SECONDS,
             )
         elif settings.MODEL_PROVIDER == "google":
             from langchain_google_genai import ChatGoogleGenerativeAI
@@ -65,7 +78,9 @@ class NLPEngine:
                 model=settings.GOOGLE_MODEL,
                 temperature=0,
                 google_api_key=settings.GOOGLE_API_KEY,
-                convert_system_message_to_human=True
+                convert_system_message_to_human=True,
+                max_retries=settings.LLM_MAX_RETRIES,
+                timeout=settings.LLM_TIMEOUT_SECONDS,
             )
         elif settings.MODEL_PROVIDER == "zhipu":
             from langchain_openai import ChatOpenAI
@@ -75,7 +90,9 @@ class NLPEngine:
                 model=settings.ZHIPU_MODEL,
                 temperature=0,
                 api_key=settings.ZHIPU_API_KEY,
-                base_url="https://api.z.ai/api/coding/paas/v4",
+                base_url=settings.ZHIPU_BASE_URL,
+                max_retries=settings.LLM_MAX_RETRIES,
+                timeout=settings.LLM_TIMEOUT_SECONDS,
             )
         elif settings.MODEL_PROVIDER == "openrouter":
             from langchain_openai import ChatOpenAI
@@ -86,6 +103,8 @@ class NLPEngine:
                 temperature=0,
                 api_key=settings.OPENROUTER_API_KEY,
                 base_url="https://openrouter.ai/api/v1",
+                max_retries=settings.LLM_MAX_RETRIES,
+                timeout=settings.LLM_TIMEOUT_SECONDS,
             )
         else:
             from langchain_ollama import ChatOllama
@@ -104,6 +123,39 @@ class NLPEngine:
             enable_intelligent=settings.ENABLE_INTELLIGENT_VIZ
         )
 
+    def refresh_schema(self) -> None:
+        """Ask the next query to re-introspect the datasource and re-index the
+        schema RAG. Safe to call while queries are in flight — the actual work
+        happens under the schema lock, not here."""
+        self._schema_cache_ts = 0.0
+        self._schema_reindex = True
+        logger.info("Schema marked stale; next query will re-introspect and re-index.")
+
+    async def warm(self, db_engine: Engine, dialect: str = "postgres") -> None:
+        """Build every question-independent piece of the context bundle so no
+        Question carries the cold-cache cost (spec #27 / #28): datasource
+        schema introspection, schema-RAG indexing and the formatted schema-text
+        cache. The question-dependent pieces (per-question retrieval, pruned
+        filtering) stay on the Question path. Must be called off the event
+        loop's hot path — the heavy work runs in worker threads inside
+        _prepare_context's lock section. Raises on failure: callers decide the
+        policy (startup warms log-and-continue; the per-Question path keeps
+        today's rebuild-on-demand fallback either way)."""
+        await self._prepare_context(
+            question="(warmup probe)", engine=db_engine, dialect=dialect,
+            agent_mode=True)
+        self._schema_warmed = True
+        logger.info("Engine warm: schema introspected, schema-RAG indexed, schema text cached.")
+
+    def warm_state(self) -> dict:
+        """Coarse operational signal for /api/health and the background
+        re-warm check (spec #27 / #28 / #29)."""
+        fresh = (
+            self._schema_cache is not None
+            and (time.time() - self._schema_cache_ts) < settings.SCHEMA_CACHE_TTL_SECONDS
+        )
+        return {"schema_cached": bool(fresh), "warming": not self._schema_warmed}
+
     def _create_prompt_template(self) -> PromptTemplate:
         template = """You are an expert SQL analyst specialized in Thai language understanding.
 Given an input question (possibly in Thai), create a syntactically correct, read-only SQL query for the target database dialect.
@@ -119,50 +171,7 @@ Given an input question (possibly in Thai), create a syntactically correct, read
 5. DO NOT format percentages with '%' symbol in SQL. Return raw numbers.
 6. The "Similar Examples" below are automatically retrieved. If they use different tables, ignore them.
 
-### Dialect-Specific Functions:
-- Date: MySQL: YEAR(col), MONTH(col) | SQLite: strftime('%Y', col)
-- String: MySQL: CONCAT(a, b) | SQLite: a || b
-
-### Thai Keyword Hints:
-**Aggregation:**
-- "ยอดขาย" / "ยอดรวม" -> SUM(sales_column)
-- "ค่าเฉลี่ย" / "เฉลี่ย" -> AVG(...)
-- "มากที่สุด" / "สูงสุด" -> ORDER BY ... DESC LIMIT
-- "น้อยที่สุด" / "ต่ำสุด" -> ORDER BY ... ASC LIMIT
-- "จำนวน" / "กี่รายการ" / "นับ" -> COUNT(...)
-
-**Schema Column Mapping (receipt table):**
-- "ลูกค้า" / "คนซื้อ" -> customer_name
-- "ยอดขาย" / "ยอดรวม" -> total_price (use SUM for aggregation)
-- "จำนวนใบเสร็จ" / "กี่ใบ" -> COUNT(receipt_id)
-- "หมวดหมู่" / "ประเภทสินค้า" -> product_category
-- "การชำระเงิน" / "จ่ายเงิน" -> payment_method
-- "เดือน" -> month column (IMPORTANT: stored as TEXT e.g. 'January', 'February', ..., 'December' — do NOT use date functions on this column, use GROUP BY month directly)
-- "ปี" -> year column (stored as INTEGER)
-
-**Ratio & Rate:**
-- "อัตราส่วน" / "สัดส่วน" / "เปอร์เซ็นต์" -> SUM(A) / SUM(B) * 100 (aggregate BOTH numerator AND denominator)
-- "อัตราการแปลง" / "conversion" -> COUNT(condition) / COUNT(*) * 100
-- "เทียบกับ" / "เปรียบเทียบ" -> use ratio or difference between two aggregated values
-- "ต่อ" (per, e.g. "ยอดขายต่อคน") -> SUM(value) / COUNT(DISTINCT entity)
-- "เติบโต" / "growth" -> (current - previous) / previous * 100
-
-**Time Grouping:**
-- "รายเดือน" / "แต่ละเดือน" -> GROUP BY year, month (use actual column names from schema, not date functions unless column is a date type)
-- "รายปี" / "แต่ละปี" -> GROUP BY year
-- "รายไตรมาส" / "quarter" -> GROUP BY YEAR, QUARTER
-- "ล่าสุด" / "ใหม่สุด" -> ORDER BY date DESC LIMIT
-- "ระหว่าง" / "ช่วง" -> WHERE date BETWEEN ... AND ...
-- "กี่วัน" / "ระยะเวลา" -> DATEDIFF or julianday difference
-- "ลูกค้าใหม่" / "เพิ่มขึ้น" -> COUNT customers whose MIN(date/receipt) falls in that period (use subquery or MIN to find first purchase)
-
-**Negation & NULL:**
-- "ไม่เคย" / "ยังไม่" -> LEFT JOIN ... WHERE right.id IS NULL or NOT EXISTS
-- "ไม่มี" / "ว่างเปล่า" -> IS NULL or = ''
-
-**Advanced:**
-- "แต่ละ" / "ของแต่ละ" / "ตาม" -> GROUP BY the entity mentioned
-- "ที่มี...มากกว่า" / "เฉพาะที่" -> HAVING aggregate > value (filter AFTER GROUP BY)
+{hints}
 
 ### Similar Examples (Retrieved dynamically):
 {dynamic_examples}
@@ -180,11 +189,146 @@ Think step by step:
 4. Write the SQL query using ONLY tables and columns from the schema above.
 
 SQL:"""
-        return PromptTemplate.from_template(template)
+        return PromptTemplate.from_template(template).partial(
+            hints=load_profile_hints(settings.DOMAIN_PROFILE)
+        )
 
     def clean_sql(self, response: str, dialect: str = None) -> str:
         """Cleans and formats SQL from various LLM output formats."""
         return clean_sql_response(response, dialect)
+
+    async def _prepare_context(self, question: str, engine: Engine, dialect: str,
+                               agent_mode: bool = False):
+        """Shared retrieval prep for the one-shot chain and the agent loop.
+
+        Schema fetch + RAG (re)index run under one lock so concurrent queries
+        (and a concurrent /admin/refresh-schema) never double-index or race a
+        half-built _schema_rag; then example RAG and schema formatting run in
+        parallel. Returns a context bundle consumed by both entry points.
+
+        agent_mode: the caller is the conversational loop, which recovers a
+        schema-filter miss itself via the get_schema tool. smart_filter's
+        Tier-3 LLM table-guessing exists for the one-shot chain (which has no
+        recovery path) and is skipped here — in agent mode it would be a
+        duplicate, unbudgeted LLM call per Turn.
+        """
+        pruned = settings.SCHEMA_STRATEGY == "pruned"
+
+        async with self._schema_lock:
+            engine_changed = (self._current_engine != engine)
+            cache_fresh = (
+                self._schema_cache is not None
+                and not engine_changed
+                and (time.time() - self._schema_cache_ts) < settings.SCHEMA_CACHE_TTL_SECONDS
+            )
+            schema_refetched = not cache_fresh
+            if cache_fresh:
+                raw_schema = self._schema_cache
+            else:
+                raw_schema = await asyncio.to_thread(get_database_schema, engine)
+                self._schema_cache = raw_schema
+                self._schema_cache_ts = time.time()
+                self._current_engine = engine
+                self._schema_text_cache = None
+                self._join_hints_cache = None
+                self._all_tables_cache = None
+                self._full_schema_text_cache = None
+
+            if pruned and self._schema_rag is None:
+                self._schema_rag = create_schema_rag(
+                    embedder=self._example_store.embedder,
+                    embedding_cache=self._example_store._embedding_cache,
+                    embedding_lock=self._example_store._embedding_cache_lock,
+                    profile=settings.DOMAIN_PROFILE,
+                )
+            if pruned and (schema_refetched or self._schema_reindex):
+                await asyncio.to_thread(
+                    self._schema_rag.index_schema_from_db, engine,
+                    force_reindex=self._schema_reindex,
+                )
+                self._schema_reindex = False
+
+            if self._all_tables_cache is None:
+                tables_dict = raw_schema.get("tables", raw_schema) if isinstance(raw_schema, dict) and "tables" in raw_schema else raw_schema
+                self._all_tables_cache = list(tables_dict.keys())
+
+        # Cache the full formatted schema (used by the "full" strategy and by retries)
+        if self._schema_text_cache is None:
+            schema_text = format_schema_for_prompt(raw_schema)
+            join_hints = get_join_hints(self._all_tables_cache, raw_schema)
+            if join_hints:
+                schema_text += f"\n\n{join_hints}"
+            self._schema_text_cache = schema_text
+
+        async def get_examples():
+            """Async task: Get similar examples from RAG store (returns (text, count))."""
+            return await self._example_store.async_format_examples_for_prompt_with_count(
+                question,
+                top_k=settings.RAG_TOP_K,
+                dialect=dialect,
+                threshold=settings.RAG_DISTANCE_THRESHOLD
+            )
+
+        async def get_schema_text():
+            """Per-query pruned schema, or the cached full schema."""
+            if not pruned:
+                return self._schema_text_cache
+
+            # Semantic + Thai-mapping filter to the tables this question needs.
+            filtered_schema = await asyncio.to_thread(
+                smart_filter_schema,
+                raw_schema,
+                question,
+                self._schema_rag,
+                # Tier-3 LLM guessing is a one-shot-chain recovery path only.
+                None if agent_mode else self._llm,
+                settings.SCHEMA_TOP_K,
+            )
+            schema_text = format_schema_for_prompt(filtered_schema)
+            tables_dict = filtered_schema.get("tables", filtered_schema) if isinstance(filtered_schema, dict) and "tables" in filtered_schema else filtered_schema
+            join_hints = get_join_hints(list(tables_dict.keys()), filtered_schema)
+            if join_hints:
+                schema_text += f"\n\n{join_hints}"
+            return schema_text
+
+        # Run both tasks in parallel
+        (dynamic_examples, rag_count), schema_text = await asyncio.gather(
+            get_examples(),
+            get_schema_text()
+        )
+
+        tables_dict = raw_schema.get("tables", raw_schema) if isinstance(raw_schema, dict) and "tables" in raw_schema else raw_schema
+        return SimpleNamespace(
+            sql_examples_text=dynamic_examples,
+            rag_count=rag_count,
+            schema_text=schema_text,
+            all_tables=self._all_tables_cache,
+            raw_schema=raw_schema,
+            raw_tables=tables_dict,
+            pruned=pruned,
+        )
+
+    async def agent_query_database(
+        self,
+        question: str,
+        engine: Engine,
+        dialect: str = "sqlite",
+        history: list = None,
+        max_limit: int = None,
+        preferred_chart_type: str = None,
+        on_event=None,
+    ):
+        """Conversational Turn entry point (ADR 0006): the function-calling
+        agent loop with the LLM as controller. Retrieval runs before the loop,
+        unchanged. Returns the loop's AgentTurnResult.
+        """
+        from core.services.agent import run_agent_turn
+        return await run_agent_turn(
+            self, question, engine, dialect=dialect,
+            history=history, max_limit=max_limit,
+            preferred_chart_type=preferred_chart_type,
+            on_event=on_event,
+        )
 
     async def query_database(
         self,
@@ -197,8 +341,8 @@ SQL:"""
     ):
         """
         Main entry point to generate SQL and execute it against the DB.
-        Returns: (sql, dataframe_dict, error_message, retry_count, viz_config)
-        
+        Returns: (sql, dataframe_dict, error_message, retry_count, viz_config, rag_count)
+
         This method is async and uses parallel RAG retrieval for better performance.
         """
         # Use settings if not explicitly provided
@@ -206,89 +350,12 @@ SQL:"""
             max_limit = settings.MAX_SQL_LIMIT
         if max_retries is None:
             max_retries = settings.MAX_RETRIES
-        
-        # Check if engine changed for caching purposes
-        engine_changed = (self._current_engine != engine)
-        
-        # Get raw schema (with caching)
-        if not engine_changed and self._schema_cache is not None:
-            raw_schema = self._schema_cache
-        else:
-            # Cache miss or engine changed - fetch and cache
-            raw_schema = await asyncio.to_thread(get_database_schema, engine)
-            self._schema_cache = raw_schema
-            self._current_engine = engine
-            # Invalidate derived caches when engine changes
-            self._schema_text_cache = None
-            self._join_hints_cache = None
-            self._all_tables_cache = None
-        
-        # Initialize Schema RAG if needed (for local LLM)
-        if settings.MODEL_PROVIDER == "ollama" and self._schema_rag is None:
-            shared_embedder = self._example_store.embedder
-            self._schema_rag = create_schema_rag(embedder=shared_embedder)
-        
-        # Index schema if engine changed
-        if settings.MODEL_PROVIDER == "ollama" and engine_changed:
-            await asyncio.to_thread(self._schema_rag.index_schema_from_db, engine)
-        
-        # Pre-compute and cache schema-derived data (once per engine)
-        if self._all_tables_cache is None:
-            tables_dict = raw_schema.get("tables", raw_schema) if isinstance(raw_schema, dict) and "tables" in raw_schema else raw_schema
-            self._all_tables_cache = list(tables_dict.keys())
-        
-        # Cache formatted schema text for Cloud LLM (same every query for same engine)
-        if settings.MODEL_PROVIDER != "ollama" and self._schema_text_cache is None:
-            schema_text = format_schema_for_prompt(raw_schema)
-            join_hints = get_join_hints(self._all_tables_cache, raw_schema)
-            if join_hints:
-                schema_text += f"\n\n{join_hints}"
-            self._schema_text_cache = schema_text
-        
-        # =============================================================
-        # PARALLEL RAG RETRIEVAL - Key Performance Optimization
-        # =============================================================
-        # Execute Example RAG and Schema processing concurrently
-        
-        async def get_examples():
-            """Async task: Get similar examples from RAG store (returns (text, count))."""
-            return await self._example_store.async_format_examples_for_prompt_with_count(
-                question,
-                top_k=settings.RAG_TOP_K,
-                dialect=dialect,
-                threshold=settings.RAG_DISTANCE_THRESHOLD
-            )
-        
-        async def get_schema_text():
-            """Async task: Get filtered schema (for local LLM) or cached full schema."""
-            if settings.MODEL_PROVIDER == "ollama":
-                # Use smart filtering (semantic + Thai mapping) — per-query (depends on question)
-                filtered_schema = await asyncio.to_thread(
-                    smart_filter_schema,
-                    raw_schema,
-                    question,
-                    self._schema_rag,
-                    self._llm,
-                    settings.SCHEMA_TOP_K
-                )
 
-                schema_text = format_schema_for_prompt(filtered_schema)
+        bundle = await self._prepare_context(question, engine, dialect)
+        raw_schema = bundle.raw_schema
+        dynamic_examples, rag_count = bundle.sql_examples_text, bundle.rag_count
+        schema_text = bundle.schema_text
 
-                tables_dict = filtered_schema.get("tables", filtered_schema) if isinstance(filtered_schema, dict) and "tables" in filtered_schema else filtered_schema
-                join_hints = get_join_hints(list(tables_dict.keys()), filtered_schema)
-                if join_hints:
-                    schema_text += f"\n\n{join_hints}"
-                return schema_text
-            else:
-                # Cloud LLM: return cached full schema (already computed above)
-                return self._schema_text_cache
-        
-        # Run both tasks in parallel
-        (dynamic_examples, rag_count), schema_text = await asyncio.gather(
-            get_examples(),
-            get_schema_text()
-        )
-        
         # =============================================================
         # LLM Chain Execution
         # =============================================================
@@ -311,10 +378,10 @@ SQL:"""
             return None, None, f"LLM Generation Failed: {str(e)}", 0, None, 0
 
         # Use cached table list
-        all_tables = self._all_tables_cache
+        all_tables = bundle.all_tables
 
         # Lazy: full_schema_text only computed if a retry actually needs it
-        full_schema_text = None
+        full_schema_text = self._full_schema_text_cache if self._full_schema_text_cache else None
 
         for attempt in range(max_retries + 1):
             try:
@@ -347,18 +414,16 @@ SQL:"""
                     # Lazy compute full schema text (only on first retry)
                     if full_schema_text is None:
                         full_schema_text = format_schema_for_prompt(raw_schema)
+                        self._full_schema_text_cache = full_schema_text
 
-                    # Check if it's a "table not found" error
-                    is_table_error = any(phrase in error_msg.lower() for phrase in [
-                        "no such table", "table not found", "doesn't exist",
-                        "unknown table", "relation.*does not exist"
-                    ])
-
-                    # Check if it's a "column not found" error
-                    is_column_error = any(phrase in error_msg.lower() for phrase in [
-                        "unknown column", "no such column", "column not found",
-                        "ambiguous column"
-                    ])
+                    msg = error_msg.lower()
+                    # PostgreSQL: 'column "x" does not exist' / 'relation "x" does not exist'
+                    is_column_error = any(p in msg for p in [
+                        "unknown column", "no such column", "column not found", "ambiguous column",
+                    ]) or ("column" in msg and "does not exist" in msg)
+                    is_table_error = any(p in msg for p in [
+                        "no such table", "table not found", "doesn't exist", "unknown table",
+                    ]) or ("relation" in msg and "does not exist" in msg)
 
                     # ทั้ง table error และ column error ให้ส่ง full schema + FK info
                     if is_table_error or is_column_error:

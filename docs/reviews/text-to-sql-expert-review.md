@@ -367,7 +367,7 @@ The retry loop in [engine.py#L279-L367](file:///Users/chanyut/Documents/nlp_sql_
 |----------|------|---------|
 | `PRODUCT_SPEC.md` | 23KB | Comprehensive product specification |
 | `TUNING_GUIDE.md` | 28KB | LLM tuning techniques, LoRA/QLoRA, evaluation metrics |
-| `DEVELOPMENT_PLAN.md` | 51KB | Detailed project roadmap and task breakdown |
+| `docs/planning/DEVELOPMENT_PLAN.md` | 51KB | Detailed project roadmap and task breakdown |
 | `Data_Flow.md` | 6KB | System data flow diagrams |
 | `RAG_AUTO_TRANSPILATION.md` | 10KB | RAG transpilation documentation |
 | `RISK_ANALYSIS.md` | 11KB | Risk assessment |

@@ -122,11 +122,29 @@ class TestSQLSafetyTableAllowlist(unittest.TestCase):
         """Query on forbidden table should be blocked."""
         with self.assertRaises(SQLSafetyError) as context:
             validate_and_sanitize_sql(
-                "SELECT * FROM secret_data", 
-                dialect="sqlite", 
+                "SELECT * FROM secret_data",
+                dialect="sqlite",
                 allowed_tables=["products", "orders"]
             )
         self.assertIn("not allowed", str(context.exception))
+
+    def test_cte_name_is_not_a_forbidden_table(self):
+        """A WITH CTE referenced in FROM must not trip the table allowlist."""
+        result = validate_and_sanitize_sql(
+            "WITH c AS (SELECT a, COUNT(*) n FROM orders GROUP BY a) "
+            "SELECT a, n FROM c ORDER BY n DESC",
+            dialect="postgres",
+            allowed_tables=["orders"],
+        )
+        self.assertEqual(result.tables, ("orders",))
+
+    def test_cte_shadowing_a_real_forbidden_table_still_blocks_the_real_use(self):
+        result = validate_and_sanitize_sql(
+            "WITH orders AS (SELECT 1 AS a) SELECT a FROM orders",
+            dialect="postgres",
+            allowed_tables=["products"],
+        )
+        self.assertEqual(result.tables, ())
 
 
 if __name__ == '__main__':
