@@ -15,7 +15,7 @@ Changes:
 
 import re, sys, os
 
-STYLES_PATH = "report_unpacked/word/styles.xml"
+STYLES_PATH = "docs/reports/report_unpacked/word/styles.xml"
 
 with open(STYLES_PATH, "r", encoding="ascii", errors="replace") as f:
     content = f.read()

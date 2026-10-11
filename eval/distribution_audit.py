@@ -177,7 +177,7 @@ def _load_golden():
 
 
 def _load_examples():
-    path = os.path.join(ROOT, "TEXT_TO_SQL_STS_RAG_EXAMPLES.json")
+    path = os.path.join(ROOT, "data", "corpus", "TEXT_TO_SQL_STS_RAG_EXAMPLES.json")
     with open(path, encoding="utf-8") as f:
         return json.load(f)["examples"]
 

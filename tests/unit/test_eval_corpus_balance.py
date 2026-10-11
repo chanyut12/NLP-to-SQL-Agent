@@ -23,8 +23,8 @@ from eval.distribution_audit import (
     count_exemplar_block,
 )
 
-CORPUS_PATH = os.path.join(ROOT, "TEXT_TO_SQL_STS_RAG_EXAMPLES.json")
-ARCHIVE_PATH = os.path.join(ROOT, "TEXT_TO_SQL_STS_RAG_EXAMPLES_ARCHIVE.json")
+CORPUS_PATH = os.path.join(ROOT, "data", "corpus", "TEXT_TO_SQL_STS_RAG_EXAMPLES.json")
+ARCHIVE_PATH = os.path.join(ROOT, "data", "corpus", "archive", "TEXT_TO_SQL_STS_RAG_EXAMPLES_ARCHIVE.json")
 PROFILE_PATH = os.path.join(ROOT, "profiles", "sts", "examples.json")
 
 CORPUS = json.load(open(CORPUS_PATH, encoding="utf-8"))

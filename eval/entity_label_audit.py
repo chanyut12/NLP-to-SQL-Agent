@@ -26,7 +26,7 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-EXAMPLE_SET_PATH = os.path.join(ROOT, "TEXT_TO_SQL_STS_RAG_EXAMPLES.json")
+EXAMPLE_SET_PATH = os.path.join(ROOT, "data", "corpus", "TEXT_TO_SQL_STS_RAG_EXAMPLES.json")
 GOLDEN_SET_PATH = os.path.join(ROOT, "eval", "benchmark_sts.json")
 
 # Output-column classification (mirrors core.viz.column_meta semantics).

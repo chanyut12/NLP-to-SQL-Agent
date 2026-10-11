@@ -21,7 +21,7 @@ import os
 import re
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CORPUS = json.load(open(os.path.join(ROOT, "TEXT_TO_SQL_STS_RAG_EXAMPLES.json"), encoding="utf-8"))
+CORPUS = json.load(open(os.path.join(ROOT, "data", "corpus", "TEXT_TO_SQL_STS_RAG_EXAMPLES.json"), encoding="utf-8"))
 CORPUS_BY_ID = {e["id"]: e for e in CORPUS["examples"]}
 HELDOUT_IDS = json.load(open(os.path.join(ROOT, "profiles", "sts", "heldout_ids.json"), encoding="utf-8"))
 DB_URL = os.getenv("STS_DB_URL", "postgresql://postgres:stsLocalDev2026@localhost:5432/sts")

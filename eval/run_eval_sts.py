@@ -98,7 +98,7 @@ def main():
     from eval.scoring import check_quota_gate, domain_of, score_answer_type
     from eval.distribution_audit import CATEGORY_BUCKETS, bucket_for
     if not args.skip_quota_gate:
-        examples = json.load(open(os.path.join(ROOT, "TEXT_TO_SQL_STS_RAG_EXAMPLES.json"),
+        examples = json.load(open(os.path.join(ROOT, "data", "corpus", "TEXT_TO_SQL_STS_RAG_EXAMPLES.json"),
                                   encoding="utf-8"))["examples"]
         violations = check_quota_gate(bench["questions"], examples)
         if violations:

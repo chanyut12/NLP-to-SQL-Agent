@@ -110,7 +110,7 @@ class TestExemplarFormat(unittest.TestCase):
     """Editing the corpus must not break the clarification/refusal exemplars."""
 
     def test_exemplar_messages_follow_documented_convention(self):
-        path = os.path.join(ROOT, "TEXT_TO_SQL_STS_RAG_EXAMPLES.json")
+        path = os.path.join(ROOT, "data", "corpus", "TEXT_TO_SQL_STS_RAG_EXAMPLES.json")
         data = json.load(open(path, encoding="utf-8"))
         for ex in data["examples"]:
             if not ex.get("expected_answer_type"):

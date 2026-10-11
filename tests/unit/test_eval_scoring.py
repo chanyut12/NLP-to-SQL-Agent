@@ -18,7 +18,7 @@ from eval.distribution_audit import bucket_for
 from eval.scoring import check_quota_gate, domain_of, score_answer_type
 
 GOLDEN = json.load(open(os.path.join(ROOT, "eval/benchmark_sts.json"), encoding="utf-8"))["questions"]
-EXAMPLES = json.load(open(os.path.join(ROOT, "TEXT_TO_SQL_STS_RAG_EXAMPLES.json"), encoding="utf-8"))["examples"]
+EXAMPLES = json.load(open(os.path.join(ROOT, "data", "corpus", "TEXT_TO_SQL_STS_RAG_EXAMPLES.json"), encoding="utf-8"))["examples"]
 
 
 class TestQuotaGate(unittest.TestCase):
