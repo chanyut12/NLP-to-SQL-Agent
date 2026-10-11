@@ -12,6 +12,8 @@ from core.services.engine import NLPEngine
 from core.services.agent import AgentTurnResult
 from core.domain.schema_utils import get_database_schema
 from core.viz.column_meta import describe_result
+from core.profiles import load_table_notes
+from core.services.turn_digest import build_turn_digest
 from core.utils.sql_metrics import parse_sql_metrics
 from core.config import settings
 import uuid
@@ -271,6 +273,9 @@ async def _agent_envelope(
             status="ok", request_id=request_id, question=request.question,
             answer_type="result", message=result.message, steps_used=result.steps_used,
             prep_ms=result.prep_ms, sql=result.sql,
+            turn_digest=build_turn_digest(
+                result.sql, rows, result.columns, result.row_count,
+                load_table_notes(settings.DOMAIN_PROFILE)),
             columns=[ColumnInfo(**c) for c in (result.columns or [])],
             rows=rows, row_count=result.row_count, truncated=result.truncated,
             summary=ResultSummary(**(result.summary or {"row_count": result.row_count})),

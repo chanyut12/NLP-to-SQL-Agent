@@ -393,6 +393,34 @@ class TestDataKnowledgeTools(AgentLoopBase):
         self.assertTrue(any("no successful run_sql" in o for o in self._tool_outputs()))
 
 
+class TestDigestInEnvelope(AgentLoopBase):
+    def test_result_envelope_carries_turn_digest_and_clarification_does_not(self):
+        self._wire([_ai_tool("run_sql", sql="SELECT id, name FROM schools WHERE id = 1"),
+                    _ai_final("result", "มี 1 โรงเรียน")])
+        body = client.post("/api/query", json={"question": "โรงเรียนมีกี่แห่ง", "history": HISTORY},
+                           headers={"X-API-Key": "test-secret"}).json()
+        d = body["turn_digest"]
+        self.assertEqual(d["tables"], ["schools"])
+        self.assertEqual(d["filters"], ["id = 1"])
+        self.assertEqual(d["row_count"], 1)
+
+    def test_clarification_has_no_digest(self):
+        self._wire([_ai_final("clarification", "ขอรายละเอียด")])
+        body = client.post("/api/query", json={"question": "ขอข้อมูล", "history": HISTORY},
+                           headers={"X-API-Key": "test-secret"}).json()
+        self.assertIsNone(body.get("turn_digest"))
+
+    def test_prior_turn_digest_reaches_the_prompt_and_is_optional(self):
+        digest = {"tables": ["schools"], "populations": {"schools": "All schools."},
+                  "filters": [], "group_by": [], "columns": [], "top_rows": [], "row_count": 12}
+        hist = [dict(HISTORY[0], digest=digest)]
+        self._wire([_ai_final("clarification", "ขอรายละเอียด")])
+        r = client.post("/api/query", json={"question": "ขอข้อมูล", "history": hist},
+                        headers={"X-API-Key": "test-secret"})
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("population of schools: All schools.", self.llm.prompts[0][0]["content"])
+
+
 class TestSafetyInsideRunSql(AgentLoopBase):
     def test_unsafe_sql_never_executes_and_loop_recovers(self):
         self._wire([

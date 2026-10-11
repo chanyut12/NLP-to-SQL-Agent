@@ -128,6 +128,7 @@ interface PriorTurn {
   answer_type: 'result' | 'clarification' | 'refusal';
   sql: string | null;                 // result Turn: ต้องมี / ชนิดอื่น: ห้ามมี (422 ถ้าผิด)
   row_count: number;                  // >= 0
+  digest?: TurnDigest | null;         // ADR 0010 / #34 — ดูข้างล่าง (optional)
 }
 
 // ตัวอย่าง: ผู้ใช้ตอบคำถามกลับของ agent (สรรพนาม "ห้องนั้น" อ้าง Turn ก่อน)
@@ -148,6 +149,13 @@ POST /api/query
   ทุกครั้งเพื่อได้ความสามารถของ agent เต็มรูปแบบ** (ถามกลับ/ปฏิเสธ/ต่อเนื่อง)
 - result Turn ต้องมี `sql` · clarification/refusal Turn ห้ามมี `sql`
 - ห้ามส่ง `rows` กลับมา — payload อยู่ฝั่ง Consumer เท่านั้น
+- **`digest` (optional, ADR 0010 / #34)** — envelope ของ result Turn มี field `turn_digest`
+  (ตาราง/ประชากรของตาราง/เงื่อนไขกรอง/การจัดกลุ่ม/คอลัมน์/top 3 แถว สร้างแบบ deterministic
+  ไม่ใช้ LLM, ไม่มีคอลัมน์ข้อมูลส่วนบุคคล) ให้ Consumer **เก็บคู่กับ envelope แล้วส่งกลับใน
+  `history[].digest` ตรงๆ โดยไม่ต้องแก้** — ช่วยให้ "ช่วยกรองเฉพาะ X" ผูกกับ Turn ล่าสุดถูกต้องและ
+  agent รู้ว่าตัวเลขของแต่ละ Turn นับ "ใคร" (เช่น สัญญาณจากเคสที่เปิด ≠ นักเรียนเสี่ยงทั้งหมด).
+  ไม่ส่ง = ทำงานเหมือนเดิม (SQL อย่างเดียว) · ส่งได้เฉพาะ result Turn · treat เป็น opaque object
+  (NestJS: เก็บ `envelope.turn_digest` → ส่ง `history[].digest`)
 
 **ใครเป็นเจ้าของ Session:** Python service ไม่เก็บอะไรเลย — Consumer (ระบบจริงคือ
 NestJS + React) เป็นผู้ถือประวัติ Turn แล้วส่งกลับมาทุก request. แนะนำ v1: **React เก็บ

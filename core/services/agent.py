@@ -31,6 +31,7 @@ import pandas as pd
 from core.config import settings
 from core.profiles import load_table_notes
 from core.domain.sql_safety import SQLSafetyError, validate_and_sanitize_sql
+from core.services.turn_digest import digest_block
 from core.services.data_knowledge import (
     SAMPLE_LIMIT,
     MAX_VALUE_CHARS,
@@ -141,12 +142,6 @@ include that entity's readable label column (its name) next to the \
 measures — never the id alone; select the id only when the user asks for \
 the code itself. The label column is never a person's name — person \
 identifiers stay out of results per rule 2.
-8. Follow-up filters ("ช่วยกรองเฉพาะ X", "เฉพาะ X", "แล้วของ X ล่ะ") modify the \
-IMMEDIATELY PREVIOUS Turn: re-run that Turn's query with the new filter added \
-and keep its output shape (same measure, same breakdown columns). If the \
-previous Turn broke a measure down by reason/category (e.g. "สาเหตุ…"), the \
-answer must list those reasons with their counts — never collapse it into one \
-total, and never switch to the measure of an earlier Turn.
 """
 
 
@@ -172,13 +167,19 @@ class AgentTurnResult:
 def _history_block(history: Optional[list]) -> str:
     if not history:
         return "(none — this is the first Turn)"
-    lines = []
+    lines = [("A follow-up such as \"ช่วยกรองเฉพาะ X\" / \"เฉพาะ X\" / \"แล้วของ X ล่ะ\" "
+              "modifies the MOST RECENT Turn: re-run its query with the new filter "
+              "and keep its output shape (same measure, same breakdown columns).")]
     for i, turn in enumerate(history, 1):
-        head = f"Turn {i}: question: {turn.get('question', '')}"
+        latest = " (MOST RECENT)" if i == len(history) else ""
+        head = f"Turn {i}{latest}: question: {turn.get('question', '')}"
         atype = turn.get("answer_type", "result")
         if atype == "result":
             head += f"\n  SQL used: {turn.get('sql', '')}"
             head += f"\n  result rows returned: {turn.get('row_count', 0)}"
+            digest = digest_block(turn.get("digest"))
+            if digest:
+                head += "\n" + "\n".join(digest)
         elif atype == "clarification":
             head += "\n  (the agent asked a clarifying question)"
         else:

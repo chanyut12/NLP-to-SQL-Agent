@@ -24,6 +24,9 @@ class PriorTurn(BaseModel):
     # turns must not (there was no query to run).
     sql: Optional[str] = None
     row_count: Optional[int] = None
+    # ADR 0010 / #34: the envelope's `turn_digest` of this Turn, stored by the
+    # Consumer and replayed here. Optional — absent history stays SQL-only.
+    digest: Optional[Dict[str, Any]] = None
 
     def model_post_init(self, __context) -> None:
         has_sql = bool(self.sql and self.sql.strip())
@@ -91,6 +94,10 @@ class QueryResponse(BaseModel):
     # Consumer separate the service's own work from the structural LLM step
     # cost when explaining elapsed_ms.
     prep_ms: Optional[int] = None
+    # Deterministic description of a Result Turn (tables, populations, filters,
+    # grouping, top rows) for the Consumer to replay in `history` (ADR 0010 / #34).
+    # Additive and advisory: Consumers that ignore it lose nothing.
+    turn_digest: Optional[Dict[str, Any]] = None
     sql: Optional[str] = None
     columns: List[ColumnInfo] = []
     rows: Optional[List[Dict[str, Any]]] = None

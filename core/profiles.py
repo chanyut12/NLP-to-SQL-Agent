@@ -5,6 +5,7 @@ the Thai-term hints injected into the prompt and the few-shot Example set. It is
 selected by ``settings.DOMAIN_PROFILE`` and lives under ``profiles/<name>/``.
 """
 
+import functools
 import json
 import os
 import logging
@@ -45,6 +46,7 @@ def load_schema_mappings(profile: str) -> dict:
         return json.load(f)
 
 
+@functools.lru_cache(maxsize=8)
 def load_table_notes(profile: str) -> dict:
     """Curated table meaning/population notes for the agent's describe_table tool.
     {} when the profile has no table_notes.json (the tool degrades to raw columns)."""
