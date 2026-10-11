@@ -22,6 +22,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, List, Optional
@@ -54,6 +55,26 @@ STEP_BUDGET_EXCEEDED = "STEP_BUDGET_EXCEEDED"
 MAX_PROBES_AFTER_EMPTY = 2  # run_sql calls allowed after a successful 0-row query
 _DUPLICATE_PREFIX = "DUPLICATE_SQL"
 _EXPLORATION_PREFIX = "EXPLORATION_LIMIT"
+
+
+# A follow-up that only narrows the previous Turn ("ช่วยกรองเฉพาะ X", "เฉพาะ X",
+# "แล้วของ X ล่ะ"). ADR 0010 / ticket #34: its result must keep the previous
+# Turn's output columns — checked in code, not left to the model.
+_FOLLOWUP_FILTER_RE = re.compile(r"(ช่วยกรอง|กรองเฉพาะ|^\s*เฉพาะ|แล้วของ.+ล่ะ)")
+MAX_SHAPE_REPAIRS = 2
+
+
+def previous_turn_columns(question: str, history: Optional[list]) -> Optional[List[str]]:
+    """Column names the answer must keep, or None when this is not a narrowing
+    follow-up (or the previous Turn has no digest to compare against)."""
+    if not history or not _FOLLOWUP_FILTER_RE.search(question or ""):
+        return None
+    last = history[-1]
+    if last.get("answer_type") != "result":
+        return None
+    cols = [c.get("name") for c in ((last.get("digest") or {}).get("columns") or [])
+            if c.get("name")]
+    return cols or None
 
 
 def _normalize_sql(sql: str) -> str:
@@ -300,7 +321,9 @@ class _AgentSession:
         self.empty_seen: bool = False     # a query executed OK with 0 rows
         self.probes_after_empty: int = 0
         self.turn_rows: list = []         # rows of every successful run_sql (grounding, ticket #36)
-        self.grounding_repaired: bool = False
+        self.grounding_repairs: int = 0
+        self.required_columns: Optional[List[str]] = None
+        self.shape_repairs: int = 0
         self.table_notes: dict = load_table_notes(settings.DOMAIN_PROFILE)
 
     # --- tool: get_schema -----------------------------------------------------
@@ -415,22 +438,52 @@ class _AgentSession:
         parts = [self.question] + [t.get("question", "") for t in (history or [])]
         return " ".join(parts)
 
+    def check_followup_shape(self) -> Optional[str]:
+        """Repair instruction when a narrowing follow-up did not keep the previous
+        Turn's output columns; None when fine (or after MAX_SHAPE_REPAIRS)."""
+        need = self.required_columns
+        if not need or self.executed_df is None or self.shape_repairs >= MAX_SHAPE_REPAIRS:
+            return None
+        have = {str(c).lower() for c in self.executed_df.columns}
+        missing = [c for c in need if c.lower() not in have]
+        if not missing:
+            return None
+        self.shape_repairs += 1
+        return ("ERROR: this question only narrows the previous Turn, so the result "
+                "must keep that Turn's output columns "
+                f"[{', '.join(need)}] but yours lacks [{', '.join(missing)}]. Re-run "
+                "the PREVIOUS Turn's query (shown in the history) with only the new "
+                "filter added — same tables, same grouping, same columns — then call "
+                "final_answer again.")
+
+    def _shown_rows(self) -> list:
+        """The rows the Consumer will display = the last executed query. The
+        message must describe what is on screen, not an earlier probe of the
+        same Turn (the Oct 2026 text/table mismatch)."""
+        return [self.executed_rows] if self.executed_rows is not None else []
+
     def ground_message(self, message: str, history) -> Optional[str]:
-        """None when the message is grounded. Otherwise the repair instruction
-        (first time) — the caller turns a second failure into a deterministic
-        message via `grounded_fallback`."""
-        bad = ungrounded_numbers(message, self.turn_rows, self._user_text(history))
+        """None when the message is grounded in what the user will SEE (the last
+        query). Otherwise the repair instruction; callers allow two repairs."""
+        user_text = self._user_text(history)
+        bad = ungrounded_numbers(message, self._shown_rows(), user_text)
         if not bad:
             return None
         shown = ", ".join(f"{b:g}" for b in sorted(set(bad))[:6])
-        return (f"ERROR: the message states numbers that are not in this Turn's "
-                f"result rows: {shown}. State only figures shown by the rows you "
-                f"retrieved (or run another query to get them); do not quote or "
-                f"compare with figures from earlier Turns. Call final_answer "
-                f"again.")
+        if not ungrounded_numbers(message, self.turn_rows, user_text):
+            return ("ERROR: your message describes the result of an EARLIER query "
+                    f"(figures {shown}), but the table shown to the user is the LAST "
+                    "query's rows. Run the query your message is about as your last "
+                    "run_sql (it will be answered instantly if it already ran), or "
+                    "rewrite the message to describe the last result. Then call "
+                    "final_answer again.")
+        return (f"ERROR: the message states numbers that are not in the result rows "
+                f"shown to the user: {shown}. State only figures those rows show; do "
+                f"not quote or compare with figures from earlier Turns. Call "
+                f"final_answer again.")
 
     def grounded_fallback(self, message: str, history) -> str:
-        kept = drop_ungrounded_sentences(message, self.turn_rows, self._user_text(history))
+        kept = drop_ungrounded_sentences(message, self._shown_rows(), self._user_text(history))
         return kept or fallback_message(len(self.executed_rows or []))
 
     # --- tool: final_answer ---------------------------------------------------
@@ -506,6 +559,7 @@ async def run_agent_turn(
     prep_ms = int((time.monotonic() - prep_started) * 1000)
     session = _AgentSession(engine_obj, db_engine, dialect, bundle, max_limit,
                             question)
+    session.required_columns = previous_turn_columns(question, history)
 
     system = AGENT_SYSTEM_PROMPT.format(
         dialect=dialect,
@@ -597,9 +651,13 @@ async def run_agent_turn(
                     out = await session.tool_final_answer(
                         args.get("answer_type", ""), args.get("message", ""))
                     if out == "OK" and args.get("answer_type") == "result":
+                        shape = session.check_followup_shape()
+                        if shape:
+                            out = shape
+                    if out == "OK" and args.get("answer_type") == "result":
                         repair = session.ground_message(args.get("message", ""), history)
-                        if repair and not session.grounding_repaired:
-                            session.grounding_repaired = True
+                        if repair and session.grounding_repairs < 2:
+                            session.grounding_repairs += 1
                             out = repair
                         elif repair:
                             args["message"] = session.grounded_fallback(

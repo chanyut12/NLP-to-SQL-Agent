@@ -98,7 +98,7 @@
         "student_risk_profiles.student_uuid = student_term.student_uuid"
       ],
       "notes": [
-        "Supplementary evidence for a cause question: the driver columns (attendance_rate_percent, term_absent_days, consecutive_absent_days, late_count) compared between risk tiers show what separates HIGH from NORMAL students. Use it to complement case_risk_signals, or alone when the signals have no rows for the requested slice.",
+        "risk_tier is a risk LEVEL (HIGH/WATCH/NORMAL), not a cause. Never present a comparison between tiers as the cause of risk.",
         "It is a snapshot: report profile_calculated_at when freshness matters."
       ]
     },
@@ -139,8 +139,8 @@
         "cases.school_id = schools.id"
       ],
       "notes": [
-        "For 'สาเหตุ / แหล่งที่มา / เหตุผลที่ระบบแจ้งเตือนความเสี่ยง' answer from this table: group by signal_source_code and/or signal_rule_code (count of signals), optionally listing signal_reason. This is what the product records as the cause of a flag.",
-        "Always state the coverage in the message (only opened cases have signals), because at-risk students without a case have none; an empty province is a real answer."
+        "A 'สาเหตุ / แหล่งที่มา / เหตุผลที่ระบบแจ้งเตือนความเสี่ยง' question is answered ONLY from this table: group by signal_source_code and/or signal_rule_code (count of signals), optionally listing signal_reason. Do not substitute anything else for it.",
+        "Coverage is small (opened cases only). State that in the message. When the requested slice (e.g. a province) has no signals, the answer is that no signals are recorded — do not replace it with another measure."
       ]
     },
     "case_reviews": {

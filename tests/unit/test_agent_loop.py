@@ -321,17 +321,33 @@ class TestGroundingInLoop(AgentLoopBase):
         self.assertEqual(body["steps_used"], 3)
         errs = [m["content"] for m in self.llm.prompts[-1]
                 if isinstance(m, dict) and m.get("role") == "tool"
-                and "not in this Turn" in m["content"]]
+                and "shown to the user" in m["content"]]
         self.assertEqual(len(errs), 1)
         self.assertIn("76", errs[0])
 
-    def test_second_violation_is_replaced_by_a_deterministic_message(self):
+    def test_third_violation_is_replaced_by_a_deterministic_message(self):
         body = self._ask([_ai_tool("run_sql", sql="SELECT id, name FROM schools"),
+                          _ai_final("result", "กรุงเทพฯ สูงสุด 76 คน"),
                           _ai_final("result", "กรุงเทพฯ สูงสุด 76 คน"),
                           _ai_final("result", "กรุงเทพฯ สูงสุด 76 คน")])
         self.assertEqual(body["answer_type"], "result")
         self.assertNotIn("76", body["message"])
         self.assertIn("1", body["message"])
+
+    def test_message_must_describe_the_displayed_query_not_an_earlier_probe(self):
+        # two queries in one Turn: only the LAST rows are shown, so a message
+        # quoting the first query's figure (here 5) is flagged and repaired.
+        body = self._ask([
+            _ai_tool("run_sql", sql="SELECT 5 AS n FROM schools"),
+            _ai_tool("run_sql", sql="SELECT id, name FROM schools"),
+            _ai_final("result", "พบ 5 รายการ"),
+            _ai_final("result", "มี 1 โรงเรียน"),
+        ])
+        self.assertEqual(body["message"], "มี 1 โรงเรียน")
+        self.assertEqual(body["steps_used"], 4)
+        errs = [m["content"] for m in self.llm.prompts[-1]
+                if isinstance(m, dict) and m.get("role") == "tool" and "EARLIER query" in m["content"]]
+        self.assertEqual(len(errs), 1)  # told to re-run / reword, not just rejected
 
     def test_clarification_and_refusal_are_not_grounded_against_rows(self):
         body = self._ask([_ai_final("clarification", "ต้องการข้อมูลปี 2569 หรือ 2570")])
@@ -419,6 +435,55 @@ class TestDigestInEnvelope(AgentLoopBase):
                         headers={"X-API-Key": "test-secret"})
         self.assertEqual(r.status_code, 200)
         self.assertIn("population of schools: All schools.", self.llm.prompts[0][0]["content"])
+
+
+class TestFollowUpShapeGuard(AgentLoopBase):
+    """Narrowing follow-ups must keep the previous Turn's output columns."""
+
+    PREV = dict(HISTORY[0], digest={"columns": [{"name": "id"}, {"name": "name"}]})
+
+    def _ask(self, q, script, history=None):
+        self._wire(script)
+        return client.post("/api/query",
+                           json={"question": q, "history": history or [self.PREV]},
+                           headers={"X-API-Key": "test-secret"}).json()
+
+    def _tool_outputs(self):
+        return [m["content"] for m in self.llm.prompts[-1]
+                if isinstance(m, dict) and m.get("role") == "tool"]
+
+    def test_wrong_shape_is_sent_back_then_accepted_when_columns_kept(self):
+        body = self._ask("ช่วยกรองเฉพาะโรงเรียนบ้านห้วยทราย", [
+            _ai_tool("run_sql", sql="SELECT COUNT(*) AS n FROM schools"),
+            _ai_final("result", "มี 1 รายการ"),
+            _ai_tool("run_sql", sql="SELECT id, name FROM schools WHERE id = 1"),
+            _ai_final("result", "พบ 1 โรงเรียน"),
+        ])
+        self.assertEqual(body["answer_type"], "result")
+        self.assertEqual(body["columns"][0]["name"], "id")
+        self.assertTrue(any("only narrows the previous Turn" in o for o in self._tool_outputs()))
+
+    def test_repairs_are_bounded_then_the_answer_is_accepted(self):
+        script = [_ai_tool("run_sql", sql="SELECT COUNT(*) AS n FROM schools")]
+        script += [_ai_final("result", "มี 1 รายการ")] * 3
+        body = self._ask("เฉพาะบ้านห้วยทราย", script)
+        self.assertEqual(body["answer_type"], "result")  # not an infinite loop
+
+    def test_non_followup_or_no_digest_is_never_checked(self):
+        body = self._ask("นับโรงเรียน", [
+            _ai_tool("run_sql", sql="SELECT COUNT(*) AS n FROM schools"),
+            _ai_final("result", "มี 1 รายการ")])
+        self.assertEqual(body["steps_used"], 2)
+        body = self._ask("ช่วยกรองเฉพาะบ้านห้วยทราย", [
+            _ai_tool("run_sql", sql="SELECT COUNT(*) AS n FROM schools"),
+            _ai_final("result", "มี 1 รายการ")], history=[HISTORY[0]])
+        self.assertEqual(body["steps_used"], 2)  # history without digest: unchanged
+
+    def test_unit_helper(self):
+        from core.services.agent import previous_turn_columns
+        self.assertEqual(previous_turn_columns("ช่วยกรองเฉพาะนครปฐมหน่อยครับ", [self.PREV]), ["id", "name"])
+        self.assertIsNone(previous_turn_columns("สาเหตุของความเสี่ยงนั้นมาจากอะไร", [self.PREV]))
+        self.assertIsNone(previous_turn_columns("เฉพาะนครปฐม", []))
 
 
 class TestSafetyInsideRunSql(AgentLoopBase):
