@@ -1,0 +1,151 @@
+{
+  "_comment": "Curated meaning + POPULATION of the STS tables, read by the agent's describe_table tool (ADR 0010). Facts verified against the Oct 2026 datasource; owner review requested for 'population' lines. Never put real data values here.",
+  "_global": {
+    "blocked_column_pattern": "(first|middle|last|full)_?name|student_name|teacher_name|citizen|national_?id|passport|phone|mobile|email|line_?id|address|house_no|village|street|soi|trok|postal|_lat$|_lng$|latitude|longitude|photo|password|pin_|_pin$|token|hash|secret|guardian|birth"
+  },
+  "tables": {
+    "schools": {
+      "meaning": "One row per school (10 in the datasource). Holds the province/district used for every geographic breakdown.",
+      "population": "All schools. No deleted_at column — do NOT add a deleted_at filter on schools.",
+      "key_columns": ["id", "name", "province", "district", "school_status ('ACTIVE')"],
+      "joins": ["schools.id = student_term.\"SchoolID_Onec\"", "schools.id = cases.school_id", "schools.id = student_risk_profiles.school_id", "schools.id = school_terms.school_id"],
+      "notes": ["Province of a school is schools.province; cases.address_province is the student's HOME province, a different thing."]
+    },
+    "student_term": {
+      "meaning": "One row per ENROLLMENT of a student in an academic term (student_uuid). A person can have several.",
+      "population": "All enrollments incl. historical (~6,010). For the 'current student' count use student_current_enrollment_resolution, not this table alone.",
+      "key_columns": ["student_uuid", "person_uuid", "\"SchoolID_Onec\"", "\"AcademicYear_Onec\"", "\"Semester_Onec\"", "\"GradeLevelID_Onec\"", "classroom_id", "deleted_at"],
+      "joins": ["student_term.person_uuid = student_person.person_uuid", "student_term.student_uuid = student_risk_profiles.student_uuid"],
+      "notes": ["Contains personal names, address, coordinates — never select them (analytics only)."]
+    },
+    "student_person": {
+      "meaning": "One row per real person (identity); distinct from an enrollment.",
+      "population": "All persons ever registered (~6,510), including merged/duplicate identities.",
+      "key_columns": ["person_uuid", "identity_status", "merged_into"],
+      "joins": ["student_person.person_uuid = student_term.person_uuid"],
+      "notes": ["COUNT(DISTINCT person_uuid) counts people; COUNT(DISTINCT student_uuid) counts enrollments."]
+    },
+    "student_current_enrollment_resolution": {
+      "meaning": "View deciding which enrollment is a person's current one per term.",
+      "population": "One row per person per term (~6,010). resolution_state = 'ACTIVE' means the person counts as a current student.",
+      "key_columns": ["person_uuid", "selected_student_uuid", "resolution_state", "academic_year", "semester"],
+      "joins": ["selected_student_uuid = student_term.student_uuid AND person_uuid = student_term.person_uuid"],
+      "notes": ["Canonical source of 'นักเรียนปัจจุบัน'. Do not substitute student_status codes."]
+    },
+    "student_risk_profiles": {
+      "meaning": "Snapshot of every assessed student's risk level and the attendance figures that drive it.",
+      "population": "ALL assessed students (~5,987; ~610 are HIGH or WATCH), regardless of whether a case was opened. This is the population behind 'นักเรียนกลุ่มเสี่ยง'.",
+      "key_columns": ["student_uuid", "school_id", "risk_tier (HIGH/WATCH/NORMAL)", "risk_score", "attendance_rate_percent", "consecutive_absent_days", "term_absent_days", "late_count", "subject_late_count", "open_case_count", "profile_calculated_at"],
+      "joins": ["student_risk_profiles.school_id = schools.id", "student_risk_profiles.student_uuid = student_term.student_uuid"],
+      "notes": [
+        "For 'สาเหตุ/ปัจจัยของความเสี่ยงนักเรียน' compare the driver columns (attendance_rate_percent, term_absent_days, consecutive_absent_days, late_count) between risk tiers — NOT case_risk_signals, which covers only opened cases.",
+        "It is a snapshot: report profile_calculated_at when freshness matters."
+      ]
+    },
+    "cases": {
+      "meaning": "Follow-up cases opened for students (one row per case).",
+      "population": "Only students for whom a case was opened (~163 cases, ~162 students) — a small subset of at-risk students.",
+      "key_columns": ["id", "student_uuid", "school_id", "status", "risk_tier (case's own semantics)", "workflow_phase_code", "created_at", "deleted_at"],
+      "joins": ["cases.school_id = schools.id", "cases.student_uuid = student_term.student_uuid", "case_risk_signals.case_id = cases.id"],
+      "notes": ["Holds student name/address columns — never select them. Do not substitute cases.risk_tier for student_risk_profiles.risk_tier."]
+    },
+    "case_risk_signals": {
+      "meaning": "Rule-triggered signals (Thai text reason) attached to a case.",
+      "population": "Only cases that have signals (~11 signals across ~7 cases). NOT the cause of risk for all at-risk students.",
+      "key_columns": ["case_id", "signal_rule_code", "signal_reason (Thai text with thresholds)", "detected_at"],
+      "joins": ["case_risk_signals.case_id = cases.id"],
+      "notes": ["A province can have at-risk students but zero signals when none of its students has a case; an empty result there is a real answer."]
+    },
+    "case_reviews": {
+      "meaning": "Review decisions made on cases.",
+      "population": "Reviewed cases only (~20).",
+      "key_columns": ["case_id", "review_action", "resolution_outcome", "reviewed_at"],
+      "joins": ["case_reviews.case_id = cases.id", "case_referrals.case_review_id = case_reviews.id"],
+      "notes": []
+    },
+    "case_referrals": {
+      "meaning": "Referrals of a case to an outside agency.",
+      "population": "Referred cases only (~6).",
+      "key_columns": ["case_id", "case_review_id", "referral_agency_id", "status_code", "referred_at"],
+      "joins": ["case_referrals.case_id = cases.id"],
+      "notes": []
+    },
+    "tasks": {
+      "meaning": "Home-visit / assistance tasks created from cases.",
+      "population": "Tasks created from cases (~51).",
+      "key_columns": ["id", "case_id", "task_type (VISIT/ASSIST)", "status", "target_school_id", "deleted_at"],
+      "joins": ["tasks.case_id = cases.id", "task_assistance_measures.task_id = tasks.id"],
+      "notes": ["Submissions cannot be joined back to a task or case (the task_links table is not readable)."]
+    },
+    "task_assistance_measures": {
+      "meaning": "Assistance measure codes attached to a task (one row per task × measure).",
+      "population": "Tasks with recorded measures only (~16 rows; mostly empty).",
+      "key_columns": ["task_id", "assistance_measure_code"],
+      "joins": ["task_assistance_measures.task_id = tasks.id"],
+      "notes": []
+    },
+    "task_submissions": {
+      "meaning": "Field submissions (home-visit results) — readable on its own, not joinable to task/case.",
+      "population": "Submitted visits only (~22).",
+      "key_columns": ["id", "submitted_at", "follow_up_problem_category_code", "case_follow_up_decision", "deleted_at"],
+      "joins": [],
+      "notes": ["Use it for counts by month/outcome/problem category only. Never select addresses, coordinates or free-text detail columns."]
+    },
+    "attendance_day": {
+      "meaning": "View: one row per student per day with the day-level attendance status.",
+      "population": "Recorded student-days (~30,425). Source of truth for attendance rate, absent days, consecutive absence.",
+      "key_columns": ["student_uuid", "\"AttendanceDate\"", "\"AttendanceStatus\" (1 present, 2 absent, 3 late, 4 leave)", "\"AcademicYear_Onec\"", "\"Semester_Onec\""],
+      "joins": ["attendance_day.student_uuid = student_term.student_uuid"],
+      "notes": ["Attendance rate denominator = days with status <> 4; present = status IN (1, 3)."]
+    },
+    "attendance_effective_records": {
+      "meaning": "View: one row per student per attendance SESSION (period).",
+      "population": "Session-level records (~156,012).",
+      "key_columns": ["student_uuid", "session_id", "\"SchoolID_Onec\"", "\"AttendanceDate\"", "\"Period\"", "\"AttendanceStatus\""],
+      "joins": ["attendance_effective_records.session_id = attendance_sessions.id"],
+      "notes": ["Use for session-grain questions only; use attendance_day for per-day rates."]
+    },
+    "attendance_subject_day": {
+      "meaning": "View: one row per student per subject per day.",
+      "population": "Subject-day records (~156,012).",
+      "key_columns": ["student_uuid", "subject_id", "\"AttendanceDate\"", "\"AttendanceStatus\""],
+      "joins": ["attendance_subject_day.subject_id = subjects.id"],
+      "notes": []
+    },
+    "attendance_sessions": {
+      "meaning": "One row per attendance-taking session (class period).",
+      "population": "All sessions (~11,519), open and submitted.",
+      "key_columns": ["id", "school_id", "classroom_id", "attendance_date", "period", "session_kind", "status", "deleted_at"],
+      "joins": ["attendance_sessions.classroom_id = school_classrooms.id", "attendance_sessions.school_id = schools.id"],
+      "notes": ["Count sessions with COUNT(DISTINCT attendance_sessions.id)."]
+    },
+    "school_classrooms": {
+      "meaning": "Classrooms of a school in one term.",
+      "population": "All classrooms (~445).",
+      "key_columns": ["id", "school_id", "school_term_id", "grade_level_id", "room_name", "classroom_status", "deleted_at"],
+      "joins": ["school_classrooms.school_id = schools.id", "school_classrooms.school_term_id = school_terms.id", "student_term.classroom_id = school_classrooms.id"],
+      "notes": []
+    },
+    "school_terms": {
+      "meaning": "Academic year + semester of a school.",
+      "population": "School-terms (~11). status = 'ACTIVE' is the current term per school.",
+      "key_columns": ["id", "school_id", "academic_year", "semester", "starts_on", "ends_on", "status"],
+      "joins": ["school_terms.school_id = schools.id"],
+      "notes": ["Academic year comes from academic_year, never from the Gregorian year + 543."]
+    },
+    "teachers": {
+      "meaning": "Teachers (identity table).",
+      "population": "All teachers (~453).",
+      "key_columns": ["id", "teacher_status", "deleted_at"],
+      "joins": ["school_teacher_memberships.teacher_id = teachers.id"],
+      "notes": ["Holds names, citizen id, phone, email — personal data: count only, never select personal columns."]
+    },
+    "school_teacher_memberships": {
+      "meaning": "A teacher's membership in a school over time.",
+      "population": "Memberships incl. ended ones (~455).",
+      "key_columns": ["teacher_id", "school_id", "membership_status", "started_on", "ended_on", "deleted_at"],
+      "joins": ["school_teacher_memberships.school_id = schools.id", "school_teacher_memberships.teacher_id = teachers.id"],
+      "notes": ["Present-tense questions ('ครูที่สอนอยู่') need the ACTIVE membership status."]
+    }
+  }
+}

@@ -338,6 +338,61 @@ class TestGroundingInLoop(AgentLoopBase):
         self.assertEqual(body["answer_type"], "clarification")
 
 
+class TestDataKnowledgeTools(AgentLoopBase):
+    """Ticket #37: describe_table / sample_values."""
+
+    def _ask(self, script):
+        self._wire(script)
+        return client.post("/api/query",
+                           json={"question": "โรงเรียนมีกี่แห่ง", "history": HISTORY},
+                           headers={"X-API-Key": "test-secret"}).json()
+
+    def _tool_outputs(self):
+        return [m["content"] for m in self.llm.prompts[-1]
+                if isinstance(m, dict) and m.get("role") == "tool"]
+
+    def test_tools_are_bound_and_in_the_prompt(self):
+        self._ask([_ai_final("clarification", "ขอรายละเอียด")])
+        names = [t["function"]["name"] for t in self.llm.bound_tools]
+        self.assertIn("describe_table", names)
+        self.assertIn("sample_values", names)
+        self.assertIn("describe_table(table_name)", self.llm.prompts[0][0]["content"])
+
+    def test_describe_table_returns_population_notes(self):
+        self._ask([_ai_tool("describe_table", table_name="schools"),
+                   _ai_final("clarification", "ขอรายละเอียด")])
+        out = self._tool_outputs()[0]
+        self.assertIn("Population", out)
+        self.assertIn("deleted_at", out)  # schools has no deleted_at — the Oct 2026 lesson
+
+    def test_describe_unknown_table_lists_available(self):
+        self._ask([_ai_tool("describe_table", table_name="nope"),
+                   _ai_final("clarification", "ขอรายละเอียด")])
+        self.assertIn("not found", self._tool_outputs()[0])
+
+    def test_sample_values_returns_real_values(self):
+        self._ask([_ai_tool("sample_values", table_name="schools", column_name="name"),
+                   _ai_final("clarification", "ขอรายละเอียด")])
+        out = json.loads(self._tool_outputs()[0])
+        self.assertEqual(out["values"], ["บ้านห้วยทราย"])
+        self.assertFalse(out["more_values_exist"])
+
+    def test_sample_values_refuses_personal_columns_and_bad_identifiers(self):
+        self._ask([_ai_tool("sample_values", table_name="schools", column_name="citizen_id"),
+                   _ai_tool("sample_values", table_name="schools", column_name='name"; --'),
+                   _ai_final("clarification", "ขอรายละเอียด")])
+        outs = self._tool_outputs()
+        self.assertTrue(outs[0].startswith("REFUSED"))
+        self.assertTrue(outs[1].startswith("REFUSED"))
+
+    def test_sampling_never_satisfies_the_result_gate(self):
+        body = self._ask([_ai_tool("sample_values", table_name="schools", column_name="name"),
+                          _ai_final("result", "มีโรงเรียน"),
+                          _ai_final("clarification", "ขอรายละเอียด")])
+        self.assertEqual(body["answer_type"], "clarification")
+        self.assertTrue(any("no successful run_sql" in o for o in self._tool_outputs()))
+
+
 class TestSafetyInsideRunSql(AgentLoopBase):
     def test_unsafe_sql_never_executes_and_loop_recovers(self):
         self._wire([
@@ -459,7 +514,8 @@ class TestToolBinding(unittest.TestCase):
         tools = eng._llm.bound_tools
         self.assertIsNotNone(tools, "loop must bind the tool spec to the LLM")
         names = {t["function"]["name"] for t in tools}
-        self.assertEqual(names, {"get_schema", "run_sql", "final_answer"})
+        self.assertEqual(names, {"get_schema", "describe_table", "sample_values",
+                                 "run_sql", "final_answer"})
 
     def test_system_prompt_classifies_before_writing_sql(self):
         """Regression (post-#21 eval): clarify 0/4 and one PII denial hunted to

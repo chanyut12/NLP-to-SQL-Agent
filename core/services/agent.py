@@ -29,7 +29,15 @@ from typing import Any, Callable, List, Optional
 import pandas as pd
 
 from core.config import settings
+from core.profiles import load_table_notes
 from core.domain.sql_safety import SQLSafetyError, validate_and_sanitize_sql
+from core.services.data_knowledge import (
+    SAMPLE_LIMIT,
+    MAX_VALUE_CHARS,
+    column_blocked,
+    format_table_notes,
+    is_identifier,
+)
 from core.services.answer_grounding import (
     drop_ungrounded_sentences,
     fallback_message,
@@ -77,6 +85,13 @@ using tools — you do not answer from memory.
 ### Tools:
 - get_schema(table_name): full column list for one table. Use when unsure \
 about columns or join paths.
+- describe_table(table_name): what the table MEANS and which population its rows \
+cover (e.g. only opened cases vs all assessed students), key columns and join \
+paths. Use it when unsure which table answers a question — especially "why / \
+cause" questions.
+- sample_values(table_name, column_name): up to 20 real distinct values of one \
+column, to see how a status / province / category value is actually spelled \
+before you filter on it. Personal-data columns are refused.
 - run_sql(sql): executes a READ-ONLY SELECT (WITH ... SELECT allowed) against \
 the datasource. Safety validation runs inside the tool — write operations and \
 forbidden tables are rejected and the reason is returned to you. A LIMIT of at \
@@ -191,6 +206,38 @@ AGENT_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "describe_table",
+            "description": ("What a table means and which population its rows "
+                            "cover, key columns and join paths."),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "table_name": {"type": "string", "description": "Exact table name"},
+                },
+                "required": ["table_name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "sample_values",
+            "description": ("Up to 20 real distinct values of one column, to check "
+                            "how a value is spelled before filtering. Personal-data "
+                            "columns are refused."),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "table_name": {"type": "string"},
+                    "column_name": {"type": "string"},
+                },
+                "required": ["table_name", "column_name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "run_sql",
             "description": ("Execute a READ-ONLY SELECT against the datasource. "
                             "Safety validation runs inside the tool — writes and "
@@ -253,6 +300,7 @@ class _AgentSession:
         self.probes_after_empty: int = 0
         self.turn_rows: list = []         # rows of every successful run_sql (grounding, ticket #36)
         self.grounding_repaired: bool = False
+        self.table_notes: dict = load_table_notes(settings.DOMAIN_PROFILE)
 
     # --- tool: get_schema -----------------------------------------------------
     async def tool_get_schema(self, table_name: str) -> str:
@@ -266,6 +314,51 @@ class _AgentSession:
         sample = ", ".join(sorted(tables.keys())[:40])
         return (f"Table '{table_name}' not found. Available tables "
                 f"(first 40): {sample}")
+
+    # --- tool: describe_table (ADR 0010 / ticket #37) ---------------------------
+    def _resolve_table(self, table_name: str) -> Optional[str]:
+        wanted = (table_name or "").strip().lower()
+        for name in (self.bundle.raw_tables or {}):
+            if name.lower() == wanted:
+                return name
+        return None
+
+    async def tool_describe_table(self, table_name: str) -> str:
+        name = self._resolve_table(table_name)
+        if name is None:
+            sample = ", ".join(sorted((self.bundle.raw_tables or {}).keys())[:40])
+            return (f"Table '{table_name}' not found. Available tables "
+                    f"(first 40): {sample}")
+        return format_table_notes(name, self.table_notes, self.bundle.raw_tables.get(name))
+
+    # --- tool: sample_values (ADR 0010 / ticket #37) ------------------------------
+    async def tool_sample_values(self, table_name: str, column_name: str) -> str:
+        name = self._resolve_table(table_name)
+        if name is None:
+            return f"Table '{table_name}' not found or not available."
+        if not is_identifier(name) or not is_identifier(column_name or ""):
+            return "REFUSED: table and column must be plain identifiers."
+        if column_blocked(column_name, self.table_notes):
+            return (f"REFUSED: column '{column_name}' looks like personal data or a "
+                    f"credential — its values cannot be sampled. Aggregate instead.")
+        sql = (f'SELECT DISTINCT "{column_name}" FROM "{name}" '
+               f'WHERE "{column_name}" IS NOT NULL ORDER BY 1 LIMIT {SAMPLE_LIMIT + 1}')
+        try:
+            safe = validate_and_sanitize_sql(
+                sql, dialect=self.dialect, max_limit=SAMPLE_LIMIT + 1,
+                allowed_tables=self.bundle.all_tables)
+            df = await asyncio.to_thread(pd.read_sql, safe.sql, self.db_engine)
+        except SQLSafetyError as e:
+            return f"{_SAFETY_REJECTION_PREFIX}: {e}"
+        except Exception as e:
+            return f"EXECUTION_ERROR: {str(e)}"
+        # NOTE: deliberately does not touch executed_sql/rows — sampling a column
+        # must never satisfy the "a result needs an executed query" gate.
+        vals = [str(v)[:MAX_VALUE_CHARS] for v in df.iloc[:, 0].tolist()]
+        return json.dumps({"table": name, "column": column_name,
+                           "values": vals[:SAMPLE_LIMIT],
+                           "more_values_exist": len(vals) > SAMPLE_LIMIT},
+                          ensure_ascii=False, default=str)
 
     # --- tool: run_sql --------------------------------------------------------
     async def tool_run_sql(self, sql: str) -> str:
@@ -455,8 +548,8 @@ async def run_agent_turn(
             # the loop continues (counts toward the budget).
             messages.append({"role": "assistant", "content": str(getattr(ai_msg, "content", ""))})
             messages.append({"role": "system", "content":
-                             "Respond with a tool call (get_schema, run_sql, "
-                             "or final_answer) — not with prose."})
+                             "Respond with a tool call (get_schema, describe_table, "
+                             "sample_values, run_sql, or final_answer) — not with prose."})
             continue
 
         messages.append({
@@ -479,6 +572,13 @@ async def run_agent_turn(
                 if name == "get_schema":
                     emit("tool", tool="get_schema")
                     out = await session.tool_get_schema(args.get("table_name", ""))
+                elif name == "describe_table":
+                    emit("tool", tool="describe_table")
+                    out = await session.tool_describe_table(args.get("table_name", ""))
+                elif name == "sample_values":
+                    emit("tool", tool="sample_values")
+                    out = await session.tool_sample_values(
+                        args.get("table_name", ""), args.get("column_name", ""))
                 elif name == "run_sql":
                     emit("sql_planned", sql=args.get("sql", ""))
                     out = await session.tool_run_sql(args.get("sql", ""))
@@ -509,7 +609,8 @@ async def run_agent_turn(
                         done.prep_ms = prep_ms
                 else:
                     out = (f"ERROR: unknown tool '{name}'. "
-                           f"Available tools: get_schema, run_sql, final_answer.")
+                           f"Available tools: get_schema, describe_table, sample_values, "
+                           f"run_sql, final_answer.")
             except Exception as e:
                 # A tool crash must be readable by the model, never fatal to the
                 # Turn — the loop is exactly the mechanism for recovering.

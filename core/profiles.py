@@ -43,3 +43,13 @@ def load_schema_mappings(profile: str) -> dict:
         return {}
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def load_table_notes(profile: str) -> dict:
+    """Curated table meaning/population notes for the agent's describe_table tool.
+    {} when the profile has no table_notes.json (the tool degrades to raw columns)."""
+    path = os.path.join(profile_dir(profile), "table_notes.json")
+    if not os.path.exists(path):
+        return {}
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
