@@ -18,7 +18,7 @@ def main():
 
     # Save presentation
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    out_path = os.path.join(base_dir, "presentation.pptx")
+    out_path = os.path.join(base_dir, "..", "..", "docs", "reports", "presentation.pptx")
     
     prs.save(out_path)
     print(f"Saved: {out_path}")

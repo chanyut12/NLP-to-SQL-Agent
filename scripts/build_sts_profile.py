@@ -14,7 +14,7 @@ import os
 import re
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SRC = os.path.join(ROOT, "TEXT_TO_SQL_STS_RAG_EXAMPLES.json")
+SRC = os.path.join(ROOT, "data", "corpus", "TEXT_TO_SQL_STS_RAG_EXAMPLES.json")
 OUT_DIR = os.path.join(ROOT, "profiles", "sts")
 DB_URL = os.getenv("STS_DB_URL", "postgresql://postgres:stsLocalDev2026@localhost:5432/sts")
 

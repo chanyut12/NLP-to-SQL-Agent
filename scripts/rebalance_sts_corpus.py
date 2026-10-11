@@ -25,8 +25,8 @@ import os
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CORPUS_PATH = os.path.join(ROOT, "TEXT_TO_SQL_STS_RAG_EXAMPLES.json")
-ARCHIVE_PATH = os.path.join(ROOT, "TEXT_TO_SQL_STS_RAG_EXAMPLES_ARCHIVE.json")
+CORPUS_PATH = os.path.join(ROOT, "data", "corpus", "TEXT_TO_SQL_STS_RAG_EXAMPLES.json")
+ARCHIVE_PATH = os.path.join(ROOT, "data", "corpus", "archive", "TEXT_TO_SQL_STS_RAG_EXAMPLES_ARCHIVE.json")
 
 # --- ADR 0007 quotas ----------------------------------------------------------
 BUCKET_QUOTA = 8

@@ -7,7 +7,7 @@ Patch document.xml:
 
 import re
 
-DOC_PATH = "report_unpacked/word/document.xml"
+DOC_PATH = "docs/reports/report_unpacked/word/document.xml"
 
 with open(DOC_PATH, "r", encoding="utf-8", errors="replace") as f:
     content = f.read()

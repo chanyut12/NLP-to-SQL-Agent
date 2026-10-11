@@ -36,7 +36,7 @@ class ExampleStore:
     
     def __init__(
         self,
-        examples_path: str = "thai_sql_examples.json",
+        examples_path: str = "data/corpus/thai_sql_examples.json",
         model_name: str = None,
         persist_directory: Optional[str] = "rag_db",
         profile: str = "default",
@@ -348,7 +348,7 @@ class ExampleStore:
 
 
 def create_example_store(
-    examples_path: str = "thai_sql_examples.json",
+    examples_path: str = "data/corpus/thai_sql_examples.json",
     persist_directory: Optional[str] = "rag_db",
     profile: str = "default",
 ) -> ExampleStore:

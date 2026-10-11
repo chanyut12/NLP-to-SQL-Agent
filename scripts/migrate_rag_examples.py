@@ -190,7 +190,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--input",
-        default="thai_sql_examples.json",
+        default="data/corpus/thai_sql_examples.json",
         help="Input JSON file with examples"
     )
     parser.add_argument(
