@@ -136,6 +136,14 @@ class ExampleStore:
                 "difficulty": difficulty,
             })
         
+        # The examples file is the only source: drop entries it no longer holds,
+        # so an edited example's old SQL stops being retrieved.
+        file_ids = {generate_stable_id(ex.get("question", ""), ex.get("sql", "")) for ex in examples}
+        stale_ids = sorted(existing_ids - file_ids)
+        if stale_ids:
+            logger.info("Removing %s stale examples from RAG store.", len(stale_ids))
+            self.collection.delete(ids=stale_ids)
+
         # Batch upsert only new items
         if new_ids:
             logger.info("Syncing %s new examples to RAG store.", len(new_ids))

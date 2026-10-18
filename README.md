@@ -162,6 +162,30 @@ OLLAMA_MODEL=qwen2.5-coder:7b
 | `nlq-status` | สถานะ + HTTP code ของ UI |
 | `nlq-log` | ดู log สด (`/tmp/nlq_server.log`) |
 
+**คำสั่ง `launchctl` ตรง ๆ** (สิ่งที่ alias ข้างบนรันให้ — ใช้ได้แม้ไม่มี alias):
+
+```bash
+# Start — โหลด service (RunAtLoad ทำให้สตาร์ททันที)
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.chanyut.nlq-server.plist
+
+# Stop — ถอด service ออก (แค่ kill ไม่พอ: KeepAlive จะเปิด process ใหม่เอง)
+launchctl bootout gui/$(id -u)/com.chanyut.nlq-server
+
+# Restart — ใช้หลังแก้ profiles/sts/examples.json, table_notes.json, schema_mappings.json หรือโค้ด
+#           (service ไม่มี --reload; ตัวอย่าง RAG sync เข้า Chroma ตอนสตาร์ทเท่านั้น)
+launchctl kickstart -k gui/$(id -u)/com.chanyut.nlq-server
+
+# Status — มี PID = กำลังรัน
+launchctl list | grep nlq-server
+curl -s http://localhost:8000/api/health
+
+# Logs — access log / app log (ดูบรรทัด "Syncing N new examples to RAG store.")
+tail -f /tmp/nlq_server.log
+tail -f /tmp/nlq_server.err.log
+```
+
+> หลัง `bootout` service จะกลับมาเองตอน login ครั้งถัดไป (plist ยังอยู่ และตั้ง `RunAtLoad`)
+
 > alias ถูกเพิ่มใน `~/.zshrc` — terminal ใหม่ใช้ได้เลย (แท็บเดิมพิมพ์ `reload` ก่อนหนึ่งครั้ง)
 > สลับโหมดไม่ต้องแกะเอง: รัน `./start_server.sh` ตอน service ยึด port = สคริปต์ปิดให้เอง; พิมพ์ `nlq-start` ตอน dev server ปิดแล้ว = กลับโหมด service
 

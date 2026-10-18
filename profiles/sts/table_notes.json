@@ -99,6 +99,7 @@
       ],
       "notes": [
         "risk_tier is a risk LEVEL (HIGH/WATCH/NORMAL), not a cause. Never present a comparison between tiers as the cause of risk.",
+        "For 'สาเหตุของความเสี่ยง / ทำไมเสี่ยง / ทำไมจังหวัด X น่าเป็นห่วง': count HIGH students (current enrollment, ACTIVE schools — the same population as the risk ranking) per factor (no % sign inside string literals: write ร้อยละ — a bare % breaks execution) whose profile breaches the alert thresholds: attendance_rate_percent < 80, consecutive_absent_days >= 3, term_absent_days >= 7, late_count > 0. One row per factor (Thai label first), plus high_risk_total and recorded_signal_count (case_risk_signals for the same slice). In the message call these 'ปัจจัยที่พบ', not the reason the system recorded.",
         "It is a snapshot: report profile_calculated_at when freshness matters."
       ]
     },
@@ -121,7 +122,10 @@
         "case_risk_signals.case_id = cases.id"
       ],
       "notes": [
-        "Holds student name/address columns — never select them. Do not substitute cases.risk_tier for student_risk_profiles.risk_tier."
+        "Three different 'cause' questions, by stage: (1) 'สาเหตุของความเสี่ยง / ทำไมเสี่ยง' = factors in student_risk_profiles of HIGH students (before any case); (2) 'ระบบแจ้งเตือน / เปิดเคสเพราะอะไร' = cases.reason_flagged (why a case was opened), with case_risk_signals as the rule-level detail; (3) 'ติดตาม / เยี่ยมบ้านแล้วพบสาเหตุอะไร' = task_submissions problem category / absence reason (found by the follow-up). Answer the stage the question names.",
+        "Holds student name/address columns — never select them. Do not substitute cases.risk_tier for student_risk_profiles.risk_tier.",
+        "Stage (2) case-opening reason: reason_flagged is free text with a number; normalise it with starts_with(c.reason_flagged, '<prefix>') (not LIKE — a bare % breaks execution): 'ขาดเรียนหลังปิดเคสล่าสุด' → 'ขาดเรียนซ้ำหลังปิดเคส', 'ขาดเรียนสะสม', 'ขาดเรียนติดต่อกัน', 'เวลาเรียนต่ำกว่าเกณฑ์', ELSE 'อื่น ๆ (ครูระบุเอง)'. For case-opening REASONS count all cases incl. soft-deleted ones (deleted cases are still OPEN, never resolved — a product decision kept so reason/signal counts match across questions). Never output reason_flagged raw: teachers may write names in it.",
+        "For HOW MANY cases were opened (per school / province / status) exclude soft-deleted cases: WHERE c.deleted_at IS NULL (134 of 173 cases are deleted; deleted ≠ resolved — resolution is status = 'RESOLVED'). Count from cases itself, not from student_risk_profiles, and do not restrict to HIGH students unless the question says so. Put case_count as the first numeric column."
       ]
     },
     "case_risk_signals": {
@@ -139,8 +143,10 @@
         "cases.school_id = schools.id"
       ],
       "notes": [
-        "A 'สาเหตุ / แหล่งที่มา / เหตุผลที่ระบบแจ้งเตือนความเสี่ยง' question is answered ONLY from this table: group by signal_source_code and/or signal_rule_code (count of signals), optionally listing signal_reason. Do not substitute anything else for it.",
-        "Coverage is small (opened cases only). State that in the message. When the requested slice (e.g. a province) has no signals, the answer is that no signals are recorded — do not replace it with another measure."
+        "Stage (2) detail: signals are the alert rules that fired on opened cases (~11 in total). A general 'สาเหตุของความเสี่ยง' question is answered from student_risk_profiles (stage 1) with this count alongside as recorded_signal_count; a 'why was the case opened' question from cases.reason_flagged (see cases notes).",
+        "Answer from this table alone only when the question asks specifically for the reasons the SYSTEM RECORDED / the alert rules ('เหตุผลที่ระบบบันทึก', 'กฎที่แจ้งเตือน'): GROUP BY signal_rule_code with a Thai label first: CASE signal_rule_code WHEN 'LOW_ATTENDANCE_PERCENT' THEN 'เวลาเรียนต่ำกว่าเกณฑ์' WHEN 'MIXED_SUBJECT_ABSENCE' THEN 'โดดคาบ' WHEN 'TERM_ABSENCE_ACCUMULATION' THEN 'ขาดสะสมต่อเทอม' WHEN 'SUBJECT_AVOIDANCE_PERCENT' THEN 'เลี่ยงวิชาเดิม' ELSE signal_rule_code END AS cause.",
+        "Select signal_source_code only when the question asks about the source system ('แหล่งที่มา / ระบบไหน'); today every signal has the same source.",
+        "Do not filter cases.deleted_at when counting signals: 10 of 11 signals sit on soft-deleted (still OPEN) cases; they are kept on purpose so cause counts match across questions."
       ]
     },
     "case_reviews": {
@@ -206,17 +212,29 @@
     },
     "task_submissions": {
       "meaning": "Field submissions (home-visit results) — readable on its own, not joinable to task/case.",
-      "population": "Submitted visits only (~22).",
+      "population": "Submitted visits only (~46 not deleted).",
       "key_columns": [
-        "id",
-        "submitted_at",
-        "follow_up_problem_category_code",
+        "absence_reason_category_code",
+        "absence_reason_code",
         "case_follow_up_decision",
-        "deleted_at"
+        "deleted_at",
+        "follow_up_problem_category_code",
+        "id",
+        "submitted_at"
       ],
-      "joins": [],
+      "joins": [
+        "task_submissions.follow_up_problem_category_code = follow_up_problem_categories.code",
+        "task_submissions.absence_reason_code = absence_reasons.code",
+        "task_submissions.absence_reason_category_code = absence_reason_categories.code",
+        "task_submissions.parental_status_code = parental_status_options.code",
+        "home_visit_disadvantage_observations.task_submission_id = task_submissions.id (disadvantage_type_code = disadvantage_types.code)",
+        "home_visit_disability_observations.task_submission_id = task_submissions.id (disability_type_code = disability_types.code)",
+        "task_submission_residence_environments.task_submission_id = task_submissions.id (residence_environment_code = residence_environment_options.code)"
+      ],
       "notes": [
-        "Use it for counts by month/outcome/problem category only. Never select addresses, coordinates or free-text detail columns."
+        "Use it for counts by month/outcome/problem category only. Never select addresses, coordinates or free-text detail columns.",
+        "Stage (3) cause found by follow-up: count by follow_up_problem_categories.label_th or by absence_reasons.label_th (+ category), WHERE deleted_at IS NULL; show unset codes as 'ไม่ได้ระบุ'. It cannot be sliced by province/school/case (no readable link) — say so when the question asks for one.",
+        "Real/root cause found on the home visit (ยากจน, พ่อแม่หย่าร้าง, ใกล้แหล่งยาเสพติด …) — NOT cases.reason_flagged (that is why the case was opened). UNION ALL the findings: disadvantage_types (skip NONE), parental_status_options (skip LIVING_TOGETHER/UNKNOWN), residence_environment_options (skip NORMAL/OTHER), disability_types (skip NONE), absence_reasons (skip UNKNOWN); output finding, finding_group, COUNT(DISTINCT task_submission_id) AS home_visit_count, only submissions WHERE deleted_at IS NULL."
       ]
     },
     "attendance_day": {
