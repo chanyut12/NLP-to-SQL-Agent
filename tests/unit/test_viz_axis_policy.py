@@ -126,3 +126,92 @@ class TestExitGuard:
         df = pd.DataFrame({"student_id": [101, 102], "attendance_count": [12, 8]})
         cfg = s.recommend(df, "จำนวนการขาดเรียนต่อนักเรียน")
         assert cfg["chart_type"] == "table"
+
+
+def df_risk_signals_by_rule() -> pd.DataFrame:
+    # The Oct 2026 log 8a076241: one source system, four rules. Charting the
+    # source column gave four bars all labelled SUBJECT_RISK_MONITOR.
+    return pd.DataFrame(
+        {
+            "signal_source_code": ["SUBJECT_RISK_MONITOR"] * 4,
+            "signal_rule_code": [
+                "LOW_ATTENDANCE_PERCENT",
+                "MIXED_SUBJECT_ABSENCE",
+                "TERM_ABSENCE_ACCUMULATION",
+                "SUBJECT_AVOIDANCE_PERCENT",
+            ],
+            "signal_count": [4, 4, 2, 1],
+            "example_reason": [
+                "เวลาเรียนต่ำกว่าเกณฑ์: มาเรียน 64% (ต่ำกว่า 80%)",
+                "โดดคาบ: มาเรียนบางคาบแต่ขาดบางคาบ 3 วัน (เกณฑ์ 3 วัน)",
+                "ขาดสะสมต่อเทอม 7 วัน (เกณฑ์ 7 วัน)",
+                "เลี่ยงวิชาเดิม: ขาดวิชาการงานอาชีพ (CAREER) 38%",
+            ],
+        }
+    )
+
+
+class TestConstantColumnNeverLabelsAnAxis:
+    """A label column with one value across many rows gives bars that all
+    share one name — it carries no axis information."""
+
+    @pytest.mark.parametrize("preferred", [None, "bar", "pie"])
+    def test_rule_code_labels_the_axis_not_the_single_source(self, preferred):
+        cfg = svc().recommend(
+            df_risk_signals_by_rule(), "สาเหตุของความเสี่ยงเกิดจากอะไร", preferred
+        )
+        assert cfg["x_col"] == "signal_rule_code"
+
+    def test_guard_fixes_constant_axis_from_ai_path(self):
+        class FakeLLM:
+            def invoke(self, *_args, **_kwargs):
+                return (
+                    '{"chart_type": "bar", "title": "t", "x_col": "signal_source_code", '
+                    '"y_col": "signal_count", "reason": "r"}'
+                )
+
+        s = VizService(llm=FakeLLM(), enable_intelligent=True)
+        cfg = s.recommend(df_risk_signals_by_rule(), "สาเหตุของความเสี่ยงเกิดจากอะไร")
+        assert cfg["x_col"] == "signal_rule_code"
+
+    def test_single_row_keeps_its_only_label(self):
+        df = pd.DataFrame({"signal_rule_code": ["LOW_ATTENDANCE_PERCENT"], "signal_count": [4]})
+        cfg = svc().recommend(df, "สาเหตุของความเสี่ยง")
+        assert cfg["x_col"] == "signal_rule_code"
+
+    def test_reason_labels_the_axis_when_rules_repeat(self):
+        # Live run after the fix: grouped by source, rule AND reason -> 8 rows,
+        # 4 rule codes. Only signal_reason names each bar uniquely.
+        df = pd.DataFrame(
+            {
+                "signal_source_code": ["SUBJECT_RISK_MONITOR"] * 4,
+                "signal_rule_code": [
+                    "MIXED_SUBJECT_ABSENCE", "LOW_ATTENDANCE_PERCENT",
+                    "LOW_ATTENDANCE_PERCENT", "TERM_ABSENCE_ACCUMULATION",
+                ],
+                "signal_reason": [
+                    "โดดคาบ: มาเรียนบางคาบแต่ขาดบางคาบ 3 วัน (เกณฑ์ 3 วัน)",
+                    "เวลาเรียนต่ำกว่าเกณฑ์: มาเรียน 64% (ต่ำกว่า 80%)",
+                    "เวลาเรียนต่ำกว่าเกณฑ์: มาเรียน 74% (ต่ำกว่า 80%)",
+                    "ขาดสะสมต่อเทอม 8 วัน (เกณฑ์ 7 วัน)",
+                ],
+                "signal_count": [4, 1, 1, 1],
+            }
+        )
+        cfg = svc().recommend(df, "สาเหตุของความเสี่ยงเกิดจากอะไร")
+        assert cfg["x_col"] == "signal_reason"
+
+    def test_value_axis_skips_a_total_repeated_on_every_row(self):
+        # Risk-factor answer: per-factor count beside slice-wide totals.
+        df = pd.DataFrame(
+            {
+                "factor": ["มาเรียนต่ำกว่า 80%", "ขาดติดต่อกันตั้งแต่ 3 วัน", "มาสาย"],
+                "high_risk_students": [75, 75, 12],
+                "high_risk_total": [77, 77, 77],
+                "recorded_signal_count": [1, 1, 1],
+            }
+        )
+        cfg = svc().recommend(df, "ทำไมจังหวัดตรังจึงน่าเป็นห่วงที่สุด เพราะอะไร")
+        assert (cfg["x_col"], cfg["y_col"]) == ("factor", "high_risk_students")
+
+
