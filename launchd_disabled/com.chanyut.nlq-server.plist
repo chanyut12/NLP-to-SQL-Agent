@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.chanyut.nlq-server</string>
+    <key>WorkingDirectory</key>
+    <string>/Users/chanyut/Documents/nlp_sql_project</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/chanyut/Documents/nlp_sql_project/.venv/bin/uvicorn</string>
+        <string>api.main:app</string>
+        <string>--host</string>
+        <string>127.0.0.1</string>
+        <string>--port</string>
+        <string>8000</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/tmp/nlq_server.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/nlq_server.err.log</string>
+</dict>
+</plist>
