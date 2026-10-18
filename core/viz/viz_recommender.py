@@ -94,6 +94,24 @@ def detect_series_column(df: pd.DataFrame, x_col: Optional[str], y_col: Optional
     
     return None
 
+def _repeating_label_cols(df: pd.DataFrame, label_cols: List[str]) -> set:
+    """Label columns that would give several bars the same name (e.g. one
+    source code on every row). They lose the axis to the best label column
+    that does tell rows apart: unique per row first, else at least varying."""
+    if len(df) < 2:
+        return set()
+    distinct = {}
+    for c in label_cols:
+        try:
+            distinct[c] = int(df[c].nunique(dropna=False))
+        except TypeError:
+            distinct[c] = 0  # unhashable cells; never a good label
+    for floor in (len(df), 2):
+        if any(n >= floor for n in distinct.values()):
+            return {c for c, n in distinct.items() if n < floor}
+    return set()
+
+
 def recommend_chart(df: pd.DataFrame, question: str = "", preferred_chart_type: str = None) -> Tuple[str, Optional[str], Optional[str]]:
     """
     Analyze dataframe and recommend (chart_type, x_col, y_col).
@@ -118,12 +136,14 @@ def recommend_chart(df: pd.DataFrame, question: str = "", preferred_chart_type: 
         (c for c in df.columns if semantic[c] in _LABEL_PRIORITY),
         key=lambda c: _LABEL_PRIORITY[semantic[c]],
     )
+    repeating_cols = _repeating_label_cols(df, axis_label_cols)
+    axis_label_cols = [c for c in axis_label_cols if c not in repeating_cols]
 
     def _axis_pick(current: Optional[str]) -> Optional[str]:
         """Upgrade an axis pick to the policy's best label column, if any."""
         if not axis_label_cols:
             return current
-        if current is None or current in id_cols:
+        if current is None or current in id_cols or current in repeating_cols:
             return axis_label_cols[0]
         if current in axis_label_cols and current != axis_label_cols[0]:
             return axis_label_cols[0]
@@ -157,6 +177,11 @@ def recommend_chart(df: pd.DataFrame, question: str = "", preferred_chart_type: 
 
     # Non-id numeric candidates for the value axis (ADR 0008).
     num_axis = [c for c in numeric_cols if c not in id_cols]
+    # A value repeated on every row (a total, a slice-wide count) draws equal
+    # bars; plot a column that varies first.
+    flat_values = {c for c in num_axis if len(df) > 1 and df[c].nunique(dropna=False) <= 1}
+    if len(flat_values) < len(num_axis):
+        num_axis.sort(key=lambda c: c in flat_values)
 
     # Priority 1: User preference from dropdown (highest priority) — but the
     # axis policy still rules: a preferred type with no label column falls
@@ -334,9 +359,11 @@ def _enforce_axis_policy(config: Dict[str, Any], df: pd.DataFrame) -> Dict[str, 
         c for c in df.columns
         if semantic[c] in ("name", "category", "text")
     ]
+    repeating_cols = _repeating_label_cols(df, label_cols)
+    label_cols = [c for c in label_cols if c not in repeating_cols]
 
     def _fix(col: Optional[str]) -> Optional[str]:
-        if col not in id_cols:
+        if col not in id_cols and col not in repeating_cols:
             return col
         return label_cols[0] if label_cols else None
 

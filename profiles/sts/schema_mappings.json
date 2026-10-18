@@ -44,5 +44,12 @@
   "ส่งต่อ": ["case_referrals", "referral_agencies"],
   "หน่วยงาน": ["referral_agencies"],
   "ความเห็นครู": ["classroom_student_comments"],
-  "ข้อสังเกต": ["classroom_student_comments"]
+  "ข้อสังเกต": ["classroom_student_comments"],
+  "สาเหตุจริง": ["home_visit_disadvantage_observations", "task_submissions", "parental_status_options", "task_submission_residence_environments"],
+  "ยากจน": ["home_visit_disadvantage_observations", "disadvantage_types"],
+  "ด้อยโอกาส": ["home_visit_disadvantage_observations", "disadvantage_types"],
+  "หย่าร้าง": ["task_submissions", "parental_status_options"],
+  "พ่อแม่": ["task_submissions", "parental_status_options"],
+  "สภาพแวดล้อม": ["task_submission_residence_environments", "residence_environment_options"],
+  "พิการ": ["home_visit_disability_observations", "disability_types"]
 }
