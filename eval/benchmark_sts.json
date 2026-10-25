@@ -326,6 +326,13 @@
       "category": "count_groupby",
       "question": "เคสที่ส่งต่อให้หน่วยงานภายนอก แยกตามประเภทหน่วยงาน มีกี่เคส",
       "gold_sql": "SELECT COALESCE(kind.label_th, 'ไม่ระบุประเภท') AS agency_kind, CAST(COUNT(DISTINCT cr.case_id) AS INT) AS referred_case_count, CAST(COUNT(*) AS INT) AS referral_count FROM case_referrals AS cr JOIN cases AS c ON c.id = cr.case_id LEFT JOIN referral_agencies AS agency ON agency.id = cr.referral_agency_id LEFT JOIN referral_agency_kinds AS kind ON kind.code = agency.agency_kind_code WHERE c.deleted_at IS NULL GROUP BY 1 ORDER BY referred_case_count DESC, agency_kind ASC"
+    },
+    {
+      "id": "regression_province_concern_ranking",
+      "source_tag": "regression",
+      "category": "ranking",
+      "question": "จังหวัดไหนมีสัดส่วนนักเรียนเสี่ยงสูงมากที่สุด",
+      "gold_sql": "WITH assessed AS (SELECT DISTINCT risk.student_uuid, risk.risk_tier, COALESCE(school.province, 'ไม่ระบุ') AS province FROM student_risk_profiles AS risk JOIN student_term AS enrollment ON enrollment.student_uuid = risk.student_uuid JOIN student_current_enrollment_resolution AS current_enrollment ON current_enrollment.person_uuid = enrollment.person_uuid AND current_enrollment.selected_student_uuid = enrollment.student_uuid AND current_enrollment.resolution_state = 'ACTIVE' JOIN schools AS school ON school.id = risk.school_id WHERE enrollment.deleted_at IS NULL AND school.school_status = 'ACTIVE') SELECT province, ROUND(100.0 * COUNT(*) FILTER (WHERE risk_tier = 'HIGH') / COUNT(*), 1) AS high_risk_percent, CAST(COUNT(*) FILTER (WHERE risk_tier = 'HIGH') AS INT) AS high_risk_student_count, CAST(COUNT(*) AS INT) AS assessed_student_count FROM assessed GROUP BY province ORDER BY high_risk_percent DESC, high_risk_student_count DESC, province ASC"
     }
   ]
 }

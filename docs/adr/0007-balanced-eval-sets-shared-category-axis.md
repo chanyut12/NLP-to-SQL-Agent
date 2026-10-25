@@ -31,18 +31,18 @@ reaches the prompt.
 
 The frozen Golden set (36 questions) says nothing about examples added after the
 freeze, so a later corpus edit could silently break them. We add a third block to the
-Golden set, alongside ambiguous and deny: **8 regression questions** (`source_tag:
+Golden set, alongside ambiguous and deny: **9 regression questions** (8 at the amendment, 1 added with the province concern ranking) (`source_tag:
 "regression"`), each a paraphrase of a post-freeze example whose gold SQL is that
 example's SQL, so it is checked by result equivalence like any other question.
 
 - The block sits **outside the 4 × 7 bucket quotas**, the same way the clarify/refusal
   exemplars sit outside the Example set's quotas. Regression items never count toward a
   bucket, so the bucket balance this ADR protects is untouched.
-- `REGRESSION_QUOTA = 8`; the eval harness refuses to run when the block deviates, like
-  every other quota. Golden set total: 36 + 8 = 44.
+- `REGRESSION_QUOTA = 9`; the eval harness refuses to run when the block deviates, like
+  every other quota. Golden set total: 36 + 9 = 45.
 - Growing the block later means changing `REGRESSION_QUOTA` in the same commit, so the
   size stays a deliberate decision.
-- The 8 cover the STS cause chain: risk factors, why cases were opened, case counts per
+- They cover the STS cause chain: province concern ranking, risk factors, why cases were opened, case counts per
   school and province, home-visit absence reasons / root causes / parental status, and
   referrals by agency kind.
 
