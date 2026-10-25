@@ -215,3 +215,17 @@ class TestConstantColumnNeverLabelsAnAxis:
         assert (cfg["x_col"], cfg["y_col"]) == ("factor", "high_risk_students")
 
 
+
+
+class TestSingleRowIsNotAScatter:
+    """One row is one point, not a correlation — "มีกี่เคส" must not draw a lone dot."""
+
+    def test_one_row_two_numbers_is_a_table(self):
+        df = pd.DataFrame({"referred_case_count": [10], "total_case_count": [39]})
+        cfg = svc().recommend(df, "มีเคสที่ถูกส่งต่อหน่วยงานภายนอกกี่เคส")
+        assert cfg["chart_type"] == "table"
+        assert cfg["x_col"] is None
+
+    def test_many_rows_two_numbers_still_scatter(self):
+        df = pd.DataFrame({"a_count": [1, 2, 3], "b_count": [4, 6, 5]})
+        assert svc().recommend(df, "")["chart_type"] == "scatter"
