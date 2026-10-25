@@ -584,7 +584,7 @@ class TestDirectLoopUnit(unittest.TestCase):
 
 def run_agent_turn_sync(engine, question, db, history):
     import asyncio
-    return asyncio.get_event_loop().run_until_complete(
+    return asyncio.run(
         run_agent_turn(engine, question, db, dialect="sqlite", history=history))
 
 
