@@ -19,9 +19,11 @@ from eval.distribution_audit import (
     CLARIFY_REFUSAL_QUOTA,
     DENY_QUOTA,
     EXAMPLE_BUCKET_QUOTA,
+    REGRESSION_QUOTA,
     count_answer_type_block,
     count_buckets,
     count_exemplar_block,
+    count_regression_block,
 )
 
 # --- domain coverage vocabulary (reported axis only) --------------------------
@@ -65,6 +67,10 @@ def check_quota_gate(questions, examples):
     if g_blocks["deny"] != DENY_QUOTA:
         violations.append(
             f"golden set deny block has {g_blocks['deny']}, quota {DENY_QUOTA}")
+    g_regression = count_regression_block(questions)
+    if g_regression != REGRESSION_QUOTA:
+        violations.append(
+            f"golden set regression block has {g_regression}, quota {REGRESSION_QUOTA}")
     violations.extend(f"golden set unmapped category '{t}' x{n}"
                       for t, n in sorted(g_unmapped.items()))
 

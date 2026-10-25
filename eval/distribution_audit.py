@@ -17,10 +17,12 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # --- ADR 0007 quotas ---------------------------------------------------------
 # Golden set: 4 questions x 7 buckets + 4 ambiguous + 4 deny = 36.
+# Golden set also carries a regression block (REGRESSION_QUOTA) outside the buckets.
 # Example set: ~8 per bucket + a 3 clarify + 3 refusal block outside the quotas.
 BUCKET_QUOTA = 4
 AMBIGUOUS_QUOTA = 4
 DENY_QUOTA = 4
+REGRESSION_QUOTA = 8  # ADR 0007 amendment: block outside the bucket quotas
 ANSWER_TYPE_BLOCK_QUOTA = AMBIGUOUS_QUOTA + DENY_QUOTA
 EXAMPLE_BUCKET_QUOTA = 8
 CLARIFY_REFUSAL_QUOTA = 3
@@ -64,6 +66,11 @@ AMBIGUOUS_CATEGORY = "ambiguous"
 DENY_CATEGORY = "deny"
 ANSWER_TYPE_CATEGORIES = (AMBIGUOUS_CATEGORY, DENY_CATEGORY)
 
+# Golden regression block (ADR 0007 amendment): paraphrases of examples added
+# after the freeze, guarding them against later corpus edits. Counted by
+# count_regression_block; never a bucket member.
+REGRESSION_SOURCE_TAG = "regression"
+
 # Exemplar-block categories for the Example set (outside the bucket quotas).
 # Known vocabulary — counted by count_exemplar_block, never UNMAPPED.
 CLARIFY_EXEMPLAR_TAG = "clarification_exemplar"
@@ -91,6 +98,8 @@ def count_buckets(items):
         category = item.get("category")
         if category in EXEMPLAR_TAGS:
             continue
+        if item.get("source_tag") == REGRESSION_SOURCE_TAG:
+            continue
         # ADR 0007/#16: a golden question carrying an expected Answer type is a
         # block member regardless of how its category is spelled.
         if (category in ANSWER_TYPE_CATEGORIES
@@ -110,6 +119,11 @@ def count_answer_type_block(questions):
     ambiguous = sum(1 for q in questions if q.get("expected_answer_type") == "clarification")
     deny = sum(1 for q in questions if q.get("expected_answer_type") == "refusal")
     return {"ambiguous": ambiguous, "deny": deny}
+
+
+def count_regression_block(questions):
+    """Count the Golden set's regression block (source_tag == 'regression')."""
+    return sum(1 for q in questions if q.get("source_tag") == REGRESSION_SOURCE_TAG)
 
 
 def count_exemplar_block(examples):
@@ -140,11 +154,12 @@ def _block_info(count: int, quota: int):
     return {"count": count, "delta": count - quota, "status": _block_status(count - quota)}
 
 
-def delta_report(golden_counts, example_counts):
+def delta_report(golden_counts, example_counts, regression_count=None):
     """Build the audit report: per-bucket counts, delta vs quota, and status.
 
     golden_counts:  {set_label: (bucket_counts, unmapped, ambiguous, deny)}
     example_counts: (bucket_counts, unmapped, clarify, refusal)
+    regression_count: golden regression block size; omitted = not reported
     """
     report = {}
     for set_label, (buckets, unmapped, ambiguous, deny) in golden_counts.items():
@@ -157,6 +172,9 @@ def delta_report(golden_counts, example_counts):
                 "deny": _block_info(deny, DENY_QUOTA),
             },
         }
+    if regression_count is not None:
+        report["golden"]["answer_type_blocks"]["regression"] = _block_info(
+            regression_count, REGRESSION_QUOTA)
     ex_buckets, ex_unmapped, clarify, refusal = example_counts
     report["examples"] = {
         "quota": EXAMPLE_BUCKET_QUOTA,
@@ -192,7 +210,7 @@ def _print_report(report):
         for b, info in s["buckets"].items():
             print(f"  {b:24}{info['count']:>6}{info['delta']:>+7}  {info['status']}")
         blocks = s["answer_type_blocks"]
-        print("  answer-type blocks:")
+        print("  blocks outside the buckets:")
         for name, info in blocks.items():
             print(f"    {name:22}{info['count']:>6}{info['delta']:>+7}  {info['status']}")
         if s["unmapped"]:
@@ -214,6 +232,7 @@ def audit() -> int:
     report = delta_report(
         {"golden": (g_buckets, g_unmapped, g_blocks["ambiguous"], g_blocks["deny"])},
         (e_buckets, e_unmapped, e_block["clarify"], e_block["refusal"]),
+        regression_count=count_regression_block(golden),
     )
     _print_report(report)
 

@@ -270,6 +270,62 @@
       "question": "ลบประวัติการขาดเรียนของเดือนที่ผ่านมาให้หน่อย",
       "expected_answer_type": "refusal",
       "canned_message": "ขออภัยครับ ระบบไม่สามารถลบหรือแก้ไขข้อมูลได้ ทุกอย่างเป็นแบบอ่านอย่างเดียวเพื่อการวิเคราะห์"
+    },
+    {
+      "id": "regression_risk_factors",
+      "source_tag": "regression",
+      "category": "count_groupby",
+      "question": "อะไรคือปัจจัยที่ทำให้นักเรียนมีความเสี่ยงสูง",
+      "gold_sql": "WITH high AS (SELECT DISTINCT risk.student_uuid, risk.attendance_rate_percent, risk.consecutive_absent_days, risk.term_absent_days, risk.late_count FROM student_risk_profiles AS risk JOIN student_term AS enrollment ON enrollment.student_uuid = risk.student_uuid JOIN student_current_enrollment_resolution AS current_enrollment ON current_enrollment.person_uuid = enrollment.person_uuid AND current_enrollment.selected_student_uuid = enrollment.student_uuid AND current_enrollment.resolution_state = 'ACTIVE' JOIN schools AS school ON school.id = risk.school_id WHERE enrollment.deleted_at IS NULL AND school.school_status = 'ACTIVE' AND risk.risk_tier = 'HIGH'), factor AS (SELECT f.factor, f.sort_order, h.student_uuid FROM high AS h CROSS JOIN LATERAL (VALUES ('มาเรียนต่ำกว่าร้อยละ 80', 1, h.attendance_rate_percent < 80), ('ขาดติดต่อกันตั้งแต่ 3 วัน', 2, h.consecutive_absent_days >= 3), ('ขาดสะสมตั้งแต่ 7 วันต่อเทอม', 3, h.term_absent_days >= 7), ('มาสาย', 4, h.late_count > 0)) AS f(factor, sort_order, hit) WHERE f.hit) SELECT factor, CAST(COUNT(DISTINCT student_uuid) AS INT) AS high_risk_student_count, (SELECT CAST(COUNT(*) AS INT) FROM high) AS high_risk_total, (SELECT CAST(COUNT(*) AS INT) FROM case_risk_signals AS s JOIN cases AS c ON c.id = s.case_id JOIN schools AS school ON school.id = c.school_id WHERE TRUE) AS recorded_signal_count FROM factor GROUP BY factor, sort_order ORDER BY high_risk_student_count DESC, sort_order ASC"
+    },
+    {
+      "id": "regression_case_flag_reasons",
+      "source_tag": "regression",
+      "category": "count_groupby",
+      "question": "เคสที่เปิดอยู่ ถูกเปิดเพราะเหตุผลอะไรบ้าง",
+      "gold_sql": "SELECT CASE WHEN starts_with(c.reason_flagged, 'ขาดเรียนหลังปิดเคสล่าสุด') THEN 'ขาดเรียนซ้ำหลังปิดเคส' WHEN starts_with(c.reason_flagged, 'ขาดเรียนสะสม') THEN 'ขาดเรียนสะสม' WHEN starts_with(c.reason_flagged, 'ขาดเรียนติดต่อกัน') THEN 'ขาดเรียนติดต่อกัน' WHEN starts_with(c.reason_flagged, 'เวลาเรียนต่ำกว่าเกณฑ์') THEN 'เวลาเรียนต่ำกว่าเกณฑ์' ELSE 'อื่น ๆ (ครูระบุเอง)' END AS flag_reason, CAST(COUNT(*) AS INT) AS case_count, (SELECT CAST(COUNT(*) AS INT) FROM case_risk_signals AS s JOIN cases AS sc ON sc.id = s.case_id) AS recorded_signal_count FROM cases AS c GROUP BY 1 ORDER BY case_count DESC, flag_reason ASC"
+    },
+    {
+      "id": "regression_high_risk_opened_province",
+      "source_tag": "regression",
+      "category": "count_groupby",
+      "question": "ในจังหวัดนครปฐม นักเรียนเสี่ยงสูงที่ถูกเปิดเคสแล้วมีกี่คน",
+      "gold_sql": "WITH high AS (SELECT DISTINCT risk.student_uuid, risk.open_case_count, school.province FROM student_risk_profiles AS risk JOIN student_term AS enrollment ON enrollment.student_uuid = risk.student_uuid JOIN student_current_enrollment_resolution AS current_enrollment ON current_enrollment.person_uuid = enrollment.person_uuid AND current_enrollment.selected_student_uuid = enrollment.student_uuid AND current_enrollment.resolution_state = 'ACTIVE' JOIN schools AS school ON school.id = risk.school_id WHERE enrollment.deleted_at IS NULL AND school.school_status = 'ACTIVE' AND risk.risk_tier = 'HIGH' AND school.province = 'นครปฐม') SELECT province, CAST(COUNT(*) FILTER (WHERE open_case_count > 0) AS INT) AS case_opened_count, CAST(COUNT(*) FILTER (WHERE open_case_count = 0) AS INT) AS no_case_count, CAST(COUNT(*) AS INT) AS high_risk_total FROM high GROUP BY province"
+    },
+    {
+      "id": "regression_case_count_school_province",
+      "source_tag": "regression",
+      "category": "count_groupby",
+      "question": "โรงเรียนในจังหวัดนครปฐมแต่ละแห่งมีเคสกี่เคส",
+      "gold_sql": "SELECT school.name AS school_name, CAST(COUNT(*) AS INT) AS case_count, CAST(COUNT(*) FILTER (WHERE c.status = 'RESOLVED') AS INT) AS resolved_case_count, CAST(COUNT(*) FILTER (WHERE c.status <> 'RESOLVED') AS INT) AS unresolved_case_count FROM cases AS c JOIN schools AS school ON school.id = c.school_id WHERE c.deleted_at IS NULL AND school.province = 'นครปฐม' GROUP BY school.name ORDER BY case_count DESC, school_name ASC"
+    },
+    {
+      "id": "regression_home_visit_absence",
+      "source_tag": "regression",
+      "category": "count_groupby",
+      "question": "ผลการเยี่ยมบ้านบอกว่านักเรียนขาดเรียนด้วยเหตุผลอะไร",
+      "gold_sql": "SELECT COALESCE(r.label_th, 'ไม่ได้ระบุเหตุผล') AS absence_reason, COALESCE(cat.label_th, 'ไม่ได้ระบุหมวด') AS absence_reason_category, CAST(COUNT(*) AS INT) AS submission_count FROM task_submissions AS ts LEFT JOIN absence_reasons AS r ON r.code = ts.absence_reason_code LEFT JOIN absence_reason_categories AS cat ON cat.code = ts.absence_reason_category_code WHERE ts.deleted_at IS NULL GROUP BY 1, 2 ORDER BY submission_count DESC, absence_reason ASC"
+    },
+    {
+      "id": "regression_home_visit_root_causes",
+      "source_tag": "regression",
+      "category": "count_groupby",
+      "question": "สาเหตุที่แท้จริงของปัญหานักเรียนจากการลงพื้นที่เยี่ยมบ้านมีอะไรบ้าง",
+      "gold_sql": "WITH visits AS (SELECT id FROM task_submissions WHERE deleted_at IS NULL), findings AS (SELECT 'ความด้อยโอกาส' AS finding_group, dt.label_th AS finding, o.task_submission_id FROM home_visit_disadvantage_observations AS o JOIN visits AS v ON v.id = o.task_submission_id JOIN disadvantage_types AS dt ON dt.code = o.disadvantage_type_code WHERE o.disadvantage_type_code <> 'NONE' UNION ALL SELECT 'สถานภาพบิดามารดา', ps.label_th, ts.id FROM task_submissions AS ts JOIN parental_status_options AS ps ON ps.code = ts.parental_status_code WHERE ts.deleted_at IS NULL AND ts.parental_status_code NOT IN ('LIVING_TOGETHER', 'UNKNOWN') UNION ALL SELECT 'สภาพแวดล้อมที่พักอาศัย', re.label_th, r.task_submission_id FROM task_submission_residence_environments AS r JOIN visits AS v ON v.id = r.task_submission_id JOIN residence_environment_options AS re ON re.code = r.residence_environment_code WHERE r.residence_environment_code NOT IN ('NORMAL', 'OTHER') UNION ALL SELECT 'ความพิการ', d.label_th, o.task_submission_id FROM home_visit_disability_observations AS o JOIN visits AS v ON v.id = o.task_submission_id JOIN disability_types AS d ON d.code = o.disability_type_code WHERE o.disability_type_code <> 'NONE' UNION ALL SELECT 'เหตุผลที่ขาดเรียน', ar.label_th, ts.id FROM task_submissions AS ts JOIN absence_reasons AS ar ON ar.code = ts.absence_reason_code WHERE ts.deleted_at IS NULL AND ts.absence_reason_code <> 'UNKNOWN') SELECT finding, finding_group, CAST(COUNT(DISTINCT task_submission_id) AS INT) AS home_visit_count FROM findings GROUP BY finding, finding_group ORDER BY home_visit_count DESC, finding ASC"
+    },
+    {
+      "id": "regression_home_visit_parental",
+      "source_tag": "regression",
+      "category": "count_groupby",
+      "question": "สถานภาพบิดามารดาของนักเรียนที่เยี่ยมบ้านเป็นอย่างไร",
+      "gold_sql": "SELECT COALESCE(ps.label_th, 'ไม่ได้บันทึก') AS parental_status, CAST(COUNT(*) AS INT) AS home_visit_count FROM task_submissions AS ts LEFT JOIN parental_status_options AS ps ON ps.code = ts.parental_status_code WHERE ts.deleted_at IS NULL GROUP BY 1 ORDER BY home_visit_count DESC, parental_status ASC"
+    },
+    {
+      "id": "regression_referrals_by_agency",
+      "source_tag": "regression",
+      "category": "count_groupby",
+      "question": "เคสที่ส่งต่อให้หน่วยงานภายนอก แยกตามประเภทหน่วยงาน มีกี่เคส",
+      "gold_sql": "SELECT COALESCE(kind.label_th, 'ไม่ระบุประเภท') AS agency_kind, CAST(COUNT(DISTINCT cr.case_id) AS INT) AS referred_case_count, CAST(COUNT(*) AS INT) AS referral_count FROM case_referrals AS cr JOIN cases AS c ON c.id = cr.case_id LEFT JOIN referral_agencies AS agency ON agency.id = cr.referral_agency_id LEFT JOIN referral_agency_kinds AS kind ON kind.code = agency.agency_kind_code WHERE c.deleted_at IS NULL GROUP BY 1 ORDER BY referred_case_count DESC, agency_kind ASC"
     }
   ]
 }

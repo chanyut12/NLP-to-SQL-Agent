@@ -48,6 +48,21 @@ class TestQuotaGate(unittest.TestCase):
         self.assertTrue(any("deny" in v for v in violations), violations)
 
 
+class TestRegressionBlock(unittest.TestCase):
+    """ADR 0007 amendment: a regression block sits outside the bucket quotas."""
+
+    def test_regression_questions_do_not_fill_a_bucket(self):
+        extra = GOLDEN + [{"id": "r9", "source_tag": "regression", "category": "ranking"}]
+        violations = check_quota_gate(extra, EXAMPLES)
+        self.assertFalse(any("'ranking'" in v for v in violations), violations)
+        self.assertTrue(any("regression block" in v for v in violations), violations)
+
+    def test_missing_regression_question_is_refused(self):
+        drifted = [q for q in GOLDEN if q.get("source_tag") != "regression"]
+        violations = check_quota_gate(drifted, EXAMPLES)
+        self.assertTrue(any("regression block has 0" in v for v in violations), violations)
+
+
 class TestAnswerTypeScoring(unittest.TestCase):
     """ADR 0006 refusal-first, as ADR 0007 pins the scoring."""
 
