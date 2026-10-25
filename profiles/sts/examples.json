@@ -1050,6 +1050,44 @@
       ]
     },
     {
+      "id": "province_risk_concern_ranking",
+      "question": "จังหวัดไหนน่าเป็นห่วงที่สุด",
+      "sql": "WITH assessed AS (SELECT DISTINCT risk.student_uuid, risk.risk_tier, COALESCE(school.province, 'ไม่ระบุ') AS province FROM student_risk_profiles AS risk JOIN student_term AS enrollment ON enrollment.student_uuid = risk.student_uuid JOIN student_current_enrollment_resolution AS current_enrollment ON current_enrollment.person_uuid = enrollment.person_uuid AND current_enrollment.selected_student_uuid = enrollment.student_uuid AND current_enrollment.resolution_state = 'ACTIVE' JOIN schools AS school ON school.id = risk.school_id WHERE enrollment.deleted_at IS NULL AND school.school_status = 'ACTIVE') SELECT province, ROUND(100.0 * COUNT(*) FILTER (WHERE risk_tier = 'HIGH') / COUNT(*), 1) AS high_risk_percent, CAST(COUNT(*) FILTER (WHERE risk_tier = 'HIGH') AS INT) AS high_risk_student_count, CAST(COUNT(*) AS INT) AS assessed_student_count FROM assessed GROUP BY province ORDER BY high_risk_percent DESC, high_risk_student_count DESC, province ASC",
+      "category": "ranking",
+      "dialect": "postgresql",
+      "grain": "one row per province: share of assessed students at HIGH risk (current enrollment, ACTIVE schools), ranked by that share",
+      "schema_packs": [
+        "student_enrollment",
+        "risk_case"
+      ],
+      "retrieval_tags": [
+        "น่าเป็นห่วง",
+        "จังหวัดเสี่ยง",
+        "จัดอันดับจังหวัด",
+        "สัดส่วนนักเรียนเสี่ยงสูง",
+        "จังหวัดที่ต้องเฝ้าระวัง"
+      ]
+    },
+    {
+      "id": "province_risk_concern_ranking_paraphrase",
+      "question": "จัดอันดับจังหวัดที่มีนักเรียนเสี่ยงสูงมากที่สุด",
+      "sql": "WITH assessed AS (SELECT DISTINCT risk.student_uuid, risk.risk_tier, COALESCE(school.province, 'ไม่ระบุ') AS province FROM student_risk_profiles AS risk JOIN student_term AS enrollment ON enrollment.student_uuid = risk.student_uuid JOIN student_current_enrollment_resolution AS current_enrollment ON current_enrollment.person_uuid = enrollment.person_uuid AND current_enrollment.selected_student_uuid = enrollment.student_uuid AND current_enrollment.resolution_state = 'ACTIVE' JOIN schools AS school ON school.id = risk.school_id WHERE enrollment.deleted_at IS NULL AND school.school_status = 'ACTIVE') SELECT province, ROUND(100.0 * COUNT(*) FILTER (WHERE risk_tier = 'HIGH') / COUNT(*), 1) AS high_risk_percent, CAST(COUNT(*) FILTER (WHERE risk_tier = 'HIGH') AS INT) AS high_risk_student_count, CAST(COUNT(*) AS INT) AS assessed_student_count FROM assessed GROUP BY province ORDER BY high_risk_percent DESC, high_risk_student_count DESC, province ASC",
+      "category": "ranking",
+      "dialect": "postgresql",
+      "grain": "one row per province: share of assessed students at HIGH risk (current enrollment, ACTIVE schools), ranked by that share",
+      "schema_packs": [
+        "student_enrollment",
+        "risk_case"
+      ],
+      "retrieval_tags": [
+        "จังหวัดที่เสี่ยงที่สุด",
+        "นักเรียนเสี่ยงสูง",
+        "อันดับจังหวัด",
+        "น่าเป็นห่วง",
+        "ร้อยละนักเรียนเสี่ยงสูง"
+      ]
+    },
+    {
       "id": "high_risk_case_opened_count_in_province",
       "question": "นักเรียนกลุ่มเสี่ยงสูงในจังหวัดนครปฐมถูกเปิดเคสไปแล้วกี่คน",
       "sql": "WITH high AS (SELECT DISTINCT risk.student_uuid, risk.open_case_count, school.province FROM student_risk_profiles AS risk JOIN student_term AS enrollment ON enrollment.student_uuid = risk.student_uuid JOIN student_current_enrollment_resolution AS current_enrollment ON current_enrollment.person_uuid = enrollment.person_uuid AND current_enrollment.selected_student_uuid = enrollment.student_uuid AND current_enrollment.resolution_state = 'ACTIVE' JOIN schools AS school ON school.id = risk.school_id WHERE enrollment.deleted_at IS NULL AND school.school_status = 'ACTIVE' AND risk.risk_tier = 'HIGH' AND school.province = 'นครปฐม') SELECT province, CAST(COUNT(*) FILTER (WHERE open_case_count > 0) AS INT) AS case_opened_count, CAST(COUNT(*) FILTER (WHERE open_case_count = 0) AS INT) AS no_case_count, CAST(COUNT(*) AS INT) AS high_risk_total FROM high GROUP BY province",

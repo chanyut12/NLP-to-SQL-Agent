@@ -100,6 +100,7 @@
       "notes": [
         "risk_tier is a risk LEVEL (HIGH/WATCH/NORMAL), not a cause. Never present a comparison between tiers as the cause of risk.",
         "For 'สาเหตุของความเสี่ยง / ทำไมเสี่ยง / ทำไมจังหวัด X น่าเป็นห่วง': count HIGH students (current enrollment, ACTIVE schools — the same population as the risk ranking) per factor (no % sign inside string literals: write ร้อยละ — a bare % breaks execution) whose profile breaches the alert thresholds: attendance_rate_percent < 80, consecutive_absent_days >= 3, term_absent_days >= 7, late_count > 0. One row per factor (Thai label first), plus high_risk_total and recorded_signal_count (case_risk_signals for the same slice). In the message call these 'ปัจจัยที่พบ', not the reason the system recorded.",
+        "Ranking provinces ('จังหวัดไหนน่าเป็นห่วง/เสี่ยงที่สุด', no province named): rank by the SHARE of assessed students at HIGH risk — high_risk_percent first, then high_risk_student_count, then assessed_student_count; province label first. Never plot assessed_student_count as the value. With a province named, answer the cause (factors) instead.",
         "It is a snapshot: report profile_calculated_at when freshness matters."
       ]
     },
