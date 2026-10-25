@@ -26,7 +26,9 @@ from eval.distribution_audit import (
     bucket_for,
     count_answer_type_block,
     count_buckets,
+    REGRESSION_QUOTA,
     count_exemplar_block,
+    count_regression_block,
     delta_report,
 )
 
@@ -230,6 +232,29 @@ class TestAuditRun(unittest.TestCase):
         self.assertIn("examples", r.stdout.lower())
         self.assertIn("count_groupby", r.stdout)
         self.assertIn("delta", r.stdout.lower())
+
+
+class TestRegressionBlock(unittest.TestCase):
+    """ADR 0007 amendment: regression questions are a block, not bucket members."""
+
+    def test_regression_items_are_not_counted_in_buckets(self):
+        items = [{"category": "count_groupby", "source_tag": "regression"},
+                 {"category": "count_groupby", "source_tag": "held_out"}]
+        counts, unmapped = count_buckets(items)
+        self.assertEqual(counts["count_groupby"], 1)
+        self.assertEqual(unmapped, {})
+
+    def test_count_regression_block(self):
+        items = [{"source_tag": "regression"}, {"source_tag": "regression"}, {"source_tag": "novel"}]
+        self.assertEqual(count_regression_block(items), 2)
+
+    def test_report_includes_the_block_against_its_quota(self):
+        zero = dict.fromkeys(CATEGORY_BUCKETS, 0)
+        report = delta_report({"golden": (zero, {}, 0, 0)}, (zero, {}, 0, 0), regression_count=REGRESSION_QUOTA - 1)
+        self.assertEqual(report["golden"]["answer_type_blocks"]["regression"]["status"], "deficit")
+
+    def test_real_golden_set_matches_the_regression_quota(self):
+        self.assertEqual(count_regression_block(GOLDEN), REGRESSION_QUOTA)
 
 
 if __name__ == "__main__":
