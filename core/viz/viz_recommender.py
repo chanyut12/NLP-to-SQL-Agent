@@ -261,8 +261,9 @@ def recommend_chart(df: pd.DataFrame, question: str = "", preferred_chart_type: 
     if cat_col and cat_col not in id_cols and num_axis:
         return "bar", cat_col, num_axis[0]
 
-    # Case 3: Correlation (2 non-id Numeric cols) -> Scatter
-    if len(num_axis) >= 2:
+    # Case 3: Correlation (2 non-id Numeric cols) -> Scatter. One row is one
+    # point, not a correlation: fall through to a table.
+    if len(num_axis) >= 2 and len(df) >= 2:
         return "scatter", num_axis[0], num_axis[1]
 
     # Case 4: no axis label column under the policy -> not chartable (ADR 0008)
