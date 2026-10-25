@@ -23,6 +23,16 @@ from core.config import settings
 logger = logging.getLogger(__name__)
 
 
+def _example_id(ex: Dict[str, Any]) -> str:
+    """Stable id of an example. Tags are part of the embedded passage, so they
+    are part of the id: editing them re-embeds the example instead of being skipped."""
+    tags = ex.get("retrieval_tags") or []
+    parts = [ex.get("question", ""), ex.get("sql", "")]
+    if tags:
+        parts.append(" ".join(tags))
+    return generate_stable_id(*parts)
+
+
 def _norm_dialect(d: Optional[str]) -> str:
     d = (d or "").lower()
     return "postgresql" if d in ("postgres", "postgresql") else d
@@ -116,7 +126,7 @@ class ExampleStore:
             difficulty = ex.get("difficulty", "medium")
             tags = ex.get("retrieval_tags", [])
 
-            ex_id = generate_stable_id(question, sql)
+            ex_id = _example_id(ex)
 
             if ex_id in existing_ids:
                 continue
@@ -138,7 +148,7 @@ class ExampleStore:
         
         # The examples file is the only source: drop entries it no longer holds,
         # so an edited example's old SQL stops being retrieved.
-        file_ids = {generate_stable_id(ex.get("question", ""), ex.get("sql", "")) for ex in examples}
+        file_ids = {_example_id(ex) for ex in examples}
         stale_ids = sorted(existing_ids - file_ids)
         if stale_ids:
             logger.info("Removing %s stale examples from RAG store.", len(stale_ids))
