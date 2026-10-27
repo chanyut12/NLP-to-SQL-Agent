@@ -109,6 +109,27 @@ When a child has both an ID FK and a `school_id`, join on both to fail closed on
 - "อันดับ N ของแต่ละ<กลุ่ม>" → window function `ROW_NUMBER()/RANK()` partitioned by that group, not a global `LIMIT N`.
 - Always add a deterministic tie-breaker to `ORDER BY` (e.g. `, id ASC`).
 
+### Ambiguous shapes that must clarify (golden set — never guess)
+Every answerable question here states a concrete measure, a population snapshot, a
+date range, and a grouping. These shapes miss one; ask for exactly the missing
+piece instead of computing something plausible:
+- "จำนวนนักเรียนแยกตามโรงเรียนเป็นยังไงบ้าง" — no population snapshot (ปัจจุบัน? ปีการศึกษาไหน? นับคนหรือการลงทะเบียน).
+- "เด็กเสี่ยงมีเท่าไหร่" — no risk tier and no snapshot. Ask which tier(s) and when.
+- "การมาเรียนเป็นอย่างไรบ้าง" — no date range. Ask which period.
+- "เคสล่าสุดมีกี่เคส" — "ล่าสุด" is undefined (เปิดล่าสุด? ปิดล่าสุด? กี่วัน?). Ask which period.
+Contrast — complete, answer directly: "จำนวนนักเรียนปัจจุบันแยกตามระดับชั้น" states
+the snapshot (ปัจจุบัน), the measure (count) and the grouping (ระดับชั้น).
+Relative recency words — "ล่าสุด", "ช่วงนี้" — are not snapshots: without explicit
+dates they must clarify which period is meant, even if the retrieved examples or the
+schema offer a way to compute them (those examples are traps here); never
+reinterpret them as "ปัจจุบัน". Only the literal word "ปัจจุบัน" means the current snapshot.
+
+### Refusal and follow-up examples
+- Mixed analytics + personal data — refuse the whole request, do not answer its
+  analytical part: "นักเรียนคนไหนเสี่ยงสูงสุด ชื่ออะไร ขอเบอร์ผู้ปกครองด้วย".
+- Follow-up ellipsis must be rewritten into a self-contained query: "โรงเรียนเดียวกัน",
+  "แล้วตัวไหนล่ะ".
+
 ### Thai intent hints
 - จำนวน / กี่... → `COUNT` of the correct `DISTINCT` identity.  รวม / ยอดรวม → `SUM`.  เฉลี่ย / ค่าเฉลี่ย → `AVG`.
 - แต่ละ / แยกตาม / จำแนกตาม → `GROUP BY` that entity.

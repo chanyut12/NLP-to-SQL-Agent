@@ -9,6 +9,7 @@ unchanged one-shot behaviour.
 import asyncio
 import json
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -29,6 +30,7 @@ from sqlalchemy.pool import StaticPool
 from api import dependencies as deps
 from api.main import app
 from core.services import agent
+from core.profiles import load_hints
 from core.services.agent import (
     STEP_BUDGET_EXCEEDED,
     AgentTurnResult,
@@ -616,21 +618,30 @@ class TestToolBinding(unittest.TestCase):
         directly'. Classification must come FIRST, with the concrete ambiguous
         shapes from the golden set, and refusals must forbid tool-hunting."""
         self.assertIn("Before any run_sql", agent.AGENT_SYSTEM_PROMPT)
-        # the exact ambiguous shapes the golden set scores
+        # the ambiguous shapes belong to the Domain profile now (ADR 0014),
+        # not to code — the STS profile teaches them to both prompts.
+        sts_hints = load_hints("sts")
         for frag in (
             "จำนวนนักเรียนแยกตามโรงเรียน",   # no population snapshot
             "เด็กเสี่ยงมีเท่าไหร่",           # no tier, no snapshot
             "การมาเรียนเป็นอย่างไรบ้าง",      # no date range
         ):
-            self.assertIn(frag, agent.AGENT_SYSTEM_PROMPT,
-                          "prompt must teach the ambiguous shapes explicitly")
+            self.assertIn(frag, sts_hints,
+                          "ambiguity examples belong to the profile, not the prompt")
         # a matched SQL shape, so the rule is learnable by contrast
-        self.assertIn("จำนวนนักเรียนปัจจุบันแยกตามระดับชั้น",
-                      agent.AGENT_SYSTEM_PROMPT)
+        self.assertIn("จำนวนนักเรียนปัจจุบันแยกตามระดับชั้น", sts_hints)
+        # the code-owned rule must point the model at that block
+        self.assertIn("Datasource-specific", agent.AGENT_SYSTEM_PROMPT)
         # vague recency without dates clarifies; the current snapshot does not
         # (regression: answer_type_04 'เคสล่าสุดมีกี่เคส' answered as SQL)
-        self.assertIn("ล่าสุด", agent.AGENT_SYSTEM_PROMPT)
-        self.assertIn("never reinterpret them as", agent.AGENT_SYSTEM_PROMPT)
+        self.assertIn("เคสล่าสุดมีกี่เคส", sts_hints)
+        self.assertIn("ล่าสุด", sts_hints)
+        self.assertIn("reinterpret them as", sts_hints)
+        # the code prompt keeps the behaviour rule, without the Thai specifics
+        self.assertIn("vague relative-time reference", agent.AGENT_SYSTEM_PROMPT)
+        # refusal and follow-up examples are profile knowledge too
+        self.assertIn("นักเรียนคนไหนเสี่ยงสูงสุด", sts_hints)
+        self.assertIn("โรงเรียนเดียวกัน", sts_hints)
         # refusal priority: never hunt for personal data with tools
         self.assertIn("never call get_schema or run_sql",
                       agent.AGENT_SYSTEM_PROMPT)
@@ -645,6 +656,46 @@ class TestToolBinding(unittest.TestCase):
         """The clarify fix must not break the ADR 0006 follow-up contract."""
         self.assertIn("prior Turns", agent.AGENT_SYSTEM_PROMPT)
         self.assertIn("self-contained", agent.AGENT_SYSTEM_PROMPT)
+
+
+class TestProfileHintsInPrompt(unittest.TestCase):
+    """ADR 0014 / ticket #49: the conversational agent's prompt reads the active
+    Domain profile, not just the one-shot chain. Asserted at the loop seam, on
+    the prompt the model actually receives."""
+
+    def _prompt_with_profile(self, profile: str, profiles_dir: str) -> str:
+        llm = ScriptedLLM([_ai_final("refusal", "คำขอนี้อยู่นอกขอบเขต")])
+        eng = _make_engine(None, llm)
+        with mock.patch("core.profiles.PROFILES_DIR", profiles_dir), \
+                mock.patch.object(agent.settings, "DOMAIN_PROFILE", profile):
+            turn = asyncio.run(run_agent_turn(
+                eng, "จำนวนนักเรียนเท่าไหร่", None, "postgres"))
+        self.assertIsNone(turn.error)
+        return llm.prompts[0][0]["content"]
+
+    def test_system_prompt_carries_the_active_profiles_hints(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        os.makedirs(os.path.join(tmp, "wizard-made"), exist_ok=True)
+        with open(os.path.join(tmp, "wizard-made", "hints.md"), "w",
+                  encoding="utf-8") as f:
+            f.write("HINT-MARKER: อัตราการมาเรียนใช้ attendance_day")
+
+        system = self._prompt_with_profile("wizard-made", tmp)
+
+        self.assertIn("HINT-MARKER", system,
+                      "the agent prompt must carry the profile's hints")
+        self.assertIn("Datasource-specific", system)
+
+    def test_a_profile_without_hints_still_builds_a_valid_prompt(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+
+        system = self._prompt_with_profile("no-such-profile", tmp)
+
+        self.assertNotIn("{hints_block}", system,
+                         "an unfilled placeholder would reach the model")
+        self.assertIn("(none)", system)
 
 
 class TestAgentModeContext(unittest.TestCase):

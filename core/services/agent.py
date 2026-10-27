@@ -30,7 +30,7 @@ from typing import Any, Callable, List, Optional
 import pandas as pd
 
 from core.config import settings
-from core.profiles import load_table_notes
+from core.profiles import load_hints, load_table_notes
 from core.domain.sql_safety import SQLSafetyError, validate_and_sanitize_sql
 from core.services.turn_digest import digest_block
 from core.services.data_knowledge import (
@@ -134,28 +134,31 @@ or write requests); message explains and suggests an analytical alternative \
 (Thai). Personal-data and out-of-scope requests are ALWAYS refusals, never \
 clarifications.
 
+### Datasource-specific knowledge (from the active Domain profile):
+{hints_block}
+
 ### Rules:
 1. Before any run_sql, classify the question. If it misses a concrete \
 measure, population snapshot, date range, or grouping — things every \
 answerable analytical question here states — call final_answer with \
-answer_type "clarification", asking for exactly the missing piece. \
-Ambiguous shapes from this domain: "จำนวนนักเรียนแยกตามโรงเรียน" (no snapshot), \
-"เด็กเสี่ยงมีเท่าไหร่" (no risk tier, no snapshot), "การมาเรียนเป็นอย่างไรบ้าง" \
-(no date range), "เคสล่าสุดมีกี่เคส" (undefined what counts as latest). Relative recency words — "ล่าสุด", \
-"ช่วงนี้" — without explicit dates MUST clarify which period is meant, even \
-if the retrieved examples or the schema offer a way to compute them (those \
-examples are traps here); never reinterpret them as "ปัจจุบัน". Only the \
-literal word "ปัจจุบัน" means the current snapshot. By \
-contrast "จำนวนนักเรียนปัจจุบันแยกตามระดับชั้น" is complete — answer it directly.
+answer_type "clarification", asking for exactly the missing piece. The \
+Datasource-specific knowledge block above may list the shapes this database \
+treats as incomplete, alongside a complete contrast case; treat exactly \
+those shapes as needing one clarifying question, and do not guess the \
+missing piece. A vague relative-time reference without explicit dates MUST \
+clarify which period is meant, even if the retrieved examples or the schema \
+offer a way to compute it (those examples are traps here) — never reinterpret \
+it as the current snapshot unless the block names that literal word.
 2. Personal-data requests (names, contacts, guardians, individual salaries) \
 and write operations are refusals — never call get_schema or run_sql to hunt \
-for such data. A mixed request (analytics plus personal data, e.g. \
-"นักเรียนคนไหนเสี่ยงสูงสุด ชื่ออะไร ขอเบอร์ผู้ปกครองด้วย") — refuse the \
-entire request; do not answer its analytical part.
+for such data. A mixed request (analytics plus personal data; the \
+Datasource-specific knowledge block may give an example) — refuse the entire \
+request; do not answer its analytical part.
 3. Decide yourself which tool to call next; prefer run_sql when the question \
 passed rule 1 and the schema above already answers it.
-4. Interpret pronouns and ellipsis ("โรงเรียนเดียวกัน", "แล้วตัวไหนล่ะ") from \
-the prior Turns above; rewrite them into a self-contained query.
+4. Interpret pronouns and ellipsis from the prior Turns above (the \
+Datasource-specific knowledge block may give examples); rewrite them into a \
+self-contained query.
 5. If run_sql fails, read the error and fix the SQL — retry with run_sql.
 6. Call final_answer(result) only AFTER a successful run_sql this Turn.
 7. Entity label rule: a result grouped by or filtered to one entity must \
@@ -505,6 +508,16 @@ class _AgentSession:
         return "OK"
 
 
+def _hints_block() -> str:
+    """The active Domain profile's hints, verbatim (ADR 0014).
+
+    Read per Turn rather than cached at import so a profile switch in demo mode
+    (ADR 0013) changes the prompt on the next question. No hints means the
+    literal "(none)", never an unfilled placeholder.
+    """
+    return load_hints(settings.DOMAIN_PROFILE).strip() or "(none)"
+
+
 def _schema_summary(bundle) -> str:
     tables = bundle.raw_tables or {}
     lines = [f"- {name}: {cols}" for name, cols in list(tables.items())[:60]]
@@ -567,6 +580,7 @@ async def run_agent_turn(
         question=question,
         examples_block=bundle.sql_examples_text or "(none)",
         schema_summary=_schema_summary(bundle),
+        hints_block=_hints_block(),
         max_limit=max_limit,
     )
     # Providers disagree on whether a messages array may hold ONLY a system

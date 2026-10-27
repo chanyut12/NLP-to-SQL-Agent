@@ -7,8 +7,9 @@ It is selected once per process by `DOMAIN_PROFILE` and lives under
 `profiles/<name>/`.
 
 One service instance answers against **one Datasource** (ADR 0011). Supporting a
-new database means adding a profile and passing evaluation — not adding a
-runtime `/connect` flow.
+new database means adding a profile and passing evaluation; the service selects it
+at startup by `DOMAIN_PROFILE`, and only the bundled demo may switch datasource at
+runtime (ADR 0013) or author a profile with its Profile wizard (ADR 0014).
 
 ---
 
@@ -85,15 +86,17 @@ Write the rules the model cannot infer from the schema: dialect functions,
 academic-year conventions, status dictionaries, canonical join paths, and the
 definition of ambiguous business terms.
 
-**Known gap:** `hints.md` is injected into the one-shot prompt
-(`NLPEngine.query_database`) only. The conversational agent's system prompt
-(`core/services/agent.py`) is currently code-owned and does **not** include the
-profile hints. Until that is fixed, critical semantics for agent mode must also
-live in the Example set and `table_notes.json`. Do not assume editing
-`hints.md` changes agent behaviour.
+**Both prompts read the profile:** the one-shot prompt
+(`NLPEngine.query_database`) and the conversational agent's system prompt
+(`core/services/agent.py`) both inject `hints.md`, so one profile governs both
+answering paths — including the ambiguous shapes that must clarify instead of
+being guessed (ADR 0014). A profile with no `hints.md` still yields a valid
+prompt (the block reads `(none)`).
 
-Changing `hints.md` requires a **service restart**; the prompt is built when the
-engine initialises.
+The one-shot prompt is built when the engine initialises, so a change to
+`hints.md` reaches it after a **service restart** (or a datasource switch in demo
+mode, which rebuilds the engine). The agent reads `hints.md` per Turn, so it sees
+a hints change on the next question.
 
 ---
 
@@ -194,9 +197,10 @@ Curated table meaning and population for the agent's `describe_table` tool:
   switch profile at runtime — that rebuilds the NLPEngine (ADR 0013).
 - `start_server.sh --reload` watches `api/` and `core/`, **not** `profiles/`.
   Editing a profile file does not hot-reload it.
-- Example changes sync automatically at the next startup; `hints.md` and
-  `table_notes.json` require a restart because they are read/cached at engine
-  construction.
+- Example changes sync automatically at the next startup; the one-shot prompt's
+  `hints.md` and `table_notes.json` require a restart because they are
+  read/cached at engine construction. The conversational agent reads `hints.md`
+  per Turn, so it picks up an edit on the next question.
 
 ---
 
@@ -206,8 +210,6 @@ These are the places where STS still leaks into core code. They do not block
 using the profile mechanism today, but they must be addressed before a second
 real datasource is called supported:
 
-- `core/services/agent.py` — `AGENT_SYSTEM_PROMPT` contains STS-specific
-  ambiguity and refusal examples (`จำนวนนักเรียน`, `โรงเรียน`, `เด็กเสี่ยง`).
 - `core/domain/schema_utils.py` — `_DENYLIST_EXACT` lists STS table names
   (`task_links`, `classroom_attendance_links`, `pii_export_requests`, …). Review
   this list for every new datasource.
