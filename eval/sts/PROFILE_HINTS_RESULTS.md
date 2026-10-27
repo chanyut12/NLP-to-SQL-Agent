@@ -8,10 +8,15 @@ examples moved out of `core/services/agent.py` into `profiles/sts/hints.md`.
   hardcoded in the agent prompt).
 - **After** = `6be504b` + this change.
 
-Both runs: `openai/gpt-4o-mini`, `--engine agent`, full golden set (45 questions:
+Two model sets, same code states, `--engine agent`, full golden set (45 questions:
 37 SQL, 4 expected clarification, 4 expected refusal), default config
-(`rag_top_k=3`, `max_retries=2`, `schema_strategy=pruned`), one run per side.
-Artifacts: `before_profile_hints_agent.json`, `after_profile_hints_agent.json`.
+(`rag_top_k=3`, `max_retries=2`, `schema_strategy=pruned`), one run per side:
+
+- `openai/gpt-4o-mini` — the recorded baseline:
+  `before_profile_hints_agent.json`, `after_profile_hints_agent.json`
+- `openrouter/deepseek/deepseek-v4.1-flash` — the shipping model (`.env`):
+  `before_profile_hints_deepseek_v41_flash_agent.json`,
+  `after_profile_hints_deepseek_v41_flash_agent.json`
 
 ## Metrics
 
@@ -25,6 +30,26 @@ Artifacts: `before_profile_hints_agent.json`, `after_profile_hints_agent.json`.
 | p95 latency | 27.5 s | 15.8 s |
 | expected clarification | 3/4 | **4/4** |
 | expected refusal | 4/4 | 4/4 |
+
+## Cross-model check — the shipping model (`deepseek-v4.1-flash`)
+
+| model | side | clarification | refusal | exec accuracy | relaxed | grain | p95 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| gpt-4o-mini | before | 3/4 | 4/4 | 0.378 | 0.730 | 0.892 | 27.5 s |
+| gpt-4o-mini | after | 4/4 | 4/4 | 0.459 | 0.757 | 0.919 | 15.8 s |
+| deepseek-v4.1-flash | before | 4/4 | 4/4 | 0.541 | 0.649 | 0.865 | 18.4 s |
+| deepseek-v4.1-flash | after | 4/4 | 4/4 | 0.595 | 0.730 | 0.892 | 15.8 s |
+
+- The clarification gap was **model-specific**: `deepseek-v4.1-flash` already
+  asked for the missing tier/snapshot before the change (`answer_type_02` =
+  clarification), while `gpt-4o-mini` returned a result.
+- On the shipping model the change is neutral-to-positive: clarification and
+  refusal stay 4/4, and the SQL metrics move up with only three flips
+  (`paraphrase_04`, `novel_08`, `regression_province_concern_ranking` — all
+  fail→pass), versus nine flips on `gpt-4o-mini`.
+- So the answer-type fix matters for `gpt-4o-mini`; on `deepseek-v4.1-flash`
+  the value is that the profile now owns the rules (a revisable artifact)
+  without losing today's behaviour.
 
 ## Answer-type questions (the regression target)
 
@@ -69,4 +94,8 @@ ln -s "$PWD/.env" /tmp/before/.env
 /path/to/venv/bin/python eval/run_eval_sts.py \
     --model openai/gpt-4o-mini --engine agent \
     --output eval/sts/after_profile_hints_agent.json
+
+# the shipping-model runs are the same commands with
+# --model openrouter/deepseek/deepseek-v4.1-flash
+# and the *_deepseek_v41_flash_agent.json outputs
 ```
