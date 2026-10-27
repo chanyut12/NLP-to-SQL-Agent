@@ -9,11 +9,21 @@ relational database, and returns the result together with a suggested chart.
 An external application that calls this service's API. Distinct from the Demo UI. A
 Consumer renders results in its own pages using its own components.
 
+### Deployment mode
+How one process exposes the service, selected by `APP_MODE`: `demo` serves the
+bundled UI and leaves the API unauthenticated; `service` is Consumer-only and
+requires an API key; `auto` is the legacy bridge that chooses between them from
+`API_KEY`. The mode is set at startup, not per request. Only `demo` (or `auto`
+without a key) may also change Datasource at runtime; `service` keeps one
+Datasource per deployment (ADR 0011, ADR 0013).
+
 ### Demo UI
 The chat page bundled in `web/`, served by the service itself. A local development
 aid for eyeballing what the service returns — not a Consumer and not shipped to
-production. It is served only when the API key is unset; once a key is required, the
-page is not mounted and a Consumer is the only way in.
+production. It is mounted in `demo` mode, or in `auto` mode when the API key is
+unset; `service` mode never mounts it. Its 🔌 Connect tab switches the running
+process to another Datasource and Domain profile (ADR 0013) — a demo-only
+exception to the one-Datasource rule.
 
 ### Export
 Delivering the result of one question to a Consumer as a structured JSON payload:
@@ -133,8 +143,9 @@ The bundle of Datasource-specific knowledge the service needs to answer question
 well against one Datasource: the Thai-term-to-column and semantic hints injected into
 the prompt, the Example set, the retrieval-store namespaces, and the query-log
 stream. Selected by a single config value; swapping the Datasource means switching
-profile, not editing code. The active profile is `sts`; the prior receipts knowledge
-is retained as an inactive profile.
+profile, not editing code. The active production profile is `sts`; `demo` is the
+local SQLite sample profile, and the prior receipts knowledge is retained as an
+inactive legacy profile.
 
 ### Log store
 The record of every answered Question — Thai text, generated SQL, outcome, timing,

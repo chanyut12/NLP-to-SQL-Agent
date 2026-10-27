@@ -48,16 +48,60 @@
         <div id="ds-status" class="status-badge" title="ฐานข้อมูลตั้งค่าไว้ที่ฝั่ง service">กำลังตรวจสอบ…</div>
 
         <div class="tabs" role="tablist" aria-label="Sidebar sections">
-            <button type="button" class="tab active" data-action="switchTab" data-tab="schema"
-                role="tab" aria-selected="true" aria-controls="tab-schema" id="tab-btn-schema" tabindex="0">🗄️ Schema</button>
+            <button type="button" class="tab active" data-action="switchTab" data-tab="connection"
+                role="tab" aria-selected="true" aria-controls="tab-connection" id="tab-btn-connection" tabindex="0">🔌 Connect</button>
+            <button type="button" class="tab" data-action="switchTab" data-tab="schema"
+                role="tab" aria-selected="false" aria-controls="tab-schema" id="tab-btn-schema" tabindex="-1">🗄️ Schema</button>
             <button type="button" class="tab" data-action="switchTab" data-tab="history"
                 role="tab" aria-selected="false" aria-controls="tab-history" id="tab-btn-history" tabindex="-1">📜 History</button>
             <button type="button" class="tab" data-action="switchTab" data-tab="favorites"
                 role="tab" aria-selected="false" aria-controls="tab-favorites" id="tab-btn-favorites" tabindex="-1">⭐ Favs</button>
         </div>
 
+        <!-- Tab Content: Connection (demo mode only — ADR 0013) -->
+        <div id="tab-connection" class="tab-content active" role="tabpanel" aria-labelledby="tab-btn-connection">
+            <div class="control-group">
+                <label for="db-type">Database Type</label>
+                <select id="db-type">
+                    <option value="sqlite">SQLite</option>
+                    <option value="postgresql">PostgreSQL</option>
+                    <option value="mysql">MySQL</option>
+                </select>
+            </div>
+
+            <div id="sqlite-config" class="control-group">
+                <label for="db-path">Database File</label>
+                <input type="text" id="db-path" value="local_database.db" placeholder="database.db">
+            </div>
+
+            <div id="sql-config" class="control-group" style="display: none;">
+                <p class="field-hint">ไม่แน่ใจว่าต้องกรอกอะไร? สอบถามข้อมูลนี้จากทีมไอทีหรือผู้ดูแลฐานข้อมูลของคุณ</p>
+                <label for="db-host">Host</label>
+                <input type="text" id="db-host" value="localhost">
+                <label for="db-port">Port</label>
+                <input type="text" id="db-port" value="5432">
+                <label for="db-user">User</label>
+                <input type="text" id="db-user" placeholder="username">
+                <label for="db-pass">Password</label>
+                <input type="password" id="db-pass" placeholder="••••••">
+                <label for="db-name">Database Name</label>
+                <input type="text" id="db-name" placeholder="mydb">
+            </div>
+
+            <div class="control-group">
+                <label for="profile-select">Domain Profile</label>
+                <select id="profile-select"></select>
+                <p class="field-hint">โปรไฟล์เก็บคำศัพท์ไทยและตัวอย่างคำถามของฐานข้อมูลนั้น — เลือกให้ตรงกับ DB ที่จะเชื่อม</p>
+            </div>
+
+            <p id="dsn-preview" class="field-hint"></p>
+            <button type="button" class="primary-btn" id="connect-btn" data-action="connectDatabase">Connect Database</button>
+            <div id="connection-status" class="status-badge disconnected">Disconnected</div>
+            <p class="field-hint">มีผลกับโหมด demo เท่านั้น: เปลี่ยนฐานข้อมูลที่ใช้ตอบคำถามโดยไม่ต้อง restart (เก็บในหน่วยความจำ จนกว่าจะปิด server)</p>
+        </div>
+
         <!-- Tab Content: Schema -->
-        <div id="tab-schema" class="tab-content active" role="tabpanel" aria-labelledby="tab-btn-schema">
+        <div id="tab-schema" class="tab-content" role="tabpanel" aria-labelledby="tab-btn-schema">
             <div id="schema-container">
                 <p class="empty-state">กำลังโหลด schema…</p>
             </div>

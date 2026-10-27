@@ -1,0 +1,41 @@
+{
+  "_global": {
+    "blocked_column_pattern": "email|phone"
+  },
+  "tables": {
+    "receipt": {
+      "meaning": "ใบเสร็จ/รายการขายหนึ่งรายการ",
+      "population": "1,000 รายการขายจำลองในปี 2024",
+      "key_columns": ["receipt_id", "date", "month", "customer_name", "product_category", "total_price", "payment_method"],
+      "joins": [
+        "receipt.customer_name -> customers.customer_name",
+        "receipt.product_category -> products.category (category-level only; joining products multiplies receipt rows)"
+      ],
+      "notes": [
+        "month เก็บเป็นชื่อเดือนภาษาอังกฤษ ไม่ใช่ตัวเลขหรือวันที่",
+        "date เก็บเป็น TEXT รูปแบบ YYYY-MM-DD",
+        "หนึ่งแถวคือหนึ่งใบเสร็จ ไม่ใช่หนึ่งสินค้า"
+      ]
+    },
+    "customers": {
+      "meaning": "ลูกค้าหนึ่งราย",
+      "population": "ลูกค้าจำลอง 100 ราย",
+      "key_columns": ["customer_id", "customer_name", "membership_level"],
+      "joins": ["customers.customer_name -> receipt.customer_name"],
+      "notes": [
+        "email และ phone เป็นข้อมูลส่วนบุคคล ห้าม select",
+        "membership_level มี Bronze, Silver, Gold, Platinum"
+      ]
+    },
+    "products": {
+      "meaning": "สินค้าหนึ่งรายการ",
+      "population": "สินค้าจำลอง 25 รายการใน 5 หมวด",
+      "key_columns": ["product_id", "product_name", "category", "unit_price", "stock_quantity"],
+      "joins": ["products.category -> receipt.product_category (category-level only)"],
+      "notes": [
+        "products ไม่มีประวัติการขายของตัวเอง ต้องใช้ receipt สำหรับยอดขาย",
+        "การ join products กับ receipt ตรง ๆ จะทำให้ใบเสร็จถูกนับซ้ำตามจำนวนสินค้าในหมวด"
+      ]
+    }
+  }
+}

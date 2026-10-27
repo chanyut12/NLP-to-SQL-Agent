@@ -15,7 +15,7 @@ backend + React frontend).
 |---|---|
 | The deployed Python-service URL (e.g. `https://sts-nl2sql.onrender.com`) | `TEXT_TO_SQL_URL` env in `sts-backend` |
 | The shared secret (the service's `API_KEY` env value) | `TEXT_TO_SQL_API_KEY` env in `sts-backend` |
-| Confirmation the service is deployed with `API_KEY` set | — (if unset the service has no auth and serves a demo page) |
+| Confirmation the service is deployed with `APP_MODE=service` and `API_KEY` set | — (if unset the service has no auth and serves a demo page) |
 
 ---
 
@@ -899,11 +899,12 @@ export function NlQueryPage() {
 
 รันตามปกติ: `./start_server.sh`
 
-**ไม่ต้องตั้ง `API_KEY` ใน local** — `require_api_key` เป็น no-op เมื่อ `API_KEY` ว่าง
-(NestJS ส่ง header `X-API-Key` มาก็ได้ Python จะไม่สนใจ) และหน้า demo UI ที่ `/` ยัง
-ใช้ได้ด้วย. `.env` ปัจจุบันมี:
+**ไม่ต้องตั้ง `API_KEY` ใน local** — `require_api_key` เป็น no-op เมื่อ `APP_MODE=auto`
+และ `API_KEY` ว่าง (NestJS ส่ง header `X-API-Key` มาก็ได้ Python จะไม่สนใจ) และหน้า
+demo UI ที่ `/` ยังใช้ได้ด้วย. `.env` ปัจจุบันมี:
 
 ```
+APP_MODE=auto
 DATABASE_URL=postgresql+psycopg2://postgres:<pw>@localhost:5432/sts
 DOMAIN_PROFILE=sts
 MODEL_PROVIDER=openai

@@ -17,7 +17,7 @@ from core.domain.schema_utils import (
     format_schema_for_prompt,
     get_join_hints
 )
-from core.data.schema_rag import create_schema_rag, SchemaRAG
+from core.data.schema_rag import create_schema_rag, datasource_key, SchemaRAG
 from core.config import settings
 from core.profiles import load_hints as load_profile_hints, examples_path as profile_examples_path
 from core.viz.viz_recommender import create_viz_service, VizService
@@ -131,6 +131,28 @@ class NLPEngine:
         self._schema_reindex = True
         logger.info("Schema marked stale; next query will re-introspect and re-index.")
 
+    async def reset_for_datasource(self) -> None:
+        """Forget every cache bound to the previous Datasource.
+
+        Called by demo mode after a runtime connect (ADR 0013): the next query,
+        or the re-warm the caller schedules, must introspect the new Datasource
+        and index its schema from scratch. The schema-RAG collection is
+        namespaced by Datasource, so dropping the instance is enough — this
+        datasource can never retrieve the previous one's tables.
+        """
+        async with self._schema_lock:
+            self._current_engine = None
+            self._schema_cache = None
+            self._schema_cache_ts = 0.0
+            self._schema_text_cache = None
+            self._join_hints_cache = None
+            self._all_tables_cache = None
+            self._full_schema_text_cache = None
+            self._schema_rag = None
+            self._schema_reindex = True
+            self._schema_warmed = False
+        logger.info("Engine reset for a new Datasource; next query will rebuild.")
+
     async def warm(self, db_engine: Engine, dialect: str = "postgres") -> None:
         """Build every question-independent piece of the context bundle so no
         Question carries the cold-cache cost (spec #27 / #28): datasource
@@ -240,6 +262,7 @@ SQL:"""
                     embedding_cache=self._example_store._embedding_cache,
                     embedding_lock=self._example_store._embedding_cache_lock,
                     profile=settings.DOMAIN_PROFILE,
+                    datasource=datasource_key(engine.url),
                 )
             if pruned and (schema_refetched or self._schema_reindex):
                 await asyncio.to_thread(

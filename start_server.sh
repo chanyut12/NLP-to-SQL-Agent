@@ -45,18 +45,29 @@ fi
 # Free port 8000: stop our launchd service automatically; refuse on strangers
 # ==============================================================================
 SERVICE_LABEL="com.chanyut.nlq-server"
-LISTENERS="$(lsof -ti :8000 2>/dev/null || true)"
+
+# Only a LISTEN socket means the port is taken. Plain `lsof -ti :8000` also
+# matches clients that merely have an open socket to the port — a browser tab
+# or an SSH tunnel, for example — and would report a free port as busy.
+listening_pids() {
+    lsof -nP -iTCP:8000 -sTCP:LISTEN -t 2>/dev/null || true
+}
+
+LISTENERS="$(listening_pids)"
 if [ -n "$LISTENERS" ]; then
     if launchctl print "gui/$(id -u)/$SERVICE_LABEL" >/dev/null 2>&1; then
         echo "🔁 Port 8000 busy — stopping launchd service '$SERVICE_LABEL' first..."
         launchctl bootout "gui/$(id -u)/$SERVICE_LABEL" || true
         sleep 2
-        if [ -n "$(lsof -ti :8000 2>/dev/null || true)" ]; then
+        if [ -n "$(listening_pids)" ]; then
             echo "❌ Port 8000 still busy after stopping '$SERVICE_LABEL'"
             exit 1
         fi
     else
-        echo "❌ Port 8000 is used by another process (PID: $LISTENERS)."
+        echo "❌ Port 8000 is used by another process:"
+        for pid in $LISTENERS; do
+            echo "   PID $pid  $(ps -o command= -p "$pid" 2>/dev/null | cut -c1-100)"
+        done
         echo "   Stop it yourself, then re-run this script."
         exit 1
     fi
@@ -70,9 +81,9 @@ echo "  - api/ (API routes and endpoints)"
 echo "  - core/ (business logic and services)"
 echo ""
 
-# Dev default: force API_KEY empty so the demo UI mounts at /. Exported vars
-# win over .env (dotenv does not override), so pass API_KEY=secret to lock it.
-export API_KEY="${API_KEY:-}"
+# API_KEY is left to .env or the shell: empty means APP_MODE=auto mounts the
+# demo UI; a non-empty key means Consumer-only. For the local UI demo, use
+# ./start_demo.sh; for service mode, set APP_MODE=service and API_KEY.
 
 uv run uvicorn api.main:app \
     --reload \

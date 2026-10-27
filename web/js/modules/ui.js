@@ -5,7 +5,7 @@
 
 import { sanitize, formatTimestamp } from './utils.js';
 import { isConnected, setCurrentTab, getCurrentTab } from './state.js';
-import { fetchSchemaData, fetchHistoryData, fetchFavoritesData } from './api.js';
+import { fetchHealth, fetchSchemaData, fetchHistoryData, fetchFavoritesData } from './api.js';
 
 // DOM Elements (cached on init)
 let chatHistory = null;
@@ -21,6 +21,24 @@ export function initUI() {
     schemaContainer = document.getElementById('schema-container');
     historyContainer = document.getElementById('history-container');
     favoritesContainer = document.getElementById('favorites-container');
+}
+
+/**
+ * Ping /api/health and reflect the Datasource state in the sidebar strip.
+ * Shared by page load and the connection panel, which can change the answer.
+ */
+export async function renderDatasourceStatus() {
+    const badge = document.getElementById('ds-status');
+    if (!badge) return;
+    try {
+        const health = await fetchHealth();
+        const ok = health.datasource;
+        badge.className = `status-badge ${ok ? 'connected' : 'disconnected'}`;
+        badge.textContent = ok ? '🟢 ต่อฐานข้อมูลแล้ว (read-only)' : '🔴 service ยังไม่ได้ตั้ง DATABASE_URL';
+    } catch (e) {
+        badge.className = 'status-badge disconnected';
+        badge.textContent = '🔴 ติดต่อ service ไม่ได้';
+    }
 }
 
 /**

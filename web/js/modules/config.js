@@ -3,13 +3,10 @@
  * Contains API URL and application constants
  */
 
-/** @type {boolean} Whether the frontend is running on localhost */
-const isLocal = ["localhost", "127.0.0.1", "0.0.0.0"].includes(window.location.hostname);
-
-/** @type {string} Backend API base URL */
-export const API_URL = isLocal
-    ? "http://localhost:8000/api"
-    : "/api"; // served same-origin by the FastAPI app
+/** @type {string} Backend API base URL — the UI is served by the API itself, so
+ * this must follow whatever host/port the demo server is running on (8000 for
+ * the service, 8001 for demo mode). */
+export const API_URL = "/api";
 
 /**
  * Categorical palette for pie/doughnut slices and multi-series charts.

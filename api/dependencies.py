@@ -1,6 +1,7 @@
 import logging
 import secrets
 import threading
+from contextlib import suppress
 from typing import Optional
 
 from fastapi import Header, HTTPException
@@ -17,8 +18,9 @@ logger = logging.getLogger(__name__)
 class GlobalStateManager:
     """Process-wide singletons.
 
-    The datasource connection is fixed at startup from ``DATABASE_URL`` and never
-    mutated at runtime — there is no ``/connect`` flow and no session file.
+    The datasource connection is fixed at startup from ``DATABASE_URL``. Only
+    demo mode replaces it at runtime, through ``POST /api/demo/connect``
+    (ADR 0013); a service deployment never mutates it.
     """
 
     def __init__(self):
@@ -42,6 +44,29 @@ class GlobalStateManager:
         except Exception as e:
             logger.warning("Datasource connection failed at startup: %s", e)
             return None
+
+    def replace_datasource(self, engine: Engine) -> None:
+        """Point the process at a new Datasource (demo mode only, ADR 0013).
+
+        The previous engine is disposed so its pooled connections close; a query
+        that is already mid-flight keeps the connection it checked out and
+        finishes against the old Datasource instead of failing.
+        """
+        previous = self.db_engine
+        self.db_engine = engine
+        if previous is not None and previous is not engine:
+            with suppress(Exception):
+                previous.dispose()
+
+    def reset_nlp_engine(self) -> None:
+        """Drop the lazily-built NLPEngine so the next request rebuilds it.
+
+        The engine binds the Domain profile at construction time (prompt hints,
+        Example store, schema-RAG), so a profile switch needs a fresh instance
+        rather than a cache reset.
+        """
+        with self._nlp_engine_lock:
+            self.nlp_engine = None
 
     def get_nlp_engine(self) -> NLPEngine:
         """Get NLPEngine singleton, creating it lazily on first use."""
@@ -67,8 +92,10 @@ def get_state_manager() -> GlobalStateManager:
 def require_api_key(x_api_key: str = Header(default="")) -> None:
     """Reject the request unless it carries the shared secret.
 
-    No-op when ``API_KEY`` is unset, so local dev and the bundled demo UI work
-    without a key.
+    No-op in ``APP_MODE=demo`` or when ``API_KEY`` is unset, so the local demo
+    UI and the legacy auto mode work without a key.
     """
-    if settings.API_KEY and not secrets.compare_digest(x_api_key.encode(), settings.API_KEY.encode()):
+    if settings.api_key_enforced() and not secrets.compare_digest(
+        x_api_key.encode(), settings.API_KEY.encode()
+    ):
         raise HTTPException(status_code=401, detail="invalid or missing API key")

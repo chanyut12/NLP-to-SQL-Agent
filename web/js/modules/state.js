@@ -7,7 +7,9 @@
 const state = {
     // The datasource is fixed server-side; the UI is always "connected".
     isConnected: true,
-    currentTab: 'schema',
+    // Demo mode opens on the Connection tab, which is where a user starts
+    // when they want to point the demo at their own database (ADR 0013).
+    currentTab: 'connection',
     // Feedback state
     currentFeedbackLogId: null,
     // Conversational session (ADR 0006): completed Turns replayed to the

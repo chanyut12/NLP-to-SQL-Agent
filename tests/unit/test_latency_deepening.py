@@ -26,6 +26,7 @@ os.environ["API_KEY"] = "test-secret"
 
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage
+from sqlalchemy.engine import make_url
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
@@ -227,10 +228,18 @@ class TestWarmEngine(_SetupBase):
             self.assertEqual(eng._schema_text_cache, "SCHEMA_TEXT")
             self.assertTrue(eng._schema_warmed)
             rag.index_schema_from_db.assert_called_once()
+            # The schema-RAG index is namespaced by Datasource, so two
+            # databases sharing a profile can never pollute each other.
+            self.assertTrue(mk_rag.call_args.kwargs["datasource"])
 
     @staticmethod
     def _stub_db_engine():
-        return SimpleNamespace(dialect=SimpleNamespace(name="sqlite"))
+        """Close enough to a real SQLAlchemy engine for the schema path: the
+        schema-RAG namespace is derived from its URL."""
+        return SimpleNamespace(
+            dialect=SimpleNamespace(name="sqlite"),
+            url=make_url("sqlite:///./stub.db"),
+        )
 
 
 # ------------------------------------------------------- #30 event-loop hygiene

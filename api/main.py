@@ -7,9 +7,11 @@ import os
 from contextlib import asynccontextmanager, suppress
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from api.dependencies import require_api_key, state_manager
+from api.demo_routes import router as demo_router
 from api.routes import router
-from core.config import settings
+from core.config import settings, validate_app_mode
 from core.utils.embedding import configure_third_party_logging
 
 logger = logging.getLogger(__name__)
@@ -131,58 +133,91 @@ async def lifespan(app: FastAPI):
                     await task
 
 
-# Hide the interactive API docs once a key is required (i.e. in a real deployment):
-# the service is then Consumer-only and there is no reason to expose the schema of
-# its endpoints to anyone who hits the public URL.
-_docs_kwargs = {"docs_url": None, "redoc_url": None, "openapi_url": None} if settings.API_KEY else {}
+def create_app() -> FastAPI:
+    """Build the FastAPI app for the configured deployment mode.
 
-app = FastAPI(title="Thai NLP-to-SQL API", version="1.0.0", lifespan=lifespan, **_docs_kwargs)
+    demo    — mount the bundled UI and leave /api unauthenticated (local demo).
+    service — Consumer-only: no UI, /api requires X-API-Key.
+    auto    — preserve the pre-APP_MODE behaviour: UI on iff API_KEY is empty.
+    """
+    validate_app_mode(settings.APP_MODE, settings.API_KEY)
 
-# Enable CORS for frontend
-allow_origins = (
-    ["*"]
-    if settings.CORS_ORIGINS == "*"
-    else [origin.strip() for origin in settings.CORS_ORIGINS.split(",")]
-)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=allow_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+    # Hide the interactive API docs once a key is required (a real deployment):
+    # the service is Consumer-only and there is no reason to expose its endpoint
+    # schema to anyone who hits the public URL.
+    docs_kwargs = (
+        {"docs_url": None, "redoc_url": None, "openapi_url": None}
+        if settings.api_key_enforced()
+        else {}
+    )
+    application = FastAPI(
+        title="Thai NLP-to-SQL API",
+        version="1.0.0",
+        lifespan=lifespan,
+        **docs_kwargs,
+    )
 
-@app.get("/api/health")
-async def health_check():
-    body = {"status": "ok", "datasource": state_manager.db_engine is not None}
-    engine = state_manager.nlp_engine
-    if engine is not None and hasattr(engine, "warm_state"):
-        body.update(engine.warm_state())
+    allow_origins = (
+        ["*"]
+        if settings.CORS_ORIGINS == "*"
+        else [origin.strip() for origin in settings.CORS_ORIGINS.split(",")]
+    )
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=allow_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    @application.get("/api/health")
+    async def health_check():
+        body = {"status": "ok", "datasource": state_manager.db_engine is not None}
+        engine = state_manager.nlp_engine
+        if engine is not None and hasattr(engine, "warm_state"):
+            body.update(engine.warm_state())
+        else:
+            body.update({"schema_cached": False, "warming": True})
+        return body
+
+    application.include_router(
+        router, prefix="/api", dependencies=[Depends(require_api_key)]
+    )
+
+    if settings.demo_ui_enabled():
+        # Runtime Datasource switching lives only where the unauthenticated demo
+        # UI is served (ADR 0013); service mode keeps ADR 0011's one Datasource
+        # per deployment and never exposes these routes.
+        application.include_router(demo_router, prefix="/api")
+
+        if not os.path.exists("web"):
+            logger.warning("Demo UI requested but web/ was not found; skipping mount.")
+            return application
+
+        @application.middleware("http")
+        async def _no_store_demo_ui(request, call_next):
+            response = await call_next(request)
+            path = request.url.path
+            if not (
+                path.startswith("/api")
+                or path.startswith("/docs")
+                or path.startswith("/openapi")
+            ):
+                response.headers["Cache-Control"] = "no-store"
+            return response
+
+        application.mount("/", StaticFiles(directory="web", html=True), name="static")
+        logger.info("Demo UI mounted at / (APP_MODE=%s).", settings.APP_MODE)
     else:
-        body.update({"schema_cached": False, "warming": True})
-    return body
+        logger.info(
+            "Demo UI not mounted (APP_MODE=%s); /api requires X-API-Key.",
+            settings.APP_MODE,
+        )
+
+    return application
 
 
-app.include_router(router, prefix="/api", dependencies=[Depends(require_api_key)])
-
-# Bundled demo UI — a local dev aid, served only when auth is off. Once API_KEY is
-# set the page is not mounted; Consumers (e.g. the NestJS backend) call /api directly.
-from fastapi.staticfiles import StaticFiles
-import os
-
-if os.path.exists("web") and not settings.API_KEY:
-    @app.middleware("http")
-    async def _no_store_demo_ui(request, call_next):
-        response = await call_next(request)
-        p = request.url.path
-        if not (p.startswith("/api") or p.startswith("/docs") or p.startswith("/openapi")):
-            response.headers["Cache-Control"] = "no-store"
-        return response
-
-    app.mount("/", StaticFiles(directory="web", html=True), name="static")
-    logger.info("Demo UI mounted at / (API_KEY unset — dev mode).")
-elif settings.API_KEY:
-    logger.info("Demo UI not mounted (API_KEY set); /api requires X-API-Key.")
+app = create_app()
 
 if __name__ == "__main__":
     import uvicorn

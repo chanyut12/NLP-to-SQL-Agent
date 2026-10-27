@@ -1,0 +1,336 @@
+{
+  "description": "Few-shot examples for the standalone SQLite demo (local_database.db).",
+  "version": "1.0",
+  "examples": [
+    {
+      "id": "demo_total_sales",
+      "question": "ยอดขายรวมทั้งหมด",
+      "sql": "SELECT SUM(total_price) AS total_sales FROM receipt;",
+      "category": "aggregation",
+      "dialect": "sqlite",
+      "retrieval_tags": ["ยอดขายรวม", "รายได้รวม", "ยอดรวมทั้งหมด"],
+      "grain": "หนึ่งแถวต่อยอดขายรวมทั้งหมด",
+      "schema_packs": ["receipt"]
+    },
+    {
+      "id": "demo_sales_december",
+      "question": "ยอดขายรวมของเดือนธันวาคม",
+      "sql": "SELECT SUM(total_price) AS total_sales FROM receipt WHERE month = 'December';",
+      "category": "aggregation_filter",
+      "dialect": "sqlite",
+      "retrieval_tags": ["ยอดขายเดือนธันวาคม", "ยอดขายรายเดือน"],
+      "grain": "หนึ่งแถวต่อยอดขายของเดือนที่ระบุ",
+      "schema_packs": ["receipt"]
+    },
+    {
+      "id": "demo_sales_january",
+      "question": "ยอดขายเดือนมกราคม",
+      "sql": "SELECT SUM(total_price) AS total_sales FROM receipt WHERE month = 'January';",
+      "category": "aggregation_filter",
+      "dialect": "sqlite",
+      "retrieval_tags": ["ยอดขายเดือนมกราคม", "ยอดขายเดือนมกรา"],
+      "grain": "หนึ่งแถวต่อยอดขายของเดือนที่ระบุ",
+      "schema_packs": ["receipt"]
+    },
+    {
+      "id": "demo_top_customers",
+      "question": "ลูกค้าคนไหนซื้อเยอะที่สุด 5 อันดับแรก",
+      "sql": "SELECT customer_name, SUM(total_price) AS total_spent FROM receipt GROUP BY customer_name ORDER BY total_spent DESC LIMIT 5;",
+      "category": "ranking",
+      "dialect": "sqlite",
+      "retrieval_tags": ["ลูกค้าซื้อเยอะ", "อันดับลูกค้า", "top 5"],
+      "grain": "หนึ่งแถวต่อลูกค้า เรียงตามยอดซื้อมากไปน้อย",
+      "schema_packs": ["receipt"]
+    },
+    {
+      "id": "demo_top_customer",
+      "question": "ลูกค้าที่มียอดซื้อสูงสุด",
+      "sql": "SELECT customer_name, SUM(total_price) AS total_spent FROM receipt GROUP BY customer_name ORDER BY total_spent DESC LIMIT 1;",
+      "category": "ranking",
+      "dialect": "sqlite",
+      "retrieval_tags": ["ลูกค้ายอดสูงสุด", "ลูกค้าซื้อมากที่สุด"],
+      "grain": "หนึ่งแถวต่อลูกค้าอันดับหนึ่ง",
+      "schema_packs": ["receipt"]
+    },
+    {
+      "id": "demo_receipt_count",
+      "question": "จำนวนใบเสร็จทั้งหมด",
+      "sql": "SELECT COUNT(*) AS total_receipts FROM receipt;",
+      "category": "count",
+      "dialect": "sqlite",
+      "retrieval_tags": ["จำนวนใบเสร็จ", "กี่ใบเสร็จ", "นับใบเสร็จ"],
+      "grain": "หนึ่งแถวต่อจำนวนใบเสร็จทั้งหมด",
+      "schema_packs": ["receipt"]
+    },
+    {
+      "id": "demo_march_receipt_count",
+      "question": "มีใบเสร็จกี่ใบในเดือนมีนาคม",
+      "sql": "SELECT COUNT(*) AS receipt_count FROM receipt WHERE month = 'March';",
+      "category": "count_filter",
+      "dialect": "sqlite",
+      "retrieval_tags": ["จำนวนใบเสร็จเดือนมีนาคม", "ใบเสร็จรายเดือน"],
+      "grain": "หนึ่งแถวต่อจำนวนใบเสร็จของเดือนที่ระบุ",
+      "schema_packs": ["receipt"]
+    },
+    {
+      "id": "demo_receipts_by_payment",
+      "question": "จำนวนใบเสร็จแยกตามวิธีชำระเงิน",
+      "sql": "SELECT payment_method, COUNT(receipt_id) AS receipt_count FROM receipt GROUP BY payment_method ORDER BY receipt_count DESC;",
+      "category": "count_groupby",
+      "dialect": "sqlite",
+      "retrieval_tags": ["จำนวนใบเสร็จแยกวิธีชำระ", "การชำระเงิน"],
+      "grain": "หนึ่งแถวต่อวิธีชำระเงิน",
+      "schema_packs": ["receipt"]
+    },
+    {
+      "id": "demo_average_sale",
+      "question": "ยอดขายเฉลี่ยต่อใบเสร็จ",
+      "sql": "SELECT AVG(total_price) AS avg_sale FROM receipt;",
+      "category": "average",
+      "dialect": "sqlite",
+      "retrieval_tags": ["ยอดขายเฉลี่ย", "ค่าเฉลี่ยต่อใบเสร็จ"],
+      "grain": "หนึ่งแถวต่อค่าเฉลี่ยยอดขาย",
+      "schema_packs": ["receipt"]
+    },
+    {
+      "id": "demo_average_by_category",
+      "question": "ค่าเฉลี่ยยอดขายแต่ละหมวดสินค้า",
+      "sql": "SELECT product_category, AVG(total_price) AS avg_sale FROM receipt GROUP BY product_category ORDER BY avg_sale DESC;",
+      "category": "average_groupby",
+      "dialect": "sqlite",
+      "retrieval_tags": ["ค่าเฉลี่ยแยกหมวด", "ยอดขายเฉลี่ยหมวดสินค้า"],
+      "grain": "หนึ่งแถวต่อหมวดสินค้า",
+      "schema_packs": ["receipt"]
+    },
+    {
+      "id": "demo_sales_by_month",
+      "question": "แสดงยอดขายรวมแยกตามเดือน",
+      "sql": "SELECT month, SUM(total_price) AS monthly_sales FROM receipt GROUP BY month ORDER BY monthly_sales DESC;",
+      "category": "groupby",
+      "dialect": "sqlite",
+      "retrieval_tags": ["ยอดขายรายเดือน", "ยอดขายแต่ละเดือน"],
+      "grain": "หนึ่งแถวต่อเดือน",
+      "schema_packs": ["receipt"]
+    },
+    {
+      "id": "demo_sales_by_category",
+      "question": "ยอดขายแต่ละหมวดหมู่สินค้า",
+      "sql": "SELECT product_category, SUM(total_price) AS category_sales FROM receipt GROUP BY product_category ORDER BY category_sales DESC;",
+      "category": "groupby",
+      "dialect": "sqlite",
+      "retrieval_tags": ["ยอดขายแยกหมวด", "ยอดขายตามประเภทสินค้า"],
+      "grain": "หนึ่งแถวต่อหมวดสินค้า",
+      "schema_packs": ["receipt"]
+    },
+    {
+      "id": "demo_best_category",
+      "question": "หมวดสินค้าไหนขายดีที่สุด",
+      "sql": "SELECT product_category, SUM(total_price) AS total_sales FROM receipt GROUP BY product_category ORDER BY total_sales DESC LIMIT 1;",
+      "category": "ranking",
+      "dialect": "sqlite",
+      "retrieval_tags": ["หมวดขายดี", "หมวดยอดขายสูงสุด"],
+      "grain": "หนึ่งแถวต่อหมวดที่มียอดขายสูงสุด",
+      "schema_packs": ["receipt"]
+    },
+    {
+      "id": "demo_worst_category",
+      "question": "หมวดสินค้าที่ขายได้น้อยที่สุด",
+      "sql": "SELECT product_category, SUM(total_price) AS total_sales FROM receipt GROUP BY product_category ORDER BY total_sales ASC LIMIT 1;",
+      "category": "ranking",
+      "dialect": "sqlite",
+      "retrieval_tags": ["หมวดขายน้อย", "หมวดยอดขายต่ำสุด"],
+      "grain": "หนึ่งแถวต่อหมวดที่มียอดขายต่ำสุด",
+      "schema_packs": ["receipt"]
+    },
+    {
+      "id": "demo_credit_card_customers",
+      "question": "มีลูกค้ากี่คนที่จ่ายด้วยบัตรเครดิต",
+      "sql": "SELECT COUNT(DISTINCT customer_name) AS customer_count FROM receipt WHERE payment_method = 'Credit Card';",
+      "category": "count_distinct",
+      "dialect": "sqlite",
+      "retrieval_tags": ["ลูกค้าบัตรเครดิต", "จำนวนลูกค้าจ่ายบัตร"],
+      "grain": "หนึ่งแถวต่อจำนวนลูกค้าที่ไม่ซ้ำ",
+      "schema_packs": ["receipt"]
+    },
+    {
+      "id": "demo_total_customers",
+      "question": "จำนวนลูกค้าทั้งหมด",
+      "sql": "SELECT COUNT(DISTINCT customer_name) AS total_customers FROM receipt;",
+      "category": "count_distinct",
+      "dialect": "sqlite",
+      "retrieval_tags": ["จำนวนลูกค้า", "ลูกค้าทั้งหมด"],
+      "grain": "หนึ่งแถวต่อจำนวนลูกค้าที่ไม่ซ้ำ",
+      "schema_packs": ["receipt"]
+    },
+    {
+      "id": "demo_popular_payment",
+      "question": "วิธีชำระเงินที่นิยมที่สุด",
+      "sql": "SELECT payment_method, COUNT(*) AS usage_count FROM receipt GROUP BY payment_method ORDER BY usage_count DESC LIMIT 1;",
+      "category": "ranking",
+      "dialect": "sqlite",
+      "retrieval_tags": ["วิธีชำระยอดนิยม", "ชำระเงินมากที่สุด"],
+      "grain": "หนึ่งแถวต่อวิธีชำระเงินที่ถูกใช้มากที่สุด",
+      "schema_packs": ["receipt"]
+    },
+    {
+      "id": "demo_sales_by_customer",
+      "question": "ยอดขายของลูกค้าแต่ละคน",
+      "sql": "SELECT customer_name, SUM(total_price) AS customer_sales FROM receipt GROUP BY customer_name ORDER BY customer_sales DESC LIMIT 100;",
+      "category": "groupby",
+      "dialect": "sqlite",
+      "retrieval_tags": ["ยอดซื้อต่อลูกค้า", "ยอดขายลูกค้าแต่ละคน"],
+      "grain": "หนึ่งแถวต่อลูกค้า",
+      "schema_packs": ["receipt"]
+    },
+    {
+      "id": "demo_high_value_receipts",
+      "question": "ใบเสร็จที่มียอดซื้อมากกว่า 1000 บาท",
+      "sql": "SELECT * FROM receipt WHERE total_price > 1000 ORDER BY total_price DESC LIMIT 100;",
+      "category": "filter",
+      "dialect": "sqlite",
+      "retrieval_tags": ["ใบเสร็จยอดมาก", "ยอดซื้อเกิน 1000"],
+      "grain": "หนึ่งแถวต่อใบเสร็จ",
+      "schema_packs": ["receipt"]
+    },
+    {
+      "id": "demo_february_receipts",
+      "question": "รายการขายของเดือนกุมภาพันธ์",
+      "sql": "SELECT * FROM receipt WHERE month = 'February' ORDER BY total_price DESC LIMIT 100;",
+      "category": "filter",
+      "dialect": "sqlite",
+      "retrieval_tags": ["รายการขายเดือนกุมภาพันธ์", "ใบเสร็จเดือนกุมภาพันธ์"],
+      "grain": "หนึ่งแถวต่อใบเสร็จ",
+      "schema_packs": ["receipt"]
+    },
+    {
+      "id": "demo_best_month",
+      "question": "เดือนไหนขายได้มากที่สุด",
+      "sql": "SELECT month, SUM(total_price) AS monthly_sales FROM receipt GROUP BY month ORDER BY monthly_sales DESC LIMIT 1;",
+      "category": "ranking",
+      "dialect": "sqlite",
+      "retrieval_tags": ["เดือนขายดี", "ยอดขายสูงสุดรายเดือน"],
+      "grain": "หนึ่งแถวต่อเดือนที่มียอดขายสูงสุด",
+      "schema_packs": ["receipt"]
+    },
+    {
+      "id": "demo_payment_summary",
+      "question": "สรุปยอดขายตามวิธีชำระเงิน",
+      "sql": "SELECT payment_method, SUM(total_price) AS total_sales, COUNT(*) AS transaction_count FROM receipt GROUP BY payment_method ORDER BY total_sales DESC;",
+      "category": "summary",
+      "dialect": "sqlite",
+      "retrieval_tags": ["สรุปวิธีชำระเงิน", "ยอดขายและจำนวนรายการ"],
+      "grain": "หนึ่งแถวต่อวิธีชำระเงิน",
+      "schema_packs": ["receipt"]
+    },
+    {
+      "id": "demo_electronics_customers",
+      "question": "ลูกค้าที่ซื้อสินค้าหมวด Electronics",
+      "sql": "SELECT DISTINCT customer_name FROM receipt WHERE product_category = 'Electronics' LIMIT 100;",
+      "category": "filter_distinct",
+      "dialect": "sqlite",
+      "retrieval_tags": ["ลูกค้าซื้ออิเล็กทรอนิกส์", "ลูกค้าหมวด Electronics"],
+      "grain": "หนึ่งแถวต่อลูกค้าที่ไม่ซ้ำ",
+      "schema_packs": ["receipt"]
+    },
+    {
+      "id": "demo_clothing_sales",
+      "question": "ยอดขายรวมของสินค้าหมวด Clothing",
+      "sql": "SELECT SUM(total_price) AS clothing_sales FROM receipt WHERE product_category = 'Clothing';",
+      "category": "aggregation_filter",
+      "dialect": "sqlite",
+      "retrieval_tags": ["ยอดขายเสื้อผ้า", "ยอดขายหมวด Clothing"],
+      "grain": "หนึ่งแถวต่อยอดขายของหมวดที่ระบุ",
+      "schema_packs": ["receipt"]
+    },
+    {
+      "id": "demo_items_by_category",
+      "question": "จำนวนสินค้าที่ขายได้แต่ละหมวด",
+      "sql": "SELECT product_category, SUM(items_count) AS total_items FROM receipt GROUP BY product_category ORDER BY total_items DESC;",
+      "category": "groupby",
+      "dialect": "sqlite",
+      "retrieval_tags": ["จำนวนชิ้นแยกหมวด", "สินค้าขายได้แต่ละหมวด"],
+      "grain": "หนึ่งแถวต่อหมวดสินค้า",
+      "schema_packs": ["receipt"]
+    },
+    {
+      "id": "demo_product_count",
+      "question": "จำนวนสินค้าทั้งหมด",
+      "sql": "SELECT COUNT(*) AS total_products FROM products;",
+      "category": "count",
+      "dialect": "sqlite",
+      "retrieval_tags": ["จำนวนสินค้า", "สินค้าทั้งหมด"],
+      "grain": "หนึ่งแถวต่อจำนวนสินค้าทั้งหมด",
+      "schema_packs": ["products"]
+    },
+    {
+      "id": "demo_expensive_products",
+      "question": "สินค้าที่มีราคาสูงกว่า 500 บาท",
+      "sql": "SELECT product_name, category, unit_price FROM products WHERE unit_price > 500 ORDER BY unit_price DESC LIMIT 100;",
+      "category": "filter",
+      "dialect": "sqlite",
+      "retrieval_tags": ["สินค้าราคาแพง", "ราคาสูงกว่า 500"],
+      "grain": "หนึ่งแถวต่อสินค้า",
+      "schema_packs": ["products"]
+    },
+    {
+      "id": "demo_stock_by_category",
+      "question": "สต็อกสินค้าคงเหลือรวมแต่ละหมวด",
+      "sql": "SELECT category, SUM(stock_quantity) AS total_stock FROM products GROUP BY category ORDER BY total_stock DESC;",
+      "category": "groupby",
+      "dialect": "sqlite",
+      "retrieval_tags": ["สต็อกคงเหลือ", "สินค้าคงคลังแต่ละหมวด"],
+      "grain": "หนึ่งแถวต่อหมวดสินค้า",
+      "schema_packs": ["products"]
+    },
+    {
+      "id": "demo_gold_members",
+      "question": "ลูกค้าที่เป็นสมาชิก Gold",
+      "sql": "SELECT customer_name, membership_level FROM customers WHERE membership_level = 'Gold' LIMIT 100;",
+      "category": "filter",
+      "dialect": "sqlite",
+      "retrieval_tags": ["สมาชิก Gold", "ลูกค้าระดับ Gold"],
+      "grain": "หนึ่งแถวต่อลูกค้า",
+      "schema_packs": ["customers"]
+    },
+    {
+      "id": "demo_sales_by_membership",
+      "question": "ยอดขายรวมของลูกค้าแต่ละระดับสมาชิก",
+      "sql": "SELECT c.membership_level, SUM(r.total_price) AS total_sales FROM receipt AS r JOIN customers AS c ON c.customer_name = r.customer_name GROUP BY c.membership_level ORDER BY total_sales DESC;",
+      "category": "join_aggregation",
+      "dialect": "sqlite",
+      "retrieval_tags": ["ยอดขายตามระดับสมาชิก", "ยอดซื้อสมาชิก Gold Silver"],
+      "grain": "หนึ่งแถวต่อระดับสมาชิก",
+      "schema_packs": ["receipt", "customers"]
+    },
+    {
+      "id": "demo_average_sales_per_customer",
+      "question": "ยอดขายเฉลี่ยต่อลูกค้า",
+      "sql": "SELECT SUM(total_price) / COUNT(DISTINCT customer_name) AS avg_sales_per_customer FROM receipt;",
+      "category": "average",
+      "dialect": "sqlite",
+      "retrieval_tags": ["ยอดขายเฉลี่ยต่อคน", "ค่าเฉลี่ยต่อลูกค้า"],
+      "grain": "หนึ่งแถวต่อค่าเฉลี่ยยอดซื้อของลูกค้า",
+      "schema_packs": ["receipt"]
+    },
+    {
+      "id": "demo_customers_without_receipts",
+      "question": "ลูกค้าที่ยังไม่มีใบเสร็จ",
+      "sql": "SELECT c.customer_name FROM customers AS c LEFT JOIN receipt AS r ON r.customer_name = c.customer_name WHERE r.receipt_id IS NULL LIMIT 100;",
+      "category": "left_join_null",
+      "dialect": "sqlite",
+      "retrieval_tags": ["ลูกค้าไม่มีใบเสร็จ", "ลูกค้ายังไม่เคยซื้อ"],
+      "grain": "หนึ่งแถวต่อลูกค้าที่ยังไม่มีใบเสร็จ",
+      "schema_packs": ["customers", "receipt"]
+    },
+    {
+      "id": "demo_sales_by_year",
+      "question": "ยอดขายรวมแยกตามปี",
+      "sql": "SELECT substr(date, 1, 4) AS year, SUM(total_price) AS total_sales FROM receipt GROUP BY year ORDER BY year;",
+      "category": "groupby_date",
+      "dialect": "sqlite",
+      "retrieval_tags": ["ยอดขายรายปี", "ยอดขายแต่ละปี"],
+      "grain": "หนึ่งแถวต่อปี",
+      "schema_packs": ["receipt"]
+    }
+  ]
+}

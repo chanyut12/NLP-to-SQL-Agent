@@ -15,6 +15,7 @@ from core.viz.column_meta import describe_result
 from core.profiles import load_table_notes
 from core.services.turn_digest import build_turn_digest
 from core.utils.sql_metrics import parse_sql_metrics
+from core.utils.dialect_transpiler import sqlglot_dialect_name
 from core.config import settings
 import uuid
 import json
@@ -119,9 +120,7 @@ async def query_data(
     request_id = str(uuid.uuid4())
     # The datasource is fixed at deploy time; its own dialect is authoritative,
     # not whatever the client sent.
-    dialect = {"postgresql": "postgres"}.get(
-        state.db_engine.dialect.name, state.db_engine.dialect.name
-    )
+    dialect = sqlglot_dialect_name(state.db_engine.dialect.name)
     start_time = time.time()
 
     # ADR 0006 (dispatch refined in #21): the PRESENCE of the history field —

@@ -5,6 +5,15 @@ import sqlglot
 from typing import Optional
 
 
+def sqlglot_dialect_name(sqlalchemy_dialect: str) -> str:
+    """Map a SQLAlchemy dialect name to its sqlglot name.
+
+    The Datasource's own dialect is authoritative; this is the one place that
+    knows SQLAlchemy says 'postgresql' where sqlglot says 'postgres'.
+    """
+    return {"postgresql": "postgres"}.get(sqlalchemy_dialect, sqlalchemy_dialect)
+
+
 class DialectTranspiler:
     """
     ช่วยแปลง SQL query ระหว่าง dialects ต่างๆ

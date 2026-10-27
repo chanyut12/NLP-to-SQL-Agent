@@ -1,13 +1,52 @@
 import os
 
+
+VALID_APP_MODES = ("auto", "demo", "service")
+
+
+def normalize_app_mode(value) -> str:
+    """Normalize APP_MODE; an unset/blank value means the legacy auto mode."""
+    return (value or "auto").strip().lower()
+
+
+def validate_app_mode(mode, api_key) -> str:
+    """Validate the deployment mode and its auth requirement.
+
+    auto    — preserve the original behaviour: UI on iff API_KEY is empty.
+    demo    — bundled UI on and auth off; API_KEY must be empty so the page
+              cannot accidentally expose a protected datasource.
+    service — Consumer-only: UI off and API_KEY required.
+    """
+    mode = normalize_app_mode(mode)
+    if mode not in VALID_APP_MODES:
+        raise ValueError(
+            f"Invalid APP_MODE={mode!r}; expected one of {', '.join(VALID_APP_MODES)}."
+        )
+    if mode == "demo" and api_key:
+        raise ValueError(
+            "APP_MODE=demo serves an unauthenticated UI; unset API_KEY or use APP_MODE=service."
+        )
+    if mode == "service" and not api_key:
+        raise ValueError(
+            "APP_MODE=service requires API_KEY; use APP_MODE=demo for an unauthenticated local demo."
+        )
+    return mode
+
+
 class Settings:
+    # ===========================================================================
+    # Deployment mode
+    # ===========================================================================
+    # auto (default) | demo | service. See validate_app_mode().
+    APP_MODE = normalize_app_mode(os.getenv("APP_MODE", "auto"))
     # ===========================================================================
     # Datasource & Service (microservice deployment)
     # ===========================================================================
     # Single read-only PostgreSQL connection, fixed at deploy time.
     # e.g. postgresql+psycopg2://user:pass@host:5432/sts
     DATABASE_URL = os.getenv("DATABASE_URL", "")
-    # Shared secret required in the X-API-Key header. Empty = auth disabled (dev).
+    # Shared secret required in the X-API-Key header. Empty disables auth in
+    # auto/demo mode; APP_MODE=service rejects an empty key at startup.
     API_KEY = os.getenv("API_KEY", "")
     # Domain profile: profiles/<name>/{hints.md,examples.json}
     DOMAIN_PROFILE = os.getenv("DOMAIN_PROFILE", "sts")
@@ -79,5 +118,19 @@ class Settings:
     # CORS Configuration (Frontend Origins)
     # ===========================================================================
     CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*")
+
+    def demo_ui_enabled(self) -> bool:
+        """Whether the bundled web UI should be mounted at /."""
+        mode = normalize_app_mode(self.APP_MODE)
+        if mode == "demo":
+            return True
+        if mode == "service":
+            return False
+        return not self.API_KEY
+
+    def api_key_enforced(self) -> bool:
+        """Whether /api requests must carry X-API-Key."""
+        return normalize_app_mode(self.APP_MODE) != "demo" and bool(self.API_KEY)
+
 
 settings = Settings()

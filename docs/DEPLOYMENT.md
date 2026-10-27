@@ -89,6 +89,7 @@ postgresql://nl2sql_ro.abcdefghijklmnop:THE_PASSWORD@aws-0-ap-southeast-1.pooler
 In the repo root, create `.env`:
 
 ```
+APP_MODE=service
 DATABASE_URL=postgresql+psycopg2://nl2sql_ro.abcdefghijklmnop:THE_PASSWORD@aws-0-ap-northeast-1.pooler.supabase.com:5432/postgres?sslmode=require
 API_KEY=1df6af602a3f783d86c7bce648f785dc0e7095efccaf12969057368bdb1e631f
 MODEL_PROVIDER=openai
@@ -98,7 +99,11 @@ DOMAIN_PROFILE=sts
 SCHEMA_STRATEGY=pruned
 ```
 
-`API_KEY` set → the demo UI and `/docs` are off; the service is Consumer-only.
+`APP_MODE=service` requires a non-empty `API_KEY`; the process refuses to start
+without it. With the key set, the demo UI and `/docs` are off and the service is
+Consumer-only. For a local UI demo, use `./start_demo.sh` instead — never point
+demo mode at the STS datasource.
+
 **LLM: gpt-4o-mini** — OpenRouter's free models were ~58 s per call (unusable
 with the 90 s HTTP timeout once self-correction retries stack). gpt-4o-mini is
 ~2–8 s and costs roughly $0.5–2/month at ≤ 500 queries/day. To try a free model
@@ -167,7 +172,7 @@ tailscale funnel 8000                                       # terminal 2
 
 Docker alternative: `docker compose up` also works, but `docker-compose.yml` only
 forwards `MODEL_PROVIDER` / `GOOGLE_*` / `OPENAI_*` today — add `DATABASE_URL`,
-`API_KEY`, `OPENROUTER_*`, `DOMAIN_PROFILE` to its `environment:` list first, or
+`APP_MODE`, `API_KEY`, `OPENROUTER_*`, `DOMAIN_PROFILE` to its `environment:` list first, or
 just use `uvicorn` as above.
 
 ---

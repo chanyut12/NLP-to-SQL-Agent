@@ -6,12 +6,14 @@ with Thai-English mapping support for improved Local LLM accuracy.
 """
 
 import asyncio
+import hashlib
 import threading
 from typing import List, Dict, Optional, Any, Set
 import logging
 from sentence_transformers import SentenceTransformer
 import chromadb
 from sqlalchemy import Engine, inspect
+from sqlalchemy.engine import make_url
 
 from core.utils.common import generate_stable_id
 from core.utils.embedding import load_sentence_transformer
@@ -19,6 +21,25 @@ from core.profiles import load_schema_mappings
 
 
 logger = logging.getLogger(__name__)
+
+
+def datasource_key(url) -> str:
+    """Short, stable, Chroma-safe key for the Datasource behind a SQLAlchemy URL.
+
+    Schema-RAG collections are namespaced by it so two Datasources never share
+    one index: demo mode can switch Datasource at runtime (ADR 0013), and a
+    deployment that repoints a profile at another database must not retrieve
+    the previous database's tables. The username is part of the identity because
+    two roles can see different tables in the same database.
+    """
+    url = make_url(url)
+    identity = ":".join(
+        str(part or "")
+        for part in (
+            url.get_backend_name(), url.username, url.host, url.port, url.database,
+        )
+    )
+    return hashlib.sha1(identity.encode("utf-8")).hexdigest()[:12]
 
 
 
@@ -36,6 +57,7 @@ class SchemaRAG:
         embedding_cache: Optional[Dict[str, list]] = None,
         embedding_lock: Optional[threading.Lock] = None,
         profile: str = "default",
+        datasource: str = "",
     ):
         """
         Initialize the Schema RAG store.
@@ -45,11 +67,16 @@ class SchemaRAG:
             persist_directory: Directory to persist ChromaDB
             embedder: Optional shared SentenceTransformer instance
             embedding_cache: Optional shared embedding cache dict
+            profile: Domain profile whose Thai mappings describe the schema
+            datasource: Key from datasource_key(); namespaces the collection so
+                each Datasource keeps its own index (empty = legacy shared name)
         """
         from core.config import settings
         self.model_name = model_name or settings.EMBEDDING_MODEL
         self.persist_directory = persist_directory
-        self.collection_name = f"schema_metadata_{profile}"
+        self.collection_name = f"schema_metadata_{profile}" + (
+            f"_{datasource}" if datasource else ""
+        )
         # Thai-term -> table/column name fragments, per domain profile.
         self.thai_mappings = load_schema_mappings(profile)
         self._embedder = embedder
@@ -340,6 +367,7 @@ def create_schema_rag(
     embedding_cache: Optional[Dict[str, list]] = None,
     embedding_lock: Optional[threading.Lock] = None,
     profile: str = "default",
+    datasource: str = "",
 ) -> SchemaRAG:
     """Create and return a SchemaRAG instance."""
     return SchemaRAG(
@@ -348,6 +376,7 @@ def create_schema_rag(
         embedding_cache=embedding_cache,
         embedding_lock=embedding_lock,
         profile=profile,
+        datasource=datasource,
     )
 
 

@@ -153,3 +153,24 @@ class FeedbackRequest(BaseModel):
     feedback: str  # "positive" or "negative"
     feedback_text: Optional[str] = None  # Optional user-typed comment
 
+# =============================================================================
+# Demo-mode Datasource switching (APP_MODE=demo / auto without a key; ADR 0013)
+# =============================================================================
+# These models are not part of the Consumer contract: the endpoints are mounted
+# only where the bundled UI is served, and a service deployment keeps ADR 0011's
+# one-Datasource-per-deployment rule.
+
+class DemoConnectRequest(BaseModel):
+    database_url: str  # SQLAlchemy DSN, e.g. sqlite:///./local_database.db
+    profile: Optional[str] = None  # profiles/<name>; defaults to the active one
+
+class DemoConnectResponse(BaseModel):
+    datasource: str  # the accepted DSN, password redacted
+    profile: str
+    tables: List[str] = []  # readable tables (denylist applied) on the new Datasource
+
+class DemoStateResponse(BaseModel):
+    datasource: Optional[str] = None  # redacted DSN; None until one is configured
+    profile: str
+    profiles: List[str] = []  # profile names the demo can switch to
+

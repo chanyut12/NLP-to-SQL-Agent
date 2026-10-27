@@ -8,19 +8,19 @@
 // Module imports
 import { getCurrentTab, getSessionTurns, addSessionTurn, resetSession } from './modules/state.js';
 import { sanitize, formatError } from './modules/utils.js';
-import { fetchHealth, sendQuery, saveFavorite, deleteFavoriteById } from './modules/api.js';
+import { sendQuery, saveFavorite, deleteFavoriteById } from './modules/api.js';
 import {
     initUI, switchTab, appendMessage, appendLoading, removeLoading,
-    fetchSchema, fetchHistory, fetchFavorites
+    fetchSchema, fetchHistory, fetchFavorites, renderDatasourceStatus
 } from './modules/ui.js';
 import {
     showFeedbackModal, closeFeedbackModal, submitFeedbackWithText, sendFeedback
 } from './modules/feedback.js';
 import { renderAnswer } from './modules/result.js';
+import { initConnectionPanel, connectFromForm } from './modules/connection.js';
 
 // DOM Elements
 let userInput = null;
-let dsStatus = null;
 let sidebar = null;
 let openSidebarBtn = null;
 let sidebarBackdrop = null;
@@ -35,7 +35,6 @@ const isMobileViewport = () => window.matchMedia(MOBILE_QUERY).matches;
 function init() {
     // Cache DOM elements
     userInput = document.getElementById('user-input');
-    dsStatus = document.getElementById('ds-status');
     sidebar = document.getElementById('sidebar');
     openSidebarBtn = document.getElementById('open-sidebar-btn');
     sidebarBackdrop = document.getElementById('sidebar-backdrop');
@@ -53,24 +52,11 @@ function init() {
     // Sync theme toggle icon with the theme applied pre-paint (see index.html inline script)
     restoreThemeState();
 
-    // Show datasource status and load the schema
-    checkDatasource();
+    // Show datasource status, load the schema, and wire the demo's
+    // connection panel (which hides itself when its routes are absent).
+    renderDatasourceStatus();
     fetchSchema();
-}
-
-/**
- * Ping /api/health and reflect it in the status badge.
- */
-async function checkDatasource() {
-    try {
-        const h = await fetchHealth();
-        const ok = h.datasource;
-        dsStatus.className = `status-badge ${ok ? 'connected' : 'disconnected'}`;
-        dsStatus.textContent = ok ? '🟢 ต่อฐานข้อมูลแล้ว (read-only)' : '🔴 service ยังไม่ได้ตั้ง DATABASE_URL';
-    } catch (e) {
-        dsStatus.className = 'status-badge disconnected';
-        dsStatus.textContent = '🔴 ติดต่อ service ไม่ได้';
-    }
+    initConnectionPanel();
 }
 
 /**
@@ -156,6 +142,9 @@ function handleAction(e) {
             break;
         case 'sendMessage':
             sendMessage();
+            break;
+        case 'connectDatabase':
+            connectFromForm();
             break;
         case 'resetSession':
             resetConversation();

@@ -28,6 +28,32 @@ export async function fetchHealth() {
 }
 
 /**
+ * Demo-mode Datasource state — { datasource, profile, profiles }.
+ *
+ * Only mounted while the demo UI is served (ADR 0013); a 404 means this
+ * deployment has no connection panel and the caller should hide it.
+ */
+export async function fetchDemoState() {
+    const res = await fetch(`${API_URL}/demo/state`);
+    return handleResponse(res);
+}
+
+/**
+ * Switch the running demo to another Datasource (APP_MODE=demo only).
+ * @param {string} databaseUrl - SQLAlchemy DSN, e.g. sqlite:///./local_database.db
+ * @param {string} profile - Domain profile name under profiles/
+ * @returns {Promise<Object>} { datasource, profile, tables }
+ */
+export async function connectDemoDatabase(databaseUrl, profile) {
+    const res = await fetch(`${API_URL}/demo/connect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ database_url: databaseUrl, profile }),
+    });
+    return handleResponse(res);
+}
+
+/**
  * Fetch database schema
  * @returns {Promise<Object>} Schema data with tables array
  * @throws {Error} If server returns non-ok status
