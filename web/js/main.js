@@ -17,6 +17,7 @@ import {
     showFeedbackModal, closeFeedbackModal, submitFeedbackWithText, sendFeedback
 } from './modules/feedback.js';
 import { renderAnswer } from './modules/result.js';
+import { refreshCharts } from './modules/chart.js';
 import { initConnectionPanel, connectFromForm } from './modules/connection.js';
 
 // DOM Elements
@@ -291,6 +292,7 @@ function toggleTheme() {
         localStorage.setItem('theme', 'dark');
     }
     themeIcon.textContent = isDark ? '🌙' : '☀️';
+    refreshCharts();  // charts derive their colours from the theme tokens
 }
 
 /**

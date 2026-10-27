@@ -966,13 +966,14 @@ curl -X POST http://localhost:3000/api/nl-query \
 
 ## 5. Reference implementation — demo UI source (vanilla JS → port เป็น React)
 
-โค้ดจริงจาก demo UI ของ service (`web/js/modules/`). **ไม่ใช่ React** — ใช้ Chart.js
-global + DOM API ตรง ๆ. Frontend AI port ตามนี้:
+โค้ดจริงจาก demo UI ของ service (`web/js/modules/`). **ไม่ใช่ React** — ใช้ ECharts
+global + DOM API ตรง ๆ (เดิมเป็น Chart.js; เปลี่ยนเป็น ECharts ตาม ADR 0015).
+Frontend AI port ตามนี้:
 
 - `renderResult(env)` → `<QueryResult envelope={env} />` (React component)
 - `buildTable` → `<ResultTable rows columns />`, `buildTabs` + `renderChart` → `<ResultChart />`
-- global `Chart` → `import { Bar, Line, Doughnut, Scatter } from 'react-chartjs-2'`
-  (หรือ `Chart` class ผ่าน `chart.js/auto` + `ref`)
+- global `echarts` → `echarts-for-react` (`<ReactECharts option={…} />`)
+  หรือ `echarts.init` ผ่าน `ref`
 - ตัด `appendMessage` / `chat-history` / `escapeHtml` ทิ้ง (React escape ให้เอง);
   tab/pane visibility ใช้ `useState` แทน `.hidden`
 - `resolveColor()` (hidden-probe) — เก็บไว้ ถ้า React ใช้ CSS custom properties;
@@ -1250,7 +1251,11 @@ function escapeHtml(text) {   // React: not needed
 }
 ```
 
-### 5.3 `chart.js` (Chart.js config — bar/line/doughnut/scatter, top-N, horizontal)
+### 5.3 `chart.js` (การ map viz config → option, top-N, horizontal)
+
+> หมายเหตุ: listing ด้านล่างคือเวอร์ชัน Chart.js (ก่อน ADR 0015) — เก็บไว้เป็น
+> ตัวอย่างการ map ข้อมูล; โมดูลจริงตอนนี้ใช้ ECharts (value ramp, value labels,
+> theme จาก CSS vars) อ่านได้ที่ [`web/js/modules/chart.js`](../web/js/modules/chart.js)
 
 ```js
 import { CATEGORICAL_COLORS } from './config.js';

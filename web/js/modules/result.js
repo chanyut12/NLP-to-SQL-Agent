@@ -5,7 +5,7 @@
  */
 
 import { appendMessage } from './ui.js';
-import { renderChart, resizeChart } from './chart.js';
+import { renderChart, resizeChart, chartPng } from './chart.js';
 import {
     formatValue, isRightAligned, humanizeHeader, toCSV, toMarkdown,
 } from './format.js';
@@ -98,7 +98,7 @@ export function renderResult(env) {
     const chartId = `chart-${++_seq}`;
     const chartPane = document.createElement('div');
     chartPane.className = 'result-pane result-pane-chart';
-    chartPane.innerHTML = `<div class="chart-container"><canvas id="${chartId}"></canvas></div>`;
+    chartPane.innerHTML = `<div class="chart-container"><div class="chart-host" id="${chartId}"></div></div>`;
 
     if (viz.title) {
         const h4 = document.createElement('h4');
@@ -189,7 +189,7 @@ function buildTabs(card, viz, chartId, rows, columns) {
     const select = document.createElement('select');
     select.className = 'result-chart-type';
     const types = { bar: 'Bar', line: 'Line', area: 'Area', pie: 'Pie', scatter: 'Scatter' };
-    const offered = new Set(['bar', 'line', 'pie', 'scatter', viz.chart_type]);
+    const offered = new Set(['bar', 'line', 'area', 'pie', 'scatter', viz.chart_type]);
     for (const [value, label] of Object.entries(types)) {
         if (!offered.has(value)) continue;
         const opt = document.createElement('option');
@@ -199,9 +199,8 @@ function buildTabs(card, viz, chartId, rows, columns) {
         select.appendChild(opt);
     }
     select.addEventListener('change', () => {
-        // Make the pane visible *before* rendering — Chart.js measures the
-        // container at creation and renders blank (and won't self-heal) if it
-        // is still display:none.
+        // Make the pane visible *before* rendering — ECharts measures the host
+        // at init and renders blank (and won't self-heal) if it is display:none.
         show('chart');
         renderChart(chartId, { ...viz, chart_type: select.value }, rows, columns);
     });
@@ -304,10 +303,10 @@ function pngButton(chartId, title) {
     btn.className = 'result-mini-btn';
     btn.textContent = '⬇ PNG';
     btn.addEventListener('click', () => {
-        const canvas = document.getElementById(chartId);
-        if (!canvas) return;
+        const dataUrl = chartPng(chartId);
+        if (!dataUrl) return;
         const a = document.createElement('a');
-        a.href = canvas.toDataURL('image/png');
+        a.href = dataUrl;
         a.download = `${(title || 'chart').slice(0, 40)}.png`;
         a.click();
     });
