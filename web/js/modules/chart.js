@@ -417,6 +417,14 @@ export function renderChart(chartId, config, data, columns) {
                     symbolSize: 6,
                     showSymbol: isLineish && xValues.length <= 30,
                     areaStyle: kind === 'area' ? { color: colour, opacity: 0.18 } : undefined,
+                    // ECharts 5.6 drops an *inherited* line/area style when it
+                    // re-enters emphasis on every hover move, leaving the line
+                    // and fill blank. Restating them here keeps the chart drawn.
+                    emphasis: isLineish ? {
+                        itemStyle: { color: colour },
+                        lineStyle: { color: colour, width: 2.5 },
+                        areaStyle: kind === 'area' ? { color: colour, opacity: 0.18 } : undefined,
+                    } : undefined,
                 });
             });
             option.legend = {
@@ -448,6 +456,12 @@ export function renderChart(chartId, config, data, columns) {
                 symbolSize: 6,
                 showSymbol: isLineish && values.length <= 30,
                 areaStyle: kind === 'area' ? { color: t.fill } : undefined,
+                // Same 5.6 emphasis reset as the multi-series branch above.
+                emphasis: isLineish ? {
+                    itemStyle: { color: t.series },
+                    lineStyle: { color: t.series, width: 2.5 },
+                    areaStyle: kind === 'area' ? { color: t.fill } : undefined,
+                } : undefined,
             });
         }
 
