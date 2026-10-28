@@ -38,4 +38,6 @@ export const CHART_KIND_LABELS = {
     combo: 'Bar + line',
     pie: 'Doughnut',
     scatter: 'Scatter',
+    heatmap: 'Heatmap',
+    treemap: 'Treemap',
 };

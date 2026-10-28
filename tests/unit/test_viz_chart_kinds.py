@@ -6,6 +6,7 @@ alternative offered is a key the renderer implements.
 """
 import pandas as pd
 import pytest
+from langchain_core.runnables import RunnableLambda
 
 from core.viz.viz_recommender import (
     CHART_KINDS, SERIES_FORMS, SORT_ORDERS, VizService,
@@ -64,6 +65,26 @@ def df_two_numbers() -> pd.DataFrame:
     })
 
 
+def df_heatmap() -> pd.DataFrame:
+    """Six schools x four risk tiers: a dense two-dimension grid (24 cells)."""
+    tiers = ["สูง", "เฝ้าระวัง", "ปกติ", "ไม่ประเมิน"]
+    return pd.DataFrame([
+        {"school_name": f"โรงเรียน{i}", "risk_tier": tier, "student_count": 10 + i}
+        for i in range(6) for tier in tiers
+    ])
+
+
+def df_one_to_one_labels() -> pd.DataFrame:
+    """Two label columns where one merely names the other — a diagonal, not a
+    matrix (many cells, but no shared levels)."""
+    n = 13
+    return pd.DataFrame({
+        "rule_code": [f"RULE_{i:02d}" for i in range(n)],
+        "rule_reason": [f"เหตุผลที่ {i}" for i in range(n)],
+        "signal_count": list(range(1, n + 1)),
+    })
+
+
 def df_no_label() -> pd.DataFrame:
     return pd.DataFrame({"student_id": [101, 102], "attendance_count": [12, 8]})
 
@@ -79,7 +100,8 @@ class TestKindsAreKeys:
     def test_every_fixture_offers_only_chart_kinds(self):
         for df in (df_plain_bar(), df_long_axis(), df_series(True),
                    df_series(False), df_series_percent(), df_combo(),
-                   df_two_numbers(), df_no_label()):
+                   df_two_numbers(), df_no_label(), df_heatmap(),
+                   df_one_to_one_labels()):
             cfg = svc().recommend(df, "")
             assert set(cfg["options"]) <= set(CHART_KINDS), cfg["options"]
             assert cfg["chart_type"] in CHART_KINDS
@@ -164,6 +186,89 @@ class TestCombo:
         assert cfg["y2_col"] is None
 
 
+class TestHeatmap:
+    """Two category dimensions cross into a matrix; a dense one reads as color
+    (ticket #53). Sparse grids and ordered axes stay in the bar/line family."""
+
+    def test_two_dense_dimensions_recommend_a_heatmap(self):
+        cfg = svc().recommend(df_heatmap(), "จำนวนนักเรียนแยกตามโรงเรียนและระดับความเสี่ยง")
+        assert cfg["chart_type"] == "heatmap"
+        assert cfg["x_col"] == "school_name"
+        assert cfg["series_col"] == "risk_tier"
+        assert cfg["y_col"] == "student_count"
+        assert cfg["chart_form"] is None
+        assert cfg["y2_col"] is None
+        assert cfg["reason"]
+
+    def test_heatmap_is_offered_and_the_bar_family_stays_available(self):
+        cfg = svc().recommend(df_heatmap(), "")
+        assert "heatmap" in cfg["options"]
+        assert {"bar_grouped", "bar_stacked"} <= set(cfg["options"])
+        assert cfg["chart_type"] in cfg["options"]
+
+    def test_a_small_matrix_stays_grouped_bars(self):
+        cfg = svc().recommend(df_series(equal_totals=False), "จำนวนนักเรียนแยกตามโรงเรียน")
+        assert cfg["chart_type"] == "bar_grouped"
+        # Drawable, so still offered as an alternative.
+        assert "heatmap" in cfg["options"]
+
+    def test_heatmap_needs_both_dimensions_to_cross(self):
+        cfg = svc().recommend(df_one_to_one_labels(), "สาเหตุของความเสี่ยง")
+        assert cfg["chart_type"] != "heatmap"
+        assert "heatmap" not in cfg["options"]
+
+    def test_an_ordered_axis_is_a_trend_not_a_heatmap(self):
+        df = pd.DataFrame({
+            "month_label": ["ม.ค.", "ก.พ.", "มี.ค."] * 4,
+            "school_name": [f"โรงเรียน{i}" for i in range(4)] * 3,
+            "count": list(range(12)),
+        })
+        cfg = svc().recommend(df, "จำนวนรายเดือน")
+        assert cfg["chart_type"] != "heatmap"
+        assert "heatmap" not in cfg["options"]
+
+    def test_one_dimension_never_offers_a_heatmap(self):
+        cfg = svc().recommend(df_plain_bar(), "จำนวนนักเรียน")
+        assert "heatmap" not in cfg["options"]
+
+
+class TestTreemap:
+    """A treemap is offered for one high-cardinality category with additive,
+    positive measures — and refused when the parts would misstate the whole."""
+
+    def test_high_cardinality_positive_count_offers_a_treemap(self):
+        cfg = svc().recommend(df_long_axis(), "จำนวนนักเรียนแยกตามโรงเรียน")
+        assert cfg["chart_type"] == "bar_horizontal"   # the bar stays the default
+        assert "treemap" in cfg["options"]
+
+    def test_treemap_can_be_requested_and_states_its_sort(self):
+        cfg = svc().recommend(df_long_axis(), "", "treemap")
+        assert cfg["chart_type"] == "treemap"
+        assert cfg["x_col"] == "school_name"
+        assert cfg["y_col"] == "student_count"
+        assert cfg["series_col"] is None
+        assert cfg["sort"] == "value_desc"
+        assert "treemap" in cfg["options"]
+
+    def test_a_negative_measure_is_not_a_treemap(self):
+        df = df_long_axis()
+        df.loc[0, "student_count"] = -5
+        cfg = svc().recommend(df, "จำนวนนักเรียนแยกตามโรงเรียน")
+        assert "treemap" not in cfg["options"]
+        assert svc().recommend(df, "", "treemap")["chart_type"] != "treemap"
+
+    def test_a_non_additive_measure_is_not_a_treemap(self):
+        df = pd.DataFrame({
+            "school_name": [f"โรงเรียน{i}" for i in range(13)],
+            "attendance_rate_percent": [80.0 + i for i in range(13)],
+        })
+        cfg = svc().recommend(df, "อัตราการมาเรียนแยกตามโรงเรียน")
+        assert "treemap" not in cfg["options"]
+
+    def test_a_small_category_set_is_not_a_treemap(self):
+        assert "treemap" not in svc().recommend(df_plain_bar(), "")["options"]
+
+
 class TestAlternativesAreDerived:
     def test_series_result_offers_the_bar_family_and_not_pie(self):
         cfg = svc().recommend(df_series(equal_totals=True), "จำนวนนักเรียนรายเดือน")
@@ -205,6 +310,32 @@ class TestExitGuardStillRules:
         assert cfg["chart_type"] == "bar"      # no series role -> degraded
         assert cfg["chart_form"] is None
 
+    def test_ai_heatmap_without_two_dimensions_degrades_to_bar(self):
+        # A real Runnable, so the intelligent path actually runs and the guard —
+        # not the rule-based fallback — is what repairs the config.
+        llm = RunnableLambda(lambda _: (
+            '{"chart_type": "heatmap", "title": "t", '
+            '"x_col": "class_name", "y_col": "count", "reason": "r"}'))
+
+        cfg = VizService(llm=llm, enable_intelligent=True).recommend(
+            df_plain_bar(), "จำนวนนักเรียน")
+        assert cfg["chart_type"] == "bar"
+        assert cfg["series_col"] is None
+
+    def test_ai_treemap_over_a_percent_measure_degrades_to_bar(self):
+        df = pd.DataFrame({
+            "school_name": [f"โรงเรียน{i}" for i in range(13)],
+            "attendance_rate_percent": [80.0 + i for i in range(13)],
+        })
+
+        llm = RunnableLambda(lambda _: (
+            '{"chart_type": "treemap", "title": "t", '
+            '"x_col": "school_name", "y_col": "attendance_rate_percent", '
+            '"reason": "r"}'))
+
+        cfg = VizService(llm=llm, enable_intelligent=True).recommend(df, "อัตราการมาเรียน")
+        assert cfg["chart_type"] == "bar"
+
 
 @pytest.mark.parametrize("kind,df", [
     ("bar", df_plain_bar()),
@@ -215,6 +346,8 @@ class TestExitGuardStillRules:
     ("line", df_plain_bar()),
     ("area", df_plain_bar()),
     ("combo", df_combo()),
+    ("heatmap", df_heatmap()),
+    ("treemap", df_long_axis()),
 ])
 def test_every_offered_kind_is_recommended_not_degraded(kind, df):
     """Asking for a catalog kind the grid supports returns that kind, and the

@@ -113,9 +113,11 @@ a `top_n` cut beyond which the remaining categories should be folded into one
 "other" slice. Where a series role exists the config also states the intended form
 — `grouped`, `stacked`, or `stacked_100` — and it names the sort order the
 recommendation assumes (`value_desc`, `x_asc`, or `row_order`). Every alternative
-is a kind the rendering UI can draw. Color, type and layout stay the Consumer's:
-the service never sends a palette. Advisory only — the Consumer may ignore any of
-it (ADR 0015).
+is a kind the rendering UI can draw. A heatmap uses the axis column and the
+series column as its two category dimensions with the measure as colour; a
+treemap uses one high-cardinality category and a single additive, positive
+measure as area. Color, type and layout stay the Consumer's: the service never
+sends a palette. Advisory only — the Consumer may ignore any of it (ADR 0015).
 
 Axis-selection language (part of the config's meaning, not implementation):
 - An **axis label column** is a column that tells the reader *what each mark is*.

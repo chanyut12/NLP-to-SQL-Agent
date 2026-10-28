@@ -92,6 +92,7 @@ interface QueryEnvelope {
     chart_type:                     // kind key ไม่ใช่ label (ADR 0015)
       | 'bar' | 'bar_horizontal' | 'bar_grouped' | 'bar_stacked'
       | 'bar_stacked_100' | 'line' | 'area' | 'combo' | 'pie' | 'scatter'
+      | 'heatmap' | 'treemap'
       | 'table' | 'none';
     x_col: string | null;
     y_col: string | null;
@@ -797,6 +798,12 @@ export function toMarkdown(rows: Record<string, unknown>[]): string {
 | `line` | `Line` | `tension: 0.35`, `pointRadius: 3` (→ 0 ถ้าจุด > 30), `fill: true` พื้นจาง |
 | `pie` | `Doughnut` | `cutout: '55%'`, legend point-style |
 | `scatter` | `Scatter` | หา 2 คอลัมน์ `numeric && semantic_type !== 'id'` → `{x, y}` points |
+
+> `heatmap` และ `treemap` อยู่นอก Chart.js core: ใช้ `chartjs-chart-matrix` /
+> `chartjs-chart-treemap`, หรือ ECharts (`type: 'heatmap'` จาก `[xi, yi, value]`
+> ที่ index จาก `x_col`/`series_col`; `type: 'treemap'` จาก `{name: x_col,
+> value: y_col}`). Heatmap ใช้ `x_col` + `series_col` เป็นสองมิติและ `y_col` เป็นสี;
+> treemap ใช้ `x_col` เป็นชื่อกล่องและ `y_col` เป็นพื้นที่ (เฉพาะค่าบวกที่บวกกันได้)
 
 - **สี**: single-series bar/line = สีแบรนด์เดียว; pie/multi-series = palette เช่น
   `['#4C72B0','#DD8452','#55A868','#C44E52','#8172B2','#937860','#DA8BC3']`

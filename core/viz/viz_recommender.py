@@ -152,6 +152,8 @@ CHART_KINDS = (
     "combo",
     "pie",
     "scatter",
+    "heatmap",
+    "treemap",
     "table",
     "none",
 )
@@ -172,6 +174,20 @@ _KIND_FORM = {kind: form for form, kind in _SERIES_FORM_KIND.items()}
 # A category axis longer than this reads better horizontally (same value as the
 # demo renderer's threshold).
 _HORIZONTAL_BAR_THRESHOLD = 8
+
+# A two-dimension grid at least this large reads better as a heatmap than as
+# grouped bars (ADR 0015); below it the bar family keeps exact values visible.
+_HEATMAP_MIN_CELLS = 12
+
+# Axis priority (ADR 0008/0009): a name beats a category beats free text.
+_LABEL_PRIORITY = {"name": 0, "category": 1, "text": 2}
+
+# Measure names that are not additive: summing them is meaningless, so a
+# treemap built from them would lie about the whole.
+_NON_ADDITIVE_NAME_HINTS = (
+    "rate", "percent", "pct", "ratio", "share", "avg", "average", "mean",
+    "median", "gpa", "อัตรา", "ร้อยละ", "สัดส่วน", "เฉลี่ย",
+)
 
 # Percent-like measures; `_column_info` already types most of these, these hints
 # cover names it does not (share, ratio, Thai สัดส่วน).
@@ -250,7 +266,7 @@ def sort_for(chart_type: str, df: pd.DataFrame, x_col: Optional[str]) -> Optiona
     """The ordering the recommendation assumes for this kind."""
     if not x_col or x_col not in df.columns:
         return None
-    if chart_type in ("bar", "bar_horizontal", "pie"):
+    if chart_type in ("bar", "bar_horizontal", "pie", "treemap"):
         return "value_desc"
     if chart_type == "combo":
         return "x_asc" if _is_ordered_axis(df, x_col) else "value_desc"
@@ -259,6 +275,94 @@ def sort_for(chart_type: str, df: pd.DataFrame, x_col: Optional[str]) -> Optiona
     if chart_type in _KIND_FORM:
         return "x_asc" if _is_ordered_axis(df, x_col) else "row_order"
     return None
+
+
+def _heatmap_dimensions(
+    df: pd.DataFrame, semantic: Dict[str, str]
+) -> Optional[Tuple[str, str]]:
+    """`(x, series)` when the grid carries exactly two category dimensions.
+
+    Both columns must actually cross (every level of each appears with more than
+    one level of the other), so a pair where one column merely labels the other
+    — a rule code beside its unique reason — is not a matrix. Ordered axes are
+    excluded: a date or month over a category is a trend, not a heatmap.
+    """
+    labels = [c for c in df.columns if semantic.get(c) in _LABEL_PRIORITY]
+    labels = [c for c in labels if c not in _repeating_label_cols(df, labels)]
+    if len(labels) != 2:
+        return None
+    if any(_is_ordered_axis(df, c) for c in labels):
+        return None
+
+    x, series = sorted(labels, key=lambda c: _LABEL_PRIORITY[semantic[c]])
+    try:
+        if int(df[x].nunique(dropna=True)) < 2 or int(df[series].nunique(dropna=True)) < 2:
+            return None
+        if int(df.groupby(x, dropna=True)[series].nunique(dropna=True).min()) < 2:
+            return None
+        if int(df.groupby(series, dropna=True)[x].nunique(dropna=True).min()) < 2:
+            return None
+    except (KeyError, TypeError, ValueError):
+        return None
+    return x, series
+
+
+def _heatmap_cells(df: pd.DataFrame, pair: Tuple[str, str]) -> int:
+    """How many cells the two dimensions would draw."""
+    try:
+        return (int(df[pair[0]].nunique(dropna=True))
+                * int(df[pair[1]].nunique(dropna=True)))
+    except (KeyError, TypeError):
+        return 0
+
+
+def _is_additive_measure(col: str, semantic: Dict[str, str]) -> bool:
+    """True when summing the measure across rows is meaningful."""
+    if semantic.get(col) not in ("count", "number"):
+        return False
+    return not any(hint in col.lower() for hint in _NON_ADDITIVE_NAME_HINTS)
+
+
+def _treemap_pick(
+    df: pd.DataFrame, label_cols: List[str], numeric: List[str], semantic: Dict[str, str]
+) -> Optional[Tuple[str, str]]:
+    """`(category, measure)` when a treemap is honest: one high-cardinality
+    category and an additive measure whose values are all positive."""
+    if len(label_cols) != 1 or not numeric or len(df) < 2:
+        return None
+    x = label_cols[0]
+    try:
+        if int(df[x].nunique(dropna=True)) <= _HORIZONTAL_BAR_THRESHOLD:
+            return None
+    except TypeError:
+        return None
+
+    for col in numeric:
+        if not _is_additive_measure(col, semantic):
+            continue
+        values = pd.to_numeric(df[col], errors="coerce").dropna()
+        if len(values) == len(df) and bool((values > 0).all()):
+            return x, col
+    return None
+
+
+def _treemap_ok(
+    df: pd.DataFrame, x_col: Optional[str], y_col: Optional[str], semantic: Dict[str, str]
+) -> bool:
+    """Is this exact pair a drawable treemap? Used as an exit guard too."""
+    if not x_col or not y_col or x_col not in df.columns or y_col not in df.columns:
+        return False
+    if semantic.get(x_col) not in _LABEL_PRIORITY:
+        return False
+    if not _is_additive_measure(y_col, semantic):
+        return False
+    try:
+        if int(df[x_col].nunique(dropna=True)) <= _HORIZONTAL_BAR_THRESHOLD:
+            return False
+    except TypeError:
+        return False
+    values = pd.to_numeric(df[y_col], errors="coerce").dropna()
+    return len(values) == len(df) and bool((values > 0).all())
 
 
 def chart_options(
@@ -280,7 +384,7 @@ def chart_options(
         if pd.api.types.is_numeric_dtype(df[c]) and semantic[c] != "id"
     ]
     has_label = bool(x_col and x_col in df.columns
-                     and semantic.get(x_col) in ("name", "category", "text"))
+                     and semantic.get(x_col) in _LABEL_PRIORITY)
     has_measure = bool(y_col and y_col in numeric)
 
     options: List[str] = []
@@ -292,6 +396,12 @@ def chart_options(
             options += ["bar_grouped", "bar_stacked", "bar_stacked_100"]
         if not series_col and combo_pair(numeric, semantic):
             options.append("combo")
+        # Two dimensions cross into a matrix; a treemap needs one big category
+        # (and a measure whose parts add up) — offered only for this exact grid.
+        if _heatmap_dimensions(df, semantic):
+            options.append("heatmap")
+        if not series_col and _treemap_ok(df, x_col, y_col, semantic):
+            options.append("treemap")
     if len(numeric) >= 2 and len(df) >= 2:
         options.append("scatter")
     options.append("table")
@@ -322,7 +432,6 @@ def recommend_chart(df: pd.DataFrame, question: str = "", preferred_chart_type: 
     # ADR 0008: ids never label an axis. Keep the legacy keyword heuristics for
     # chart-type/time detection, but drop id columns from every candidate queue.
     id_cols = {c for c, s in semantic.items() if s == "id"}
-    _LABEL_PRIORITY = {"name": 0, "category": 1, "text": 2}
     axis_label_cols = sorted(
         (c for c in df.columns if semantic[c] in _LABEL_PRIORITY),
         key=lambda c: _LABEL_PRIORITY[semantic[c]],
@@ -395,6 +504,14 @@ def recommend_chart(df: pd.DataFrame, question: str = "", preferred_chart_type: 
                 return "combo", axis_label_cols[0], pair[0]
         elif pref in bar_like and axis_label_cols and num_axis:
             return pref, axis_label_cols[0], num_axis[0]
+        elif pref == 'heatmap':
+            pair = _heatmap_dimensions(df, semantic)
+            if pair and num_axis:
+                return "heatmap", pair[0], num_axis[0]
+        elif pref == 'treemap':
+            pair = _treemap_pick(df, axis_label_cols, num_axis, semantic)
+            if pair:
+                return "treemap", pair[0], pair[1]
 
     # Priority 2: User Preference from question keywords
     q = question.lower()
@@ -452,7 +569,15 @@ def recommend_chart(df: pd.DataFrame, question: str = "", preferred_chart_type: 
             
     if date_col and numeric_cols:
         return "line", date_col, numeric_cols[0]
-        
+
+    # Case 1b: two category dimensions on a dense grid -> heatmap (ticket #53).
+    # Below the cell threshold grouped bars keep exact values readable, so the
+    # bar family stays the recommendation there (heatmap is still offered).
+    heatmap_pair = _heatmap_dimensions(df, semantic)
+    if heatmap_pair and num_axis \
+            and _heatmap_cells(df, heatmap_pair) >= _HEATMAP_MIN_CELLS:
+        return "heatmap", heatmap_pair[0], num_axis[0]
+
     # Case 2: Ranking / Comparison (Label + Numeric) -> bar family. A count-like
     # measure beside a rate/percent one is the combo case; a long category axis
     # reads horizontally.
@@ -487,6 +612,8 @@ _CHART_REASON_TH = {
     "area": "ดูแนวโน้มและขนาดที่สะสมตามลำดับเวลา",
     "pie": "ดูสัดส่วนขององค์ประกอบ",
     "scatter": "ดูความสัมพันธ์ระหว่างสองตัวแปร",
+    "heatmap": "เทียบค่าของสองมิติพร้อมกัน — สีเข้มคือค่าสูง",
+    "treemap": "ดูสัดส่วนของแต่ละหมวดด้วยพื้นที่สี่เหลี่ยม",
     "table": "ข้อมูลไม่เหมาะกับกราฟ แสดงเป็นตาราง",
     "none": "ไม่มีข้อมูลให้แสดง",
 }
@@ -571,6 +698,12 @@ def plan_chart(df: pd.DataFrame, question: str = "",
             form = series_form(df, x_col, y_col, series_col, semantic)
             plan["chart_form"] = form
             plan["chart_type"] = _SERIES_FORM_KIND[form]
+    elif chart_type == "heatmap" and drawable:
+        pair = _heatmap_dimensions(df, semantic)
+        if pair:
+            plan["x_col"], plan["series_col"] = pair
+        else:
+            plan["chart_type"] = "table"
 
     plan["sort"] = sort_for(plan["chart_type"], df, plan["x_col"])
     return plan
@@ -647,6 +780,25 @@ def _enforce_axis_policy(config: Dict[str, Any], df: pd.DataFrame) -> Dict[str, 
     series_col = config.get("series_col")
     if series_col not in df.columns:
         series_col = None
+
+    # A heatmap needs the matrix to exist: two crossing category dimensions.
+    # Nothing about the pair is taken on faith — the guard re-derives it.
+    if chart_type == "heatmap":
+        pair = _heatmap_dimensions(df, semantic)
+        if not pair:
+            chart_type = "bar"
+        else:
+            x_col, series_col = pair
+            config["x_col"] = x_col
+            config["x_label"] = humanize_label(x_col)
+            config["series_col"] = series_col
+            config["reason"] = _CHART_REASON_TH["heatmap"]
+    # A treemap over a non-additive measure, a negative value, or a series role
+    # would misstate the whole — the plain bar is the honest drawing.
+    if chart_type == "treemap" and (
+        series_col or not _treemap_ok(df, x_col, y_col, semantic)
+    ):
+        chart_type = "bar"
 
     # Renderability (ADR 0015): a series form without a series role, or a combo
     # without its second measure, cannot be drawn — degrade to the plain bar.

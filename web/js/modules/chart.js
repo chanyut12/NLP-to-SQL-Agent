@@ -7,9 +7,9 @@
  * colours (ADR 0015).
  *
  * Chart kinds are keys: bar, bar_horizontal, bar_grouped, bar_stacked,
- * bar_stacked_100, line, area, combo, pie, scatter. The config also states the
- * intended series form and the sort order it assumes; the kind wins when both
- * are present.
+ * bar_stacked_100, line, area, combo, pie, scatter, heatmap, treemap. The
+ * config also states the intended series form and the sort order it assumes;
+ * the kind wins when both are present.
  */
 
 import { CATEGORICAL_COLORS } from './config.js';
@@ -217,6 +217,8 @@ export function renderChart(chartId, config, data, columns) {
     const isCombo = kind === 'combo';
     const isScatter = kind === 'scatter';
     const isPie = kind === 'pie';
+    const isHeatmap = kind === 'heatmap';
+    const isTreemap = kind === 'treemap';
     const isLineish = kind === 'line' || kind === 'area';
     const isHorizontal = kind === 'bar_horizontal';
 
@@ -314,6 +316,111 @@ export function renderChart(chartId, config, data, columns) {
             symbolSize: 9,
             itemStyle: { color: t.series, opacity: 0.85 },
             emphasis: { itemStyle: { color: t.accent } },
+        }];
+    } else if (isHeatmap) {
+        // Two category dimensions × one measure: rows are one dimension, columns
+        // the other, and colour carries the value against a visible scale.
+        const seriesCol = config.series_col;
+        const xValues = [...new Set(data.map((r) => r[xCol]))];
+        const seriesValues = seriesCol
+            ? [...new Set(data.map((r) => r[seriesCol]))]
+            : [];
+        const cells = [];
+        let min = Infinity;
+        let max = -Infinity;
+        data.forEach((r) => {
+            const value = Number(r[yCol]);
+            const xi = xValues.indexOf(r[xCol]);
+            const yi = seriesValues.indexOf(r[seriesCol]);
+            if (!Number.isFinite(value) || xi < 0 || yi < 0) return;
+            cells.push([xi, yi, value]);
+            min = Math.min(min, value);
+            max = Math.max(max, value);
+        });
+        option.tooltip = {
+            ...tooltipBase,
+            trigger: 'item',
+            formatter: (p) => {
+                const [xi, yi, value] = p.value;
+                return `<strong>${truncateLabel(xValues[xi])}</strong> · `
+                    + `${truncateLabel(seriesValues[yi])}<br>`
+                    + `${yLabel || yCol}: ${fmtVal(value)}`;
+            },
+        };
+        option.grid = { left: 8, right: 84, top: 16, bottom: 8, containLabel: true };
+        option.xAxis = {
+            type: 'category',
+            data: xValues,
+            splitArea: { show: true },
+            axisLine: { lineStyle: { color: t.border } },
+            axisTick: { show: false },
+            axisLabel: {
+                color: t.muted,
+                fontFamily: FONT,
+                interval: 0,
+                rotate: xValues.length > 8 ? 30 : 0,
+                formatter: truncateLabel,
+            },
+        };
+        option.yAxis = {
+            type: 'category',
+            data: seriesValues,
+            splitArea: { show: true },
+            axisLine: { lineStyle: { color: t.border } },
+            axisTick: { show: false },
+            axisLabel: { color: t.muted, fontFamily: FONT, formatter: truncateLabel },
+        };
+        option.visualMap = {
+            min: min === Infinity ? 0 : min,
+            max: max === -Infinity ? 0 : max,
+            calculable: false,
+            orient: 'vertical',
+            right: 0,
+            top: 'center',
+            itemWidth: 12,
+            itemHeight: 120,
+            textStyle: { color: t.muted, fontFamily: FONT },
+            inRange: { color: [t.surfaceAlt, t.series, t.accent] },
+        };
+        option.series = [{
+            type: 'heatmap',
+            data: cells,
+            label: { show: false },
+            itemStyle: { borderColor: t.surface, borderWidth: 1 },
+            emphasis: { itemStyle: { borderColor: t.accent, borderWidth: 2 } },
+        }];
+    } else if (isTreemap) {
+        // One high-cardinality category: area is the measure, so only positive
+        // additive values are drawn (the service only offers the kind for them).
+        const rows = data
+            .map((r) => ({ name: String(r[xCol]), value: Number(r[yCol]) }))
+            .filter((d) => Number.isFinite(d.value) && d.value > 0)
+            .sort((a, b) => b.value - a.value);
+        option.tooltip = {
+            ...tooltipBase,
+            trigger: 'item',
+            formatter: (p) => `${p.name}: ${fmtVal(p.value)}`,
+        };
+        option.series = [{
+            type: 'treemap',
+            roam: false,
+            nodeClick: false,
+            breadcrumb: { show: false },
+            data: rows,
+            label: {
+                show: true,
+                color: t.text,
+                fontFamily: FONT,
+                fontSize: 12,
+                textBorderColor: t.surface,
+                textBorderWidth: 2,
+                formatter: (p) => `${truncateLabel(p.name)}\n${fmtVal(p.value)}`,
+            },
+            itemStyle: {
+                borderColor: t.surface,
+                borderWidth: 2,
+                gapWidth: 2,
+            },
         }];
     } else {
         // Cartesian: the bar family, line/area, or the combo's dual axis.

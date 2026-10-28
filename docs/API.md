@@ -70,7 +70,7 @@ means an empty history, not legacy mode.
 | Field | Type | Required | Meaning |
 |---|---|---|---|
 | `question` | string | yes | Thai natural-language question. |
-| `preferred_chart_type` | string \| null | no | A chart-kind key: `"bar"`, `"bar_horizontal"`, `"bar_grouped"`, `"bar_stacked"`, `"bar_stacked_100"`, `"line"`, `"area"`, `"combo"`, `"pie"` or `"scatter"`; omit/null for auto. Advisory — a kind the result cannot support degrades to the plain bar it can draw. |
+| `preferred_chart_type` | string \| null | no | A chart-kind key: `"bar"`, `"bar_horizontal"`, `"bar_grouped"`, `"bar_stacked"`, `"bar_stacked_100"`, `"line"`, `"area"`, `"combo"`, `"pie"`, `"scatter"`, `"heatmap"` or `"treemap"`; omit/null for auto. Advisory — a kind the result cannot support degrades to the plain bar it can draw. |
 | `history` | `PriorTurn[]` | no | Prior Turns of this Session. Presence selects agent mode; `[]` is the first Turn. |
 | `dialect` | string | no | Accepted for compatibility but **ignored** — the service uses its Datasource's dialect. |
 
@@ -212,8 +212,16 @@ advisory.
 `chart_type` is a **kind key**, not a display label — supply your own label. The
 catalog is `bar`, `bar_horizontal`, `bar_grouped`, `bar_stacked`,
 `bar_stacked_100`, `line`, `area`, `combo`, `pie` (drawn as a doughnut),
-`scatter`, `table` and `none`. `table` and `none` are terminal: they carry no
-axis.
+`scatter`, `heatmap`, `treemap`, `table` and `none`. `table` and `none` are
+terminal: they carry no axis.
+
+A `heatmap` uses `x_col` and `series_col` as its two category dimensions and
+`y_col` as the colour scale; a two-dimension grid of 12 cells or more recommends
+it, while a smaller one keeps the grouped-bar family (and still offers the
+heatmap). A `treemap` carries one high-cardinality category in `x_col` and a
+single additive, strictly positive measure in `y_col` — the service never offers
+it for a percent/rate/GPA measure or a result with a negative value, because the
+rectangle areas would then misstate the whole.
 
 | Field | Meaning |
 |---|---|
@@ -444,7 +452,9 @@ type AnswerType = 'result' | 'clarification' | 'refusal';
 
 type ChartKind =
   | 'bar' | 'bar_horizontal' | 'bar_grouped' | 'bar_stacked' | 'bar_stacked_100'
-  | 'line' | 'area' | 'combo' | 'pie' | 'scatter' | 'table' | 'none';
+  | 'line' | 'area' | 'combo' | 'pie' | 'scatter'
+  | 'heatmap' | 'treemap'
+  | 'table' | 'none';
 
 export type PriorTurn = {
   question: string;
