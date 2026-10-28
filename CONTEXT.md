@@ -104,16 +104,18 @@ say; it only moves what the final answer will contain into the waiting time. The
 answer remains the single source of truth for the Turn.
 
 ### Visualization config
-The service's recommendation for how to chart a result: a chart type, which columns
-map to which axis / series role, a chart title and axis labels, the list of
-alternative chart types the Consumer may offer, a plain-language reason for the
-choice, and — for a high-cardinality category axis — a `top_n` cut beyond which the
-remaining categories should be folded into one "other" slice. Where a series role
-exists the config also states the intended form — grouped, stacked, or stacked to
-100% — and it names the sort order the recommendation assumes; its list of
-alternatives is machine-readable chart kinds, not display labels. Color, type and
-layout stay the Consumer's: the service never sends a palette. Advisory only — the
-Consumer may ignore any of it (ADR 0015).
+The service's recommendation for how to chart a result: a chart kind (a
+machine-readable key, not a display label), which columns map to which axis /
+series role, the second measure a combo carries on its own axis, a chart title and
+axis labels, the list of alternative kinds this result can actually be drawn as, a
+plain-language reason for the choice, and — for a high-cardinality category axis —
+a `top_n` cut beyond which the remaining categories should be folded into one
+"other" slice. Where a series role exists the config also states the intended form
+— `grouped`, `stacked`, or `stacked_100` — and it names the sort order the
+recommendation assumes (`value_desc`, `x_asc`, or `row_order`). Every alternative
+is a kind the rendering UI can draw. Color, type and layout stay the Consumer's:
+the service never sends a palette. Advisory only — the Consumer may ignore any of
+it (ADR 0015).
 
 Axis-selection language (part of the config's meaning, not implementation):
 - An **axis label column** is a column that tells the reader *what each mark is*.

@@ -5,6 +5,11 @@
  * `visualization` block onto an ECharts option, with every colour derived from
  * the page's CSS variables so light and dark both work without hard-coded
  * colours (ADR 0015).
+ *
+ * Chart kinds are keys: bar, bar_horizontal, bar_grouped, bar_stacked,
+ * bar_stacked_100, line, area, combo, pie, scatter. The config also states the
+ * intended series form and the sort order it assumes; the kind wins when both
+ * are present.
  */
 
 import { CATEGORICAL_COLORS } from './config.js';
@@ -14,9 +19,6 @@ import { formatAxisValue } from './format.js';
 // chart-type switch can rebuild on the same host without leaking instances.
 const _charts = new Map();
 
-// Category axis goes horizontal past this many bars (long Thai labels read better).
-const HORIZONTAL_BAR_THRESHOLD = 8;
-
 // Axis labels longer than this are truncated; the tooltip carries the full text.
 const MAX_LABEL_CHARS = 16;
 
@@ -24,6 +26,13 @@ const MAX_LABEL_CHARS = 16;
 const MAX_VALUE_LABELS = 30;
 
 const FONT = "'Anuphan', system-ui, sans-serif";
+
+// Bar-family kinds whose key already names the form.
+const SERIES_FORM_OF_KIND = {
+    bar_grouped: 'grouped',
+    bar_stacked: 'stacked',
+    bar_stacked_100: 'stacked_100',
+};
 
 let _resizeBound = false;
 function bindWindowResize() {
@@ -125,12 +134,12 @@ function numericColumns(columns) {
 
 /**
  * Fold a high-cardinality category axis into "top N + other".
- * Only for single-series bar / pie, when the backend set `top_n`.
+ * Only for single-series bars / pie, when the backend set `top_n`.
  */
 function applyTopN(config, data) {
     const { top_n: topN, chart_type: type, x_col: x, y_col: y } = config;
     if (!topN || config.series_col) return data;
-    if (type !== 'bar' && type !== 'pie') return data;
+    if (!['bar', 'bar_horizontal', 'pie'].includes(type)) return data;
     if (data.length <= topN) return data;
 
     const sorted = [...data].sort((a, b) => (Number(b[y]) || 0) - (Number(a[y]) || 0));
@@ -139,20 +148,55 @@ function applyTopN(config, data) {
     return [...head, { [x]: `อื่น ๆ (${sorted.length - topN})`, [y]: tailSum }];
 }
 
+/** Order rows the way the recommendation says it assumes (config.sort). */
+function sortRows(rows, sort, xCol, yCol) {
+    if (sort === 'value_desc') {
+        return [...rows].sort((a, b) => (Number(b[yCol]) || 0) - (Number(a[yCol]) || 0));
+    }
+    if (sort === 'x_asc') {
+        return [...rows].sort((a, b) => {
+            const x = a[xCol];
+            const y = b[xCol];
+            if (typeof x === 'number' && typeof y === 'number') return x - y;
+            return String(x).localeCompare(String(y), 'th');
+        });
+    }
+    return rows;
+}
+
+/** Bar data carrying the theme's value ramp; the maximum takes the accent. */
+function rampedBars(values, t) {
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const maxIdx = values.indexOf(max);
+    return values.map((v, i) => ({
+        value: v,
+        itemStyle: {
+            // A lone measure gets intensity, not decoration: the ramp is item
+            // opacity over the theme's series colour (ADR 0015).
+            color: max > min && i === maxIdx ? t.accent : t.series,
+            opacity: max === min ? 0.75 : 0.45 + 0.55 * ((v - min) / (max - min)),
+        },
+    }));
+}
+
 /**
  * Render a chart with ECharts into a sized host element, destroying any previous
  * instance on that host.
  *
  * @param {string} chartId - id of the host element the renderer fills
  * @param {Object} config - visualization config from the envelope
- *   (chart_type, x_col, y_col, series_col, title, x_label, y_label, top_n)
+ *   (chart_type, x_col, y_col, series_col, y2_col, chart_form, sort, title,
+ *    x_label, y_label, top_n)
  * @param {Array<Object>} data - result rows
  * @param {Array<Object>} [columns] - envelope column metadata (for number formatting)
  */
 export function renderChart(chartId, config, data, columns) {
     const host = document.getElementById(chartId);
     if (!host) {
-        console.error(`Chart host not found: ${chartId}`);
+        // The card left the DOM (chat cleared, history rendered away). Forget the
+        // entry so a theme switch does not keep re-rendering a chart nobody sees.
+        _charts.delete(chartId);
         return;
     }
     if (typeof echarts === 'undefined') {
@@ -163,10 +207,18 @@ export function renderChart(chartId, config, data, columns) {
     destroyChart(chartId);
 
     const t = readTheme();
-    const kind = config.chart_type;                 // bar | line | area | pie | scatter
+    const kind = config.chart_type;
+    // The kind names the form when it is a bar-family key; a plain bar key may
+    // carry one instead (a Consumer can pick "stacked" with chart_type bar).
+    // Forms are a bar concept — a line with a series role stays a line.
+    const form = SERIES_FORM_OF_KIND[kind]
+        || (kind === 'bar' ? config.chart_form : null)
+        || null;
+    const isCombo = kind === 'combo';
     const isScatter = kind === 'scatter';
     const isPie = kind === 'pie';
     const isLineish = kind === 'line' || kind === 'area';
+    const isHorizontal = kind === 'bar_horizontal';
 
     let xCol = config.x_col;
     let yCol = config.y_col;
@@ -185,6 +237,9 @@ export function renderChart(chartId, config, data, columns) {
     const yType = semanticTypeOf(columns, yCol);
     const fmtVal = (v) => formatAxisValue(v, yType);
     const fmtX = (v) => formatAxisValue(v, semanticTypeOf(columns, xCol));
+    const fmtPercent = (v) => `${Number(v).toFixed(0)}%`;
+    // A 100% stack is normalized to shares of each x.
+    const fmtStack = form === 'stacked_100' ? fmtPercent : fmtVal;
 
     const tooltipBase = {
         backgroundColor: t.surfaceAlt,
@@ -200,8 +255,10 @@ export function renderChart(chartId, config, data, columns) {
         color: CATEGORICAL_COLORS,
     };
 
+    let y2Formatter = null;
+
     if (isPie) {
-        const rows = applyTopN(config, data);
+        const rows = sortRows(applyTopN(config, data), config.sort, xCol, yCol);
         option.tooltip = {
             ...tooltipBase,
             trigger: 'item',
@@ -259,30 +316,100 @@ export function renderChart(chartId, config, data, columns) {
             emphasis: { itemStyle: { color: t.accent } },
         }];
     } else {
-        // Cartesian: single- or multi-series bar / line / area.
-        const seriesCol = config.series_col;
+        // Cartesian: the bar family, line/area, or the combo's dual axis.
+        const seriesCol = isCombo ? null : config.series_col;
         const labels = [];
         const series = [];
         let showLabels = false;
 
-        if (seriesCol) {
-            const seriesValues = [...new Set(data.map((r) => r[seriesCol]))].sort();
+        if (isCombo) {
+            const rows = sortRows(data, config.sort, xCol, yCol);
+            const y2Col = config.y2_col;
+            const fmtY2 = (v) => formatAxisValue(v, semanticTypeOf(columns, y2Col));
+            y2Formatter = fmtY2;
+            labels.push(...rows.map((r) => r[xCol]));
+            const values = rows.map((r) => Number(r[yCol]) || 0);
+            const rates = rows.map((r) => (r[y2Col] === null || r[y2Col] === undefined
+                ? null : Number(r[y2Col])));
+            showLabels = values.length <= MAX_VALUE_LABELS;
+
+            series.push({
+                name: yLabel || yCol,
+                type: 'bar',
+                yAxisIndex: 0,
+                data: rampedBars(values, t),
+                barMaxWidth: 40,
+                label: {
+                    show: showLabels,
+                    position: 'top',
+                    color: t.muted,
+                    fontFamily: FONT,
+                    fontSize: 11,
+                    formatter: (p) => fmtVal(p.value),
+                },
+            });
+            series.push({
+                name: String(y2Col || '').replace(/_/g, ' '),
+                type: 'line',
+                yAxisIndex: 1,
+                data: rates,
+                smooth: 0.3,
+                symbol: 'circle',
+                symbolSize: 7,
+                showSymbol: true,
+                lineStyle: { color: t.accent, width: 2.5 },
+                itemStyle: { color: t.accent },
+            });
+            option.legend = {
+                type: 'scroll',
+                top: 0,
+                icon: 'circle',
+                itemWidth: 8,
+                itemHeight: 8,
+                textStyle: { color: t.muted, fontFamily: FONT },
+            };
+        } else if (seriesCol) {
+            const seriesValues = [...new Set(data.map((r) => r[seriesCol]))];
             const xValues = [...new Set(data.map((r) => r[xCol]))];
-            // A numeric x (years, months) reads better ascending; anything else
-            // keeps the row order the recommendation's SQL already chose.
-            if (xValues.every((v) => typeof v === 'number')) xValues.sort((a, b) => a - b);
+            if (config.sort === 'x_asc') {
+                xValues.sort((a, b) => (typeof a === 'number' && typeof b === 'number')
+                    ? a - b
+                    : String(a).localeCompare(String(b), 'th'));
+            }
             labels.push(...xValues);
             const marks = xValues.length * seriesValues.length;
-            showLabels = !isLineish && marks <= MAX_VALUE_LABELS;
+            // Stacked segments cannot carry readable labels; grouped bars can.
+            showLabels = !isLineish && !form && marks <= MAX_VALUE_LABELS;
+
+            const totals = new Map();
+            if (form === 'stacked_100') {
+                xValues.forEach((v) => {
+                    const total = data
+                        .filter((r) => r[xCol] === v)
+                        .reduce((sum, r) => sum + (Number(r[yCol]) || 0), 0);
+                    totals.set(v, total);
+                });
+            }
+
             seriesValues.forEach((seriesVal, idx) => {
                 const colour = CATEGORICAL_COLORS[idx % CATEGORICAL_COLORS.length];
                 const map = new Map(
-                    data.filter((r) => r[seriesCol] === seriesVal).map((r) => [r[xCol], r[yCol]]));
+                    data.filter((r) => r[seriesCol] === seriesVal)
+                        .map((r) => [r[xCol], Number(r[yCol]) || 0]));
+                const values = xValues.map((v) => {
+                    if (!map.has(v)) return null;
+                    const raw = map.get(v);
+                    if (form !== 'stacked_100') return raw;
+                    const total = totals.get(v) || 0;
+                    return total ? (raw / total) * 100 : 0;
+                });
                 series.push({
                     name: `${seriesCol}: ${seriesVal}`,
                     type: isLineish ? 'line' : 'bar',
-                    data: xValues.map((v) => (map.has(v) ? Number(map.get(v)) : null)),
-                    itemStyle: { color: colour, borderRadius: isLineish ? 0 : 6 },
+                    data: values,
+                    // Only the stacked forms share a stack; grouped bars sit side by side.
+                    stack: form === 'stacked' || form === 'stacked_100' ? 'total' : undefined,
+                    itemStyle: { color: colour, borderRadius: isLineish || form ? 0 : 6 },
                     lineStyle: { color: colour, width: 2.5 },
                     barMaxWidth: 42,
                     smooth: isLineish ? 0.3 : false,
@@ -301,36 +428,18 @@ export function renderChart(chartId, config, data, columns) {
                 textStyle: { color: t.muted, fontFamily: FONT },
             };
         } else {
-            // Single series. Bars sort by value (biggest first) and take a value
-            // ramp with the maximum highlighted; lines keep the SQL's order.
-            let rows = applyTopN(config, data);
-            if (!isLineish) {
-                rows = [...rows].sort((a, b) => (Number(b[yCol]) || 0) - (Number(a[yCol]) || 0));
-            }
+            // Single series. Bars take the order the recommendation states (the
+            // default is biggest first) and a value ramp with the maximum
+            // highlighted; lines keep the SQL's order unless told otherwise.
+            const rows = sortRows(applyTopN(config, data), config.sort, xCol, yCol);
             labels.push(...rows.map((r) => r[xCol]));
             const values = rows.map((r) => Number(r[yCol]) || 0);
             showLabels = !isLineish && values.length <= MAX_VALUE_LABELS;
 
-            let barData = values;
-            if (!isLineish) {
-                const min = Math.min(...values);
-                const max = Math.max(...values);
-                const maxIdx = values.indexOf(max);
-                barData = values.map((v, i) => ({
-                    value: v,
-                    itemStyle: {
-                        // A lone measure gets intensity, not decoration: the ramp
-                        // is item opacity over the theme's series colour, and the
-                        // maximum carries the accent (ADR 0015).
-                        color: max > min && i === maxIdx ? t.accent : t.series,
-                        opacity: max === min ? 0.75 : 0.45 + 0.55 * ((v - min) / (max - min)),
-                    },
-                }));
-            }
             series.push({
-                name: config.y_label || yCol,
+                name: yLabel || yCol,
                 type: isLineish ? 'line' : 'bar',
-                data: barData,
+                data: isLineish ? values : rampedBars(values, t),
                 itemStyle: isLineish ? { color: t.series } : { borderRadius: 6 },
                 lineStyle: { color: t.series, width: 2.5 },
                 barMaxWidth: 48,
@@ -342,8 +451,8 @@ export function renderChart(chartId, config, data, columns) {
             });
         }
 
-        const horizontal = kind === 'bar' && !seriesCol && labels.length > HORIZONTAL_BAR_THRESHOLD;
-        const rotate = !horizontal && kind === 'bar' && labels.length > 8 ? 30 : 0;
+        const horizontal = isHorizontal && !seriesCol && !form;
+        const rotate = !horizontal && labels.length > 8 ? 30 : 0;
 
         const categoryAxis = {
             type: 'category',
@@ -364,7 +473,7 @@ export function renderChart(chartId, config, data, columns) {
             type: 'value',
             axisLine: { show: false },
             axisTick: { show: false },
-            axisLabel: { color: t.muted, fontFamily: FONT, formatter: fmtVal },
+            axisLabel: { color: t.muted, fontFamily: FONT, formatter: fmtStack },
             splitLine: { lineStyle: { color: t.grid } },
         };
 
@@ -374,19 +483,38 @@ export function renderChart(chartId, config, data, columns) {
             color: t.muted,
             fontFamily: FONT,
             fontSize: 11,
-            formatter: (p) => fmtVal(p.value),
+            formatter: (p) => fmtStack(p.value),
         };
-        series.forEach((s) => { s.label = valueLabel; });
+        series.forEach((s) => { if (!s.label) s.label = valueLabel; });
 
         option.tooltip = {
             ...tooltipBase,
             trigger: 'axis',
-            axisPointer: { type: kind === 'bar' ? 'shadow' : 'line' },
-            valueFormatter: (v) => (v === null || v === undefined ? '-' : fmtVal(v)),
+            axisPointer: { type: kind === 'bar' || isCombo || form ? 'shadow' : 'line' },
+            valueFormatter: (v) => (v === null || v === undefined ? '-' : fmtStack(v)),
         };
-        option.grid = { left: 8, right: 20, top: option.legend ? 30 : 24, bottom: 4, containLabel: true };
+        option.grid = {
+            left: 8,
+            right: isCombo ? 44 : 20,
+            top: option.legend ? 30 : 24,
+            bottom: 4,
+            containLabel: true,
+        };
         option.xAxis = horizontal ? valueAxis : categoryAxis;
-        option.yAxis = horizontal ? categoryAxis : valueAxis;
+        option.yAxis = isCombo
+            ? [valueAxis, {
+                type: 'value',
+                position: 'right',
+                axisLine: { show: false },
+                axisTick: { show: false },
+                axisLabel: {
+                    color: t.muted,
+                    fontFamily: FONT,
+                    formatter: (v) => (y2Formatter ? y2Formatter(v) : v),
+                },
+                splitLine: { show: false },
+            }]
+            : (horizontal ? categoryAxis : valueAxis);
         option.series = series;
     }
 

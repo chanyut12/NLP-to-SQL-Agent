@@ -19,3 +19,23 @@ export const CATEGORICAL_COLORS = [
     '#4C72B0', '#DD8452', '#55A868', '#C44E52',
     '#8172B2', '#937860', '#DA8BC3',
 ];
+
+/**
+ * Display labels for the service's chart-kind keys (ADR 0015). The envelope
+ * carries keys so a Consumer can dispatch on them; the demo owns the words.
+ * A kind missing here is not offered by the switcher — the renderer cannot
+ * draw it, so an option would lie.
+ * @type {Object<string, string>}
+ */
+export const CHART_KIND_LABELS = {
+    bar: 'Bar',
+    bar_horizontal: 'Horizontal bar',
+    bar_grouped: 'Grouped bar',
+    bar_stacked: 'Stacked bar',
+    bar_stacked_100: 'Stacked 100%',
+    line: 'Line',
+    area: 'Area',
+    combo: 'Bar + line',
+    pie: 'Doughnut',
+    scatter: 'Scatter',
+};

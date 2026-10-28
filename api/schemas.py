@@ -42,11 +42,18 @@ class PriorTurn(BaseModel):
 
 # Visualization Model
 class VizConfig(BaseModel):
+    # Chart kinds are keys (ADR 0015); the rendering UI owns display labels.
     chart_type: str
     x_col: Optional[str]
     y_col: Optional[str]
     series_col: Optional[str] = None  # Column for multi-series grouping
-    options: List[str]
+    # Combo's second measure: a rate/percent carried on its own axis.
+    y2_col: Optional[str] = None
+    # grouped | stacked | stacked_100 — stated only when a series role exists.
+    chart_form: Optional[str] = None
+    # value_desc | x_asc | row_order — the order the recommendation assumes.
+    sort: Optional[str] = None
+    options: List[str]  # alternative chart-kind keys this result can be drawn as
     title: Optional[str] = None
     x_label: Optional[str] = None
     y_label: Optional[str] = None

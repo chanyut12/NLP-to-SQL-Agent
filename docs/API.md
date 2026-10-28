@@ -70,7 +70,7 @@ means an empty history, not legacy mode.
 | Field | Type | Required | Meaning |
 |---|---|---|---|
 | `question` | string | yes | Thai natural-language question. |
-| `preferred_chart_type` | string \| null | no | `"bar"`, `"line"`, `"pie"` or `"scatter"`; omit/null for auto. Advisory. |
+| `preferred_chart_type` | string \| null | no | A chart-kind key: `"bar"`, `"bar_horizontal"`, `"bar_grouped"`, `"bar_stacked"`, `"bar_stacked_100"`, `"line"`, `"area"`, `"combo"`, `"pie"` or `"scatter"`; omit/null for auto. Advisory — a kind the result cannot support degrades to the plain bar it can draw. |
 | `history` | `PriorTurn[]` | no | Prior Turns of this Session. Presence selects agent mode; `[]` is the first Turn. |
 | `dialect` | string | no | Accepted for compatibility but **ignored** — the service uses its Datasource's dialect. |
 
@@ -130,12 +130,15 @@ of history.
   },
   "visualization": {
     "chart_type": "bar",
-    "x_col": "school_id",
+    "x_col": "school_name",
     "y_col": "student_count",
     "series_col": null,
-    "options": ["Bar Chart", "Line Chart", "Area Chart", "Pie Chart", "Table"],
+    "y2_col": null,
+    "chart_form": null,
+    "sort": "value_desc",
+    "options": ["bar", "bar_horizontal", "line", "area", "pie", "table"],
     "title": "จำนวนนักเรียนปัจจุบันแยกตามโรงเรียน",
-    "x_label": "school id",
+    "x_label": "school name",
     "y_label": "student count",
     "top_n": null,
     "reason": "เทียบค่าข้ามหมวดหมู่"
@@ -204,7 +207,28 @@ a one-cell table.
 `title` is the user's question; `x_label` / `y_label` are humanised column names;
 `top_n` (when set) means "show the top N categories on the axis and fold the rest
 into one *other* slice"; `reason` is a short Thai phrase. Everything here is
-advisory. `chart_type` may be `bar`, `line`, `pie`, `scatter`, `table` or `none`.
+advisory.
+
+`chart_type` is a **kind key**, not a display label — supply your own label. The
+catalog is `bar`, `bar_horizontal`, `bar_grouped`, `bar_stacked`,
+`bar_stacked_100`, `line`, `area`, `combo`, `pie` (drawn as a doughnut),
+`scatter`, `table` and `none`. `table` and `none` are terminal: they carry no
+axis.
+
+| Field | Meaning |
+|---|---|
+| `chart_type` | The recommended kind key. |
+| `x_col` / `y_col` | Axis columns; never an `id` column (ADR 0008). |
+| `series_col` | Column that splits the result into multiple series, or `null`. |
+| `y2_col` | The second measure a `combo` carries on its own axis (the rate/percent), or `null`. |
+| `chart_form` | `"grouped"`, `"stacked"` or `"stacked_100"` when a series role exists; `null` otherwise. For a bar-family kind the key already encodes it. |
+| `sort` | The order the recommendation assumes: `"value_desc"`, `"x_asc"` or `"row_order"`; `null` when order is irrelevant. Honour it or sort your own way. |
+| `options` | The alternative kind keys **this result can actually be drawn as**, derived from the grid. Always includes `chart_type` and `table`. |
+
+`series_col` + `chart_form` are how a Consumer knows to group, stack, or stack
+to 100%; a `stacked_100` result needs no normalization from the Consumer — draw
+the `y_col` values as shares of each `x_col` (the service does not rewrite the
+rows). Colors, fonts and layout never travel in this block (ADR 0015).
 
 #### Clarification and refusal
 
@@ -416,6 +440,10 @@ type SemanticType =
 
 type AnswerType = 'result' | 'clarification' | 'refusal';
 
+type ChartKind =
+  | 'bar' | 'bar_horizontal' | 'bar_grouped' | 'bar_stacked' | 'bar_stacked_100'
+  | 'line' | 'area' | 'combo' | 'pie' | 'scatter' | 'table' | 'none';
+
 export type PriorTurn = {
   question: string;
   answer_type: AnswerType;
@@ -445,11 +473,14 @@ export type QueryEnvelope = {
     single_value: boolean;
   } | null;
   visualization: {
-    chart_type: string;
+    chart_type: ChartKind;
     x_col: string | null;
     y_col: string | null;
     series_col: string | null;
-    options: string[];
+    y2_col: string | null;
+    chart_form: 'grouped' | 'stacked' | 'stacked_100' | null;
+    sort: 'value_desc' | 'x_asc' | 'row_order' | null;
+    options: ChartKind[];
     title: string | null;
     x_label: string | null;
     y_label: string | null;

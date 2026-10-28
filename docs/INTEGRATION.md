@@ -34,7 +34,7 @@ STS DB (read-only role) → คืน rows + column metadata + chart config
 
 | Method | Path | Body / คืน |
 |---|---|---|
-| `POST` | `/api/query` | `{ question: string, preferred_chart_type?: "bar"\|"line"\|"pie"\|"scatter", history?: PriorTurn[] }` → **envelope** (ข้อ 1 + 1.1) |
+| `POST` | `/api/query` | `{ question: string, preferred_chart_type?: string, history?: PriorTurn[] }` → **envelope** (ข้อ 1 + 1.1) — `preferred_chart_type` คือ kind key ดูตารางใน [API.md](API.md) |
 | `GET` | `/api/health` | `{ status: "ok", datasource: boolean }` — ไม่ต้อง key |
 | `GET` | `/api/schema` | `{ tables: [{ name, columns: [{ name, type }] }] }` — ตารางเชิงวิเคราะห์ (ซ่อน backup/audit) |
 | `POST` | `/api/admin/refresh-schema` | `{ status: "ok" }` — เรียกหลัง migrate STS |
@@ -89,11 +89,17 @@ interface QueryEnvelope {
     single_value: boolean;            // true = 1 แถว × 1 คอลัมน์ numeric → โชว์เป็นตัวเลขใหญ่
   } | null;
   visualization: {
-    chart_type: 'bar' | 'line' | 'pie' | 'scatter' | 'table' | 'none';
+    chart_type:                     // kind key ไม่ใช่ label (ADR 0015)
+      | 'bar' | 'bar_horizontal' | 'bar_grouped' | 'bar_stacked'
+      | 'bar_stacked_100' | 'line' | 'area' | 'combo' | 'pie' | 'scatter'
+      | 'table' | 'none';
     x_col: string | null;
     y_col: string | null;
     series_col: string | null;        // multi-series grouping
-    options: string[];                // ชนิดกราฟทางเลือก (advisory)
+    y2_col: string | null;            // measure ที่สองของ combo (แกนขวา)
+    chart_form: 'grouped' | 'stacked' | 'stacked_100' | null;
+    sort: 'value_desc' | 'x_asc' | 'row_order' | null;
+    options: string[];                // kind keys ที่ผลนี้วาดได้ (advisory)
     title: string | null;            // = คำถามผู้ใช้
     x_label: string | null;          // ชื่อคอลัมน์ humanize แล้ว
     y_label: string | null;
@@ -234,10 +240,11 @@ Turn 3 — คำถามต่อเนื่องที่อ้างผล
     "single_value": false
   },
   "visualization": {
-    "chart_type": "bar", "x_col": "school_id", "y_col": "student_count", "series_col": null,
-    "options": ["Bar Chart", "Line Chart", "Area Chart", "Pie Chart", "Table"],
+    "chart_type": "bar", "x_col": "school_name", "y_col": "student_count", "series_col": null,
+    "y2_col": null, "chart_form": null, "sort": "value_desc",
+    "options": ["bar", "bar_horizontal", "line", "area", "pie", "table"],
     "title": "จำนวนนักเรียนปัจจุบันแยกตามโรงเรียน",
-    "x_label": "school id", "y_label": "student count",
+    "x_label": "school name", "y_label": "student count",
     "top_n": null, "reason": "เทียบค่าข้ามหมวดหมู่"
   },
   "retry_count": 0,
@@ -778,6 +785,11 @@ export function toMarkdown(rows: Record<string, unknown>[]): string {
 ### 3.7 `ResultChart.tsx` (react-chartjs-2)
 
 รับ `{ viz, rows, columns }`. Map:
+
+> kind keys ใน `viz.chart_type` / `viz.options` คือสัญญา — ตารางข้างล่างเป็นเพียง
+> จุดเริ่มต้นของการ map ไป Chart.js: `bar_horizontal` ต้องแนวนอนเสมอ,
+> `bar_grouped`/`bar_stacked`/`bar_stacked_100` ทำตาม `viz.chart_form`, `combo`
+> ใช้สองแกน (`viz.y2_col` อยู่แกนขวา) และ `viz.sort` บอกลำดับที่คำแนะนำคิดไว้
 
 | viz.chart_type | Chart.js | รายละเอียด |
 |---|---|---|

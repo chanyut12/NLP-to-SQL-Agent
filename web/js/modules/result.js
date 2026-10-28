@@ -5,6 +5,7 @@
  */
 
 import { appendMessage } from './ui.js';
+import { CHART_KIND_LABELS } from './config.js';
 import { renderChart, resizeChart, chartPng } from './chart.js';
 import {
     formatValue, isRightAligned, humanizeHeader, toCSV, toMarkdown,
@@ -188,13 +189,18 @@ function buildTabs(card, viz, chartId, rows, columns) {
 
     const select = document.createElement('select');
     select.className = 'result-chart-type';
-    const types = { bar: 'Bar', line: 'Line', area: 'Area', pie: 'Pie', scatter: 'Scatter' };
-    const offered = new Set(['bar', 'line', 'area', 'pie', 'scatter', viz.chart_type]);
-    for (const [value, label] of Object.entries(types)) {
-        if (!offered.has(value)) continue;
+    // The service sends chart-kind keys and only the kinds this result can be
+    // drawn as (ADR 0015); labels are the demo's. A kind without a label is not
+    // offered — the renderer cannot draw it, so the option would lie.
+    const kinds = (viz.options && viz.options.length ? viz.options : [viz.chart_type])
+        .filter((k) => k !== 'table' && CHART_KIND_LABELS[k]);
+    if (CHART_KIND_LABELS[viz.chart_type] && !kinds.includes(viz.chart_type)) {
+        kinds.unshift(viz.chart_type);
+    }
+    for (const value of kinds) {
         const opt = document.createElement('option');
         opt.value = value;
-        opt.textContent = label;
+        opt.textContent = CHART_KIND_LABELS[value];
         if (value === viz.chart_type) opt.selected = true;
         select.appendChild(opt);
     }
@@ -202,7 +208,11 @@ function buildTabs(card, viz, chartId, rows, columns) {
         // Make the pane visible *before* rendering — ECharts measures the host
         // at init and renders blank (and won't self-heal) if it is display:none.
         show('chart');
-        renderChart(chartId, { ...viz, chart_type: select.value }, rows, columns);
+        // The picked kind decides on its own: a form or a second measure that
+        // belonged to the previous kind must not leak into this one.
+        const next = { ...viz, chart_type: select.value, chart_form: null };
+        if (select.value !== 'combo') next.y2_col = null;
+        renderChart(chartId, next, rows, columns);
     });
     tabs.appendChild(select);
 
