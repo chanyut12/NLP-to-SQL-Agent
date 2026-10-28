@@ -13,15 +13,21 @@ import asyncio
 import logging
 import os
 
+import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.engine import Engine, make_url
 
 from api.dependencies import GlobalStateManager, get_state_manager
-from api.schemas import DemoConnectRequest, DemoConnectResponse, DemoStateResponse
+from api.schemas import (
+    DemoConnectRequest, DemoConnectResponse, DemoStateResponse,
+    DemoProfileCoverage, DemoProfileDraftRequest, DemoProfileDraftResponse,
+    DemoProfileSaveRequest, DemoProfileSaveResponse,
+)
+from core import profile_writer, profiles
 from core.config import settings
 from core.domain.schema_utils import is_denylisted
-from core.profiles import PROFILES_DIR
+from core.domain.sql_safety import SQLSafetyError, validate_and_sanitize_sql
 from core.utils.dialect_transpiler import sqlglot_dialect_name
 
 logger = logging.getLogger(__name__)
@@ -31,12 +37,12 @@ router = APIRouter()
 
 def available_profiles() -> list:
     """Names under profiles/ that carry an Example set, i.e. a usable profile."""
-    if not os.path.isdir(PROFILES_DIR):
+    if not os.path.isdir(profiles.PROFILES_DIR):
         return []
     return sorted(
         name
-        for name in os.listdir(PROFILES_DIR)
-        if os.path.isfile(os.path.join(PROFILES_DIR, name, "examples.json"))
+        for name in os.listdir(profiles.PROFILES_DIR)
+        if os.path.isfile(os.path.join(profiles.PROFILES_DIR, name, "examples.json"))
     )
 
 
@@ -75,6 +81,19 @@ def open_datasource(dsn: str):
         engine.dispose()
         raise
     return engine, tables
+
+
+def run_readonly(db_engine: Engine, sql: str, dialect: str) -> tuple:
+    """Validate and execute one read-only statement. Returns (sql, rows).
+
+    Shared by drafting and saving: a drafted example is only usable once it has
+    actually run, and a saved example is only ever one that ran here.
+    """
+    safe = validate_and_sanitize_sql(
+        sql, dialect=dialect, max_limit=settings.MAX_SQL_LIMIT
+    )
+    dataframe = pd.read_sql(safe.sql, db_engine)
+    return safe.sql, dataframe.to_dict(orient="records")
 
 
 async def rewarm(engine, db_engine: Engine) -> None:
@@ -148,4 +167,140 @@ async def demo_connect(
         datasource=redacted_url(dsn),
         profile=profile,
         tables=tables,
+    )
+
+
+@router.post("/demo/profile/draft", response_model=DemoProfileDraftResponse)
+async def demo_profile_draft(
+    request: DemoProfileDraftRequest,
+    state: GlobalStateManager = Depends(get_state_manager),
+):
+    """Draft one example: the SQL and the rows it produced, saved nowhere.
+
+    A question goes through the service's own generation path; a supplied SQL
+    (the visitor corrected it by hand) is executed as-is. Either way the SQL is
+    read-only-validated and LIMIT-clamped first.
+    """
+    db_engine = state.db_engine
+    if db_engine is None:
+        raise HTTPException(status_code=503, detail="ยังไม่ได้เชื่อมต่อฐานข้อมูล")
+
+    dialect = sqlglot_dialect_name(db_engine.dialect.name)
+    question = request.question.strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="ต้องมีคำถามของตัวอย่าง")
+
+    if request.sql and request.sql.strip():
+        try:
+            sql, rows = await asyncio.to_thread(
+                run_readonly, db_engine, request.sql, dialect
+            )
+        except SQLSafetyError as e:
+            return DemoProfileDraftResponse(
+                status="error", dialect=profile_writer.contract_dialect(dialect),
+                sql=request.sql, error=str(e),
+            )
+        except Exception as e:
+            return DemoProfileDraftResponse(
+                status="error", dialect=profile_writer.contract_dialect(dialect),
+                sql=request.sql, error=safe_error(e, str(db_engine.url)),
+            )
+    else:
+        try:
+            engine = await asyncio.to_thread(state.get_nlp_engine)
+            sql, data, error, _retry, _viz, _rag = await engine.query_database(
+                question=question, engine=db_engine, dialect=dialect
+            )
+        except Exception as e:
+            return DemoProfileDraftResponse(
+                status="error", dialect=profile_writer.contract_dialect(dialect),
+                error=safe_error(e, str(db_engine.url)),
+            )
+        if error:
+            return DemoProfileDraftResponse(
+                status="error", dialect=profile_writer.contract_dialect(dialect),
+                sql=sql, error=error,
+            )
+        rows = data or []
+
+    return DemoProfileDraftResponse(
+        status="ok",
+        dialect=profile_writer.contract_dialect(dialect),
+        sql=sql,
+        rows=rows,
+        row_count=len(rows),
+        category=profile_writer.categorize_sql(sql, dialect),
+    )
+
+
+@router.post("/demo/profile/save", response_model=DemoProfileSaveResponse)
+async def demo_profile_save(
+    request: DemoProfileSaveRequest,
+    state: GlobalStateManager = Depends(get_state_manager),
+):
+    """Write a visitor's answers as an ordinary profile (ADR 0014).
+
+    Every result example is executed before anything is written, so a profile
+    never teaches the system SQL that cannot run. Existing profiles are only
+    replaced with an explicit overwrite flag.
+    """
+    db_engine = state.db_engine
+    if db_engine is None:
+        raise HTTPException(status_code=503, detail="ยังไม่ได้เชื่อมต่อฐานข้อมูล")
+
+    dialect = sqlglot_dialect_name(db_engine.dialect.name)
+    try:
+        profile_writer.validate_profile_name(request.name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    if os.path.isdir(profiles.profile_dir(request.name)) and not request.overwrite:
+        raise HTTPException(
+            status_code=409,
+            detail=f"มี profile {request.name!r} อยู่แล้ว — ต้องยืนยันเขียนทับ",
+        )
+
+    for index, example in enumerate(request.examples, start=1):
+        try:
+            await asyncio.to_thread(run_readonly, db_engine, example.sql, dialect)
+        except SQLSafetyError as e:
+            raise HTTPException(
+                status_code=400, detail=f"ตัวอย่างที่ {index} ใช้ไม่ได้: {e}"
+            )
+        except Exception as e:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"ตัวอย่างที่ {index} รันไม่สำเร็จ: "
+                    f"{safe_error(e, str(db_engine.url))}"
+                ),
+            )
+
+    try:
+        examples = profile_writer.build_examples(
+            [example.model_dump() for example in request.examples],
+            profile_writer.contract_dialect(dialect),
+        )
+        coverage = await asyncio.to_thread(
+            profile_writer.write_profile,
+            request.name,
+            hints=request.hints,
+            schema_mappings=request.schema_mappings,
+            examples=examples,
+            overwrite=request.overwrite,
+        )
+    except FileExistsError:
+        raise HTTPException(
+            status_code=409,
+            detail=f"มี profile {request.name!r} อยู่แล้ว — ต้องยืนยันเขียนทับ",
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    logger.info(
+        "Demo wizard wrote profile %r (%s examples)", request.name, coverage["examples"]
+    )
+    return DemoProfileSaveResponse(
+        profile=request.name,
+        coverage=DemoProfileCoverage(**coverage),
     )

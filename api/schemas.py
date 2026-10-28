@@ -181,3 +181,48 @@ class DemoStateResponse(BaseModel):
     profile: str
     profiles: List[str] = []  # profile names the demo can switch to
 
+
+class DemoProfileDraftRequest(BaseModel):
+    question: str
+    # A SQL the visitor corrected by hand; when present it is executed instead
+    # of asking the service to draft one.
+    sql: Optional[str] = None
+
+
+class DemoProfileDraftResponse(BaseModel):
+    status: Literal["ok", "error"]
+    dialect: str
+    sql: Optional[str] = None
+    rows: Optional[List[Dict[str, Any]]] = None
+    row_count: int = 0
+    # The Example set category the drafted SQL's shape assigns.
+    category: Optional[str] = None
+    error: Optional[str] = None
+
+
+class DemoProfileExample(BaseModel):
+    question: str
+    sql: str
+    retrieval_tags: Optional[List[str]] = None  # optional Thai synonyms
+    grain: Optional[str] = None  # optional one-line meaning of a result row
+
+
+class DemoProfileSaveRequest(BaseModel):
+    name: str
+    hints: str = ""  # business rules and known ambiguities -> hints.md
+    schema_mappings: Dict[str, List[str]] = {}  # Thai term -> name fragments
+    examples: List[DemoProfileExample] = []
+    overwrite: bool = False  # explicit confirmation to replace an existing profile
+
+
+class DemoProfileCoverage(BaseModel):
+    """Which sections the saved profile fills; there is no draft/supported tier."""
+    hints: bool
+    examples: int
+    schema_mappings: int
+
+
+class DemoProfileSaveResponse(BaseModel):
+    profile: str
+    coverage: DemoProfileCoverage
+

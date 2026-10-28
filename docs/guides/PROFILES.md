@@ -161,7 +161,8 @@ Curated table meaning and population for the agent's `describe_table` tool:
 ## 6. Adding a new Datasource — checklist
 
 1. **Create the profile** under `profiles/<name>/` with `hints.md` and
-   `examples.json`. Start from the real schema, not from `receipt_sample`.
+   `examples.json`. Start from the real schema, not from `receipt_sample` (the
+demo wizard in section 7 can draft the minimum pass for you).
 2. **Point the service at the datasource:** set `DATABASE_URL` to a read-only
    connection and `DOMAIN_PROFILE=<name>`. There is no runtime connection flow.
 3. **Write the dialect hints** for the engine you are actually using. Do not mix
@@ -204,7 +205,64 @@ Curated table meaning and population for the agent's `describe_table` tool:
 
 ---
 
-## 7. Known portability gaps
+## 7. Creating a profile from the demo (Profile wizard)
+
+`./start_demo.sh` serves a Profile wizard that writes an **ordinary** profile:
+the output is the same five-file artifact described above, under
+`profiles/<name>/`, so the same loader, conformance test, diff review and git
+commit apply. There is no second format and no draft tier. The endpoints are
+mounted only with the demo routes (`APP_MODE=demo`, or `auto` without an API
+key); a service deployment returns `404`.
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/demo/profile/draft` | Body `{ question, sql? }`. Drafts one example: generates SQL through the service's own path, or executes the supplied corrected SQL. Read-only and LIMIT-clamped. Response `{ status, dialect, sql, rows, row_count, category, error }`. Nothing is written. |
+| `POST` | `/api/demo/profile/save` | Body `{ name, hints, schema_mappings, examples, overwrite }`. Writes the profile and returns `{ profile, coverage }`. |
+
+A save body looks like:
+
+```json
+{
+  "name": "my_school",
+  "overwrite": false,
+  "hints": "ปีการศึกษามีสองภาค …",
+  "schema_mappings": { "นักเรียน": ["students"] },
+  "examples": [
+    { "question": "จำนวนนักเรียนทั้งหมด", "sql": "SELECT COUNT(*) FROM students",
+      "retrieval_tags": ["นับนักเรียน"], "grain": "หนึ่งแถวต่อจำนวนนักเรียน" }
+  ]
+}
+```
+
+The writer enforces the contract:
+
+- **Name**: lowercase `a-z`, `0-9`, `-` and `_`, at most 64 characters; path
+  separators and dots are refused, so a name cannot escape `profiles/`.
+- **No silent overwrite**: an existing profile is refused (`409`) unless the
+  request sets `overwrite: true`.
+- **Only SQL that ran is saved**: every result example is executed read-only
+  before any file is written. One failure refuses the whole save (`400`) and
+  leaves the tree untouched.
+- **Always selectable**: `examples.json` is written even when the visitor
+  supplied no examples — that file is what makes a profile appear in the demo.
+- **The service supplies what the visitor should not know**: `id`
+  (`wiz-001`…, stable for the same example order), `dialect` from the
+  connection (`sqlite`, `postgresql` or `mysql`, in contract spelling) and
+  `category` from the drafted SQL's shape. `retrieval_tags` and `grain` remain
+  optional visitor input.
+- **Coverage, not a tier**: the response reports which sections are filled
+  (`hints`, `examples`, `schema_mappings`) and the profile is used as-is.
+
+A saved profile appears in `GET /api/demo/state` immediately and can be switched
+to at runtime with `POST /api/demo/connect` (ADR 0013) — no restart. In any other
+deployment it is selected at startup by `DOMAIN_PROFILE`, like any profile.
+`table_notes.json` is written by the wizard's follow-up pass, not the minimum
+pass; editing or evaluating a saved profile stays outside the UI (the files are
+the editing surface).
+
+---
+
+## 8. Known portability gaps
 
 These are the places where STS still leaks into core code. They do not block
 using the profile mechanism today, but they must be addressed before a second
@@ -225,7 +283,7 @@ that remain out of scope.
 
 ---
 
-## 8. References
+## 9. References
 
 - [ADR 0002 — STS guide Tier 1 adoption](../adr/0002-sts-guide-tier-1-adoption.md)
 - [ADR 0006 — stateless conversational sessions](../adr/0006-conversational-agent-stateless-sessions.md)
