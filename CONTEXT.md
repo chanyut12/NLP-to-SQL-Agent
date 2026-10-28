@@ -14,8 +14,9 @@ How one process exposes the service, selected by `APP_MODE`: `demo` serves the
 bundled UI and leaves the API unauthenticated; `service` is Consumer-only and
 requires an API key; `auto` is the legacy bridge that chooses between them from
 `API_KEY`. The mode is set at startup, not per request. Only `demo` (or `auto`
-without a key) may also change Datasource at runtime; `service` keeps one
-Datasource per deployment (ADR 0011, ADR 0013).
+without a key) may also change Datasource at runtime and author Domain profiles;
+`service` keeps one Datasource per deployment and mounts neither flow
+(ADR 0011, ADR 0013, ADR 0014).
 
 ### Demo UI
 The chat page bundled in `web/`, served by the service itself. A local development
@@ -23,7 +24,8 @@ aid for eyeballing what the service returns — not a Consumer and not shipped t
 production. It is mounted in `demo` mode, or in `auto` mode when the API key is
 unset; `service` mode never mounts it. Its 🔌 Connect tab switches the running
 process to another Datasource and Domain profile (ADR 0013) — a demo-only
-exception to the one-Datasource rule.
+exception to the one-Datasource rule — and hosts the Profile wizard, which
+authors a Domain profile for a Datasource the service has not seen (ADR 0014).
 
 ### Export
 Delivering the result of one question to a Consumer as a structured JSON payload:
@@ -106,8 +108,12 @@ The service's recommendation for how to chart a result: a chart type, which colu
 map to which axis / series role, a chart title and axis labels, the list of
 alternative chart types the Consumer may offer, a plain-language reason for the
 choice, and — for a high-cardinality category axis — a `top_n` cut beyond which the
-remaining categories should be folded into one "other" slice. Advisory only — the
-Consumer may ignore any of it.
+remaining categories should be folded into one "other" slice. Where a series role
+exists the config also states the intended form — grouped, stacked, or stacked to
+100% — and it names the sort order the recommendation assumes; its list of
+alternatives is machine-readable chart kinds, not display labels. Color, type and
+layout stay the Consumer's: the service never sends a palette. Advisory only — the
+Consumer may ignore any of it (ADR 0015).
 
 Axis-selection language (part of the config's meaning, not implementation):
 - An **axis label column** is a column that tells the reader *what each mark is*.
@@ -141,11 +147,21 @@ known limitation. See `docs/adr/0002-sts-guide-tier-1-adoption.md`.
 ### Domain profile
 The bundle of Datasource-specific knowledge the service needs to answer questions
 well against one Datasource: the Thai-term-to-column and semantic hints injected into
-the prompt, the Example set, the retrieval-store namespaces, and the query-log
-stream. Selected by a single config value; swapping the Datasource means switching
-profile, not editing code. The active production profile is `sts`; `demo` is the
-local SQLite sample profile, and the prior receipts knowledge is retained as an
-inactive legacy profile.
+every prompt — one-shot and conversational alike — the Example set, the retrieval-store
+namespaces, and the query-log stream. Selected by a single config value; swapping the
+Datasource means switching profile, not editing code. The active production profile is
+`sts`; `demo` is the local SQLite sample profile, and the prior receipts knowledge is
+retained as an inactive legacy profile. A profile is authored by hand or by the Demo
+UI's Profile wizard (ADR 0014).
+
+### Profile wizard
+The Demo UI's guided flow that authors a Domain profile for a Datasource the service
+has not seen. It asks a minimum pass first — the datasource and profile name, the Thai
+terms and table meanings, the first example questions, the business rules — and offers
+deeper follow-up screens; for each example question the service drafts SQL, runs it
+read-only and shows the rows, and only a confirmed example enters the Example set. Its
+output is an ordinary profile, and what the user skipped surfaces as coverage, not as a
+different kind of profile (ADR 0014).
 
 ### Log store
 The record of every answered Question — Thai text, generated SQL, outcome, timing,
