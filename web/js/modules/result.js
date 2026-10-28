@@ -5,6 +5,7 @@
  */
 
 import { appendMessage } from './ui.js';
+import { renderMarkdown } from './markdown.js';
 import { CHART_KIND_LABELS } from './config.js';
 import { renderChart, resizeChart, chartPng } from './chart.js';
 import {
@@ -38,7 +39,7 @@ function renderNonResult(env) {
     const label = isClarify ? 'คำถามกลับจากผู้ช่วย' : 'คำขอนอกขอบเขต';
     card.innerHTML = `
         <div class="nonresult-title">${icon} ${label}</div>
-        <p class="nonresult-message">${escapeHtml(env.message || '')}</p>`;
+        <div class="md nonresult-message">${renderMarkdown(env.message || '')}</div>`;
     chatHistory.appendChild(card);
     chatHistory.scrollTop = chatHistory.scrollHeight;
 }
@@ -52,7 +53,7 @@ export function renderResult(env) {
     //    2–3-sentence paragraph answering the question in words. Reads like a
     //    chat reply — it goes BEFORE the SQL bubble so the narrative comes first.
     if (env.message) {
-        appendMessage(escapeHtml(env.message), false);
+        appendMessage(`<div class="md">${renderMarkdown(env.message)}</div>`, false);
     }
 
     // 1. The generated SQL stays in a chat bubble.
