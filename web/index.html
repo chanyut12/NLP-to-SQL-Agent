@@ -95,6 +95,19 @@
             </div>
 
             <p id="dsn-preview" class="field-hint"></p>
+            <div id="profile-nudge" class="profile-nudge" hidden>
+                <strong>🪄 ฐานข้อมูลนี้ยังไม่มี profile ของตัวเอง</strong>
+                <p>สร้างใน 4 ขั้นตอน: ตั้งชื่อ, สอนคำศัพท์ไทย, ลองตัวอย่างคำถามให้ระบบร่าง SQL และรันดู, แล้วใส่กฎธุรกิจ — ใช้เวลาไม่ถึง 5 นาที</p>
+                <div class="wizard-inline">
+                    <button type="button" class="primary-btn" data-action="openProfileWizard">สร้าง Profile</button>
+                    <button type="button" class="link-btn" data-action="dismissProfileNudge">ไว้ทีหลัง</button>
+                </div>
+            </div>
+
+            <button type="button" class="secondary-btn" id="open-wizard-btn" data-action="openProfileWizard">
+                🧭 สร้าง Profile จากฐานข้อมูลนี้
+            </button>
+
             <button type="button" class="primary-btn" id="connect-btn" data-action="connectDatabase">Connect Database</button>
             <div id="connection-status" class="status-badge disconnected">Disconnected</div>
             <p class="field-hint">มีผลกับโหมด demo เท่านั้น: เปลี่ยนฐานข้อมูลที่ใช้ตอบคำถามโดยไม่ต้อง restart (เก็บในหน่วยความจำ จนกว่าจะปิด server)</p>
@@ -177,6 +190,94 @@
             <div class="modal-actions">
                 <button class="secondary-btn" data-action="closeConfirmModal">ยกเลิก</button>
                 <button class="primary-btn" data-action="confirmModalAccept">ยืนยัน</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Profile Wizard (mounted only where the demo routes exist — ADR 0014) -->
+    <div id="profile-wizard-modal" class="modal" style="display: none;" role="dialog" aria-modal="true"
+        aria-labelledby="wizard-title">
+        <div class="modal-content wizard-content">
+            <div class="modal-header">
+                <div>
+                    <h3 id="wizard-title">🧭 สร้าง Profile จากฐานข้อมูลนี้</h3>
+                    <p class="field-hint" id="wizard-datasource"></p>
+                </div>
+                <button type="button" class="close-btn" data-action="closeProfileWizard" aria-label="ปิด">&times;</button>
+            </div>
+
+            <div class="wizard-steps" id="wizard-steps" aria-hidden="true">
+                <span class="wizard-step-dot" data-step="1">1 ชื่อ</span>
+                <span class="wizard-step-dot" data-step="2">2 คำศัพท์</span>
+                <span class="wizard-step-dot" data-step="3">3 ตัวอย่าง</span>
+                <span class="wizard-step-dot" data-step="4">4 กฎธุรกิจ</span>
+            </div>
+
+            <div class="wizard-body">
+                <section class="wizard-screen active" data-screen="1">
+                    <label for="wizard-name">ชื่อ Profile</label>
+                    <input type="text" id="wizard-name" placeholder="เช่น my_school" autocomplete="off" spellcheck="false">
+                    <p class="field-hint">ใช้ได้เฉพาะ a-z, 0-9, - และ _ — บันทึกเป็น <code>profiles/&lt;ชื่อ&gt;/</code></p>
+                </section>
+
+                <section class="wizard-screen" data-screen="2">
+                    <p class="wizard-lead">สอนคำศัพท์ไทยที่ผู้ใช้พิมพ์ ให้ระบบรู้ว่าหมายถึงตารางหรือคอลัมน์ไหน (ไม่ใส่ก็ได้)</p>
+                    <div class="wizard-inline">
+                        <input type="text" id="wizard-term" placeholder="คำไทย เช่น นักเรียน">
+                        <input type="text" id="wizard-fragments" placeholder="ตาราง/คอลัมน์ เช่น students, student_term">
+                        <button type="button" class="secondary-btn" data-action="addWizardMapping">เพิ่ม</button>
+                    </div>
+                    <p class="field-hint">คั่นหลายชื่อด้วยเครื่องหมายจุลภาค</p>
+                    <div id="wizard-mappings" class="wizard-list"></div>
+                </section>
+
+                <section class="wizard-screen" data-screen="3">
+                    <p class="wizard-lead">ลองถามเป็นภาษาไทย ระบบจะร่าง SQL แล้วรันให้ดูจริง — ยอมรับ แก้ หรือข้ามได้</p>
+                    <div class="control-group">
+                        <label for="wizard-question">คำถามตัวอย่าง</label>
+                        <input type="text" id="wizard-question" placeholder="เช่น จำนวนนักเรียนแยกตามห้อง">
+                    </div>
+                    <div class="wizard-inline">
+                        <button type="button" class="secondary-btn" data-action="draftWizardExample">ร่าง SQL</button>
+                        <span id="wizard-draft-status" class="field-hint"></span>
+                    </div>
+
+                    <div id="wizard-draft" class="wizard-draft" hidden>
+                        <label for="wizard-sql">SQL ที่จะบันทึก</label>
+                        <textarea id="wizard-sql" rows="4" spellcheck="false"></textarea>
+                        <div id="wizard-rows" class="wizard-rows"></div>
+                        <div class="wizard-inline">
+                            <button type="button" class="primary-btn" data-action="acceptWizardExample" id="wizard-accept">ใช้ตัวอย่างนี้</button>
+                            <button type="button" class="secondary-btn" data-action="retryWizardSql">ลองรัน SQL ที่แก้</button>
+                            <button type="button" class="link-btn" data-action="skipWizardExample">ข้าม</button>
+                        </div>
+                    </div>
+
+                    <div id="wizard-examples" class="wizard-list"></div>
+                </section>
+
+                <section class="wizard-screen" data-screen="4">
+                    <label for="wizard-rules">กฎทางธุรกิจ</label>
+                    <textarea id="wizard-rules" rows="4"
+                        placeholder="เช่น ปีการศึกษามีสองภาค, นักเรียนปัจจุบันนับจากสถานะ enroll, ตัวเลขที่อยากได้คือ..."></textarea>
+                    <label for="wizard-ambiguities">ความกำกวมที่รู้ — ควรถามกลับมากกว่าจะเดา</label>
+                    <textarea id="wizard-ambiguities" rows="3"
+                        placeholder="เช่น ถ้าถามว่า 'ล่าสุด' ให้ถามกลับว่าเอาเดือนหรือปีการศึกษาไหน"></textarea>
+                    <p class="field-hint">ข้อความนี้จะถูกเก็บใน <code>hints.md</code> และถูกใช้ทั้งโหมดถามครั้งเดียวและ agent</p>
+                </section>
+
+                <section class="wizard-screen" data-screen="done">
+                    <div id="wizard-result"></div>
+                </section>
+            </div>
+
+            <p id="wizard-error" class="wizard-error" hidden></p>
+
+            <div class="wizard-actions">
+                <button type="button" class="secondary-btn" id="wizard-back" data-action="wizardBack">ย้อนกลับ</button>
+                <button type="button" class="secondary-btn" id="wizard-overwrite" data-action="overwriteWizardProfile" hidden>ยืนยันเขียนทับ</button>
+                <button type="button" class="primary-btn" id="wizard-next" data-action="wizardNext">ถัดไป</button>
+                <button type="button" class="primary-btn" id="wizard-save" data-action="saveWizardProfile" hidden>บันทึก Profile</button>
             </div>
         </div>
     </div>

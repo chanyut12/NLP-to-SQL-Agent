@@ -12,6 +12,7 @@ import { connectDemoDatabase, fetchDemoState } from './api.js';
 import { appendMessage, fetchSchema, renderDatasourceStatus, switchTab } from './ui.js';
 import { formatError, sanitize } from './utils.js';
 import { getCurrentTab, resetSession } from './state.js';
+import { refreshProfileEntry } from './wizard.js';
 
 // SQLAlchemy's DSN carries the driver; these are the ones the project ships.
 const DRIVERS = { postgresql: 'psycopg2', mysql: 'pymysql' };
@@ -109,6 +110,7 @@ function renderState(state) {
         Boolean(state.datasource),
     );
     updateDsnPreview();
+    refreshProfileEntry(state);
 }
 
 /** @param {boolean} ok - success (green) or failure (red) styling */
@@ -149,6 +151,7 @@ export async function connectFromForm() {
 
         await renderDatasourceStatus();
         fetchSchema();
+        refreshProfileEntry();
     } catch (e) {
         setStatus('🔴 เชื่อมต่อไม่สำเร็จ', false);
         appendMessage(
@@ -164,5 +167,7 @@ export async function connectFromForm() {
 function removePanel() {
     document.getElementById('tab-btn-connection')?.remove();
     document.getElementById('tab-connection')?.remove();
+    // The wizard lives in the demo routes too; leave no dead entry point behind.
+    document.getElementById('profile-wizard-modal')?.remove();
     if (getCurrentTab() === 'connection') switchTab('schema');
 }

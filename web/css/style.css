@@ -1248,3 +1248,207 @@ tr:hover td {
     margin: 0;
     white-space: pre-wrap;
 }
+
+/* ---- Profile wizard (demo only — ADR 0014) ---- */
+.profile-nudge {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px;
+    border-radius: 10px;
+    border: 1px dashed color-mix(in oklch, var(--color-primary) 45%, transparent);
+    background: color-mix(in oklch, var(--color-primary) 7%, transparent);
+    font-size: var(--text-sm);
+}
+
+.profile-nudge p {
+    margin: 0;
+    color: var(--color-text-muted);
+}
+
+.field-hint code,
+.wizard-lead code {
+    background: none;
+    padding: 0;
+}
+
+.wizard-content {
+    max-width: 780px;
+    width: 94%;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.wizard-body {
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
+.wizard-steps {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 14px;
+}
+
+.wizard-step-dot {
+    font-size: var(--text-xs);
+    padding: 4px 10px;
+    border-radius: 999px;
+    color: var(--color-text-muted);
+    border: 1px solid var(--color-border);
+    background: color-mix(in oklch, var(--color-text) 4%, transparent);
+}
+
+.wizard-step-dot.active {
+    color: var(--color-primary);
+    border-color: color-mix(in oklch, var(--color-primary) 45%, transparent);
+    background: color-mix(in oklch, var(--color-primary) 12%, transparent);
+}
+
+.wizard-screen {
+    display: none;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.wizard-screen.active {
+    display: flex;
+}
+
+.wizard-lead {
+    margin: 0;
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+    line-height: 1.6;
+}
+
+.wizard-inline {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.wizard-inline input {
+    flex: 1;
+    min-width: 130px;
+}
+
+.wizard-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.wizard-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 8px 10px;
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    background: color-mix(in oklch, var(--color-text) 3%, transparent);
+    font-size: var(--text-sm);
+}
+
+.wizard-item span {
+    overflow-wrap: anywhere;
+}
+
+.wizard-draft {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px;
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    background: color-mix(in oklch, var(--color-text) 3%, transparent);
+}
+
+.wizard-draft[hidden] {
+    display: none;
+}
+
+.wizard-draft textarea {
+    min-height: 84px;
+    font-family: 'Fira Code', ui-monospace, monospace;
+    font-size: var(--text-sm);
+}
+
+.wizard-rows {
+    max-height: 190px;
+    overflow: auto;
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+}
+
+.wizard-rows table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--text-xs);
+}
+
+.wizard-rows th,
+.wizard-rows td {
+    padding: 5px 8px;
+    text-align: left;
+    border-bottom: 1px solid var(--color-border);
+    white-space: nowrap;
+}
+
+.wizard-rows th {
+    color: var(--color-text-muted);
+    font-weight: 600;
+    position: sticky;
+    top: 0;
+    background: var(--color-surface);
+}
+
+.wizard-error {
+    color: var(--color-danger);
+    font-size: var(--text-sm);
+    margin: 8px 0 0;
+}
+
+.wizard-actions {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 8px;
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--color-border);
+}
+
+.wizard-actions .primary-btn,
+.wizard-actions .secondary-btn {
+    padding: 10px 16px;
+}
+
+.wizard-actions [hidden] {
+    display: none;
+}
+
+.link-btn {
+    background: none;
+    border: none;
+    color: var(--color-primary);
+    cursor: pointer;
+    font: inherit;
+    font-size: var(--text-sm);
+    padding: 4px 6px;
+    text-decoration: underline;
+}
+
+.wizard-coverage {
+    margin: 8px 0;
+    padding-left: 20px;
+    line-height: 1.8;
+}
+
+.wizard-coverage .missing {
+    color: var(--color-text-muted);
+}

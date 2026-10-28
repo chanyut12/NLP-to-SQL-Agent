@@ -402,7 +402,7 @@ an API key); a service deployment returns `404`. See ADR 0013.
 | Method | Path | Notes |
 |---|---|---|
 | `GET` | `/api/demo/state` | `{ datasource, profile, profiles }` — the active DSN with the password redacted (or `null`), plus the selectable `profiles/<name>` directories. |
-| `POST` | `/api/demo/connect` | Body `{ database_url, profile? }`. Opens the DSN once, then points the process at it. `400` (with a Thai message) when the DSN is malformed, unreachable, or the profile is unknown — the previous Datasource keeps serving. Response `{ datasource, profile, tables }`. |
+| `POST` | `/api/demo/connect` | Body `{ database_url?, profile? }`. Opens the DSN once, then points the process at it. Omit `database_url` to switch profile on the Datasource already connected (the state DSN has its password redacted, so the wizard cannot resend it). `400` (with a Thai message) when the DSN is malformed, unreachable, or the profile is unknown — the previous Datasource keeps serving. Response `{ datasource, profile, tables }`. |
 | `POST` | `/api/demo/profile/draft` | Body `{ question, sql? }`. Drafts one example for the Profile wizard: the generated SQL and the rows it produced, or the failure. Writes nothing. Response `{ status, dialect, sql, rows, row_count, category, error }`. |
 | `POST` | `/api/demo/profile/save` | Body `{ name, hints, schema_mappings, examples, overwrite }`. Writes an ordinary `profiles/<name>/` profile after executing every example's SQL read-only. `400` for a bad slug or an example that fails, `409` for an existing profile without `overwrite`. Response `{ profile, coverage }`. See `docs/guides/PROFILES.md` section 7. |
 

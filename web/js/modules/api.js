@@ -40,15 +40,52 @@ export async function fetchDemoState() {
 
 /**
  * Switch the running demo to another Datasource (APP_MODE=demo only).
- * @param {string} databaseUrl - SQLAlchemy DSN, e.g. sqlite:///./local_database.db
+ * Omit databaseUrl to switch profile on the Datasource that is already
+ * connected — /api/demo/state redacts the password, so the wizard cannot
+ * resend the DSN.
+ * @param {string|null} databaseUrl - SQLAlchemy DSN, e.g. sqlite:///./local_database.db
  * @param {string} profile - Domain profile name under profiles/
  * @returns {Promise<Object>} { datasource, profile, tables }
  */
 export async function connectDemoDatabase(databaseUrl, profile) {
+    const payload = { profile };
+    if (databaseUrl) payload.database_url = databaseUrl;
     const res = await fetch(`${API_URL}/demo/connect`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ database_url: databaseUrl, profile }),
+        body: JSON.stringify(payload),
+    });
+    return handleResponse(res);
+}
+
+/**
+ * Draft one Profile-wizard example (demo only): the SQL the service would use
+ * and the rows it produced, or the failure. Nothing is saved.
+ * @param {string} question - The visitor's example question
+ * @param {string|null} [sql=null] - A corrected SQL to execute instead
+ * @returns {Promise<Object>} { status, dialect, sql, rows, row_count, category, error }
+ */
+export async function draftProfileExample(question, sql = null) {
+    const payload = { question };
+    if (sql) payload.sql = sql;
+    const res = await fetch(`${API_URL}/demo/profile/draft`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+    });
+    return handleResponse(res);
+}
+
+/**
+ * Write the visitor's answers as an ordinary Domain profile (demo only).
+ * @param {Object} profile - { name, hints, schema_mappings, examples, overwrite }
+ * @returns {Promise<Object>} { profile, coverage }
+ */
+export async function saveDemoProfile(profile) {
+    const res = await fetch(`${API_URL}/demo/profile/save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(profile),
     });
     return handleResponse(res);
 }

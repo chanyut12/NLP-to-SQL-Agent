@@ -168,7 +168,10 @@ class FeedbackRequest(BaseModel):
 # one-Datasource-per-deployment rule.
 
 class DemoConnectRequest(BaseModel):
-    database_url: str  # SQLAlchemy DSN, e.g. sqlite:///./local_database.db
+    # SQLAlchemy DSN, e.g. sqlite:///./local_database.db. Omitted to switch
+    # profile on the Datasource that is already connected (the state's DSN has
+    # its password redacted, so a profile switch must not need it).
+    database_url: Optional[str] = None
     profile: Optional[str] = None  # profiles/<name>; defaults to the active one
 
 class DemoConnectResponse(BaseModel):

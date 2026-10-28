@@ -143,6 +143,39 @@ class TestDemoConnect(unittest.TestCase):
                 self.assertEqual(response.status_code, 400)
                 self.assertIn("profile", response.json()["detail"])
 
+    def test_profile_only_switch_keeps_the_connected_datasource(self):
+        from api.dependencies import state_manager
+        from core.config import settings
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = make_sqlite_file(tmpdir, "other.db", "schools")
+            with app_client("demo", "") as client:
+                self.assertEqual(connect(client, f"sqlite:///{path}").status_code, 200)
+                state_manager.nlp_engine = object()
+
+                # No database_url: the wizard switches to the profile it just
+                # wrote without needing the password the state redacts.
+                response = client.post("/api/demo/connect", json={"profile": "sts"})
+
+                self.assertEqual(response.status_code, 200, response.text)
+                body = response.json()
+                self.assertEqual(body["profile"], "sts")
+                self.assertEqual(body["datasource"], f"sqlite:///{path}")
+                self.assertEqual(body["tables"], ["schools"])
+                self.assertEqual(settings.DOMAIN_PROFILE, "sts")
+                self.assertIsNone(state_manager.nlp_engine)
+
+    def test_profile_only_switch_without_a_datasource_is_rejected(self):
+        from api.dependencies import state_manager
+
+        with app_client("demo", "") as client:
+            # The singleton may carry the developer's startup Datasource; this
+            # case is about a demo that never connected at all.
+            state_manager.db_engine = None
+            response = client.post("/api/demo/connect", json={"profile": "demo"})
+            self.assertEqual(response.status_code, 400)
+            self.assertIn("database_url", response.json()["detail"])
+
     def test_profile_switch_updates_settings_and_drops_the_engine(self):
         from api.dependencies import state_manager
         from core.config import settings

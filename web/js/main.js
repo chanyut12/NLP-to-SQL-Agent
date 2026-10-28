@@ -19,6 +19,7 @@ import {
 import { renderAnswer } from './modules/result.js';
 import { refreshCharts } from './modules/chart.js';
 import { initConnectionPanel, connectFromForm } from './modules/connection.js';
+import { initProfileWizard } from './modules/wizard.js';
 
 // DOM Elements
 let userInput = null;
@@ -58,6 +59,7 @@ function init() {
     renderDatasourceStatus();
     fetchSchema();
     initConnectionPanel();
+    initProfileWizard();
 }
 
 /**

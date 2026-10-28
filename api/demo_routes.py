@@ -61,6 +61,15 @@ def safe_error(exc: Exception, dsn: str) -> str:
     return message[:300]
 
 
+def readable_tables(db_engine: Engine) -> list:
+    """Table names the demo may show: the denylist applied, sorted."""
+    return sorted(
+        name
+        for name in inspect(db_engine).get_table_names()
+        if not is_denylisted(name)
+    )
+
+
 def open_datasource(dsn: str):
     """Connect once and read the readable table list. Returns (engine, tables).
 
@@ -72,11 +81,7 @@ def open_datasource(dsn: str):
     try:
         with engine.connect():
             pass
-        tables = sorted(
-            name
-            for name in inspect(engine).get_table_names()
-            if not is_denylisted(name)
-        )
+        tables = readable_tables(engine)
     except Exception:
         engine.dispose()
         raise
@@ -121,12 +126,9 @@ async def demo_connect(
     request: DemoConnectRequest,
     state: GlobalStateManager = Depends(get_state_manager),
 ):
-    """Switch the running demo to another Datasource (ADR 0013)."""
-    dsn = request.database_url.strip()
-    try:
-        make_url(dsn)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Connection string ไม่ถูกต้อง: {e}")
+    """Switch the running demo to another Datasource, or to another profile
+    on the Datasource it is already connected to (ADR 0013)."""
+    dsn = (request.database_url or "").strip()
 
     profile = (request.profile or settings.DOMAIN_PROFILE).strip()
     profiles = available_profiles()
@@ -135,6 +137,31 @@ async def demo_connect(
             status_code=400,
             detail=f"ไม่พบ profile {profile!r} — ที่มีอยู่: {', '.join(profiles) or '(ไม่มี)'}",
         )
+
+    if not dsn:
+        # A profile-only switch: the state's DSN has its password redacted, so
+        # the wizard cannot reconnect and must not have to. Only the engine is
+        # dropped; the next question rebuilds it from the new profile.
+        if state.db_engine is None:
+            raise HTTPException(
+                status_code=400,
+                detail="ยังไม่ได้เชื่อมต่อฐานข้อมูล — ต้องระบุ database_url",
+            )
+        if profile != settings.DOMAIN_PROFILE:
+            settings.DOMAIN_PROFILE = profile
+            state.reset_nlp_engine()
+            logger.info("Demo profile switched to %r (same Datasource)", profile)
+        tables = await asyncio.to_thread(readable_tables, state.db_engine)
+        return DemoConnectResponse(
+            datasource=redacted_url(state.db_engine.url),
+            profile=profile,
+            tables=tables,
+        )
+
+    try:
+        make_url(dsn)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Connection string ไม่ถูกต้อง: {e}")
 
     try:
         new_engine, tables = await asyncio.to_thread(open_datasource, dsn)
