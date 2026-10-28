@@ -97,7 +97,7 @@
             <p id="dsn-preview" class="field-hint"></p>
             <div id="profile-nudge" class="profile-nudge" hidden>
                 <strong>🪄 ฐานข้อมูลนี้ยังไม่มี profile ของตัวเอง</strong>
-                <p>สร้างใน 4 ขั้นตอน: ตั้งชื่อ, สอนคำศัพท์ไทย, ลองตัวอย่างคำถามให้ระบบร่าง SQL และรันดู, แล้วใส่กฎธุรกิจ — ใช้เวลาไม่ถึง 5 นาที</p>
+                <p>สร้างใน 6 ขั้นตอน: ตั้งชื่อ, สอนคำศัพท์ไทย, ลองตัวอย่างคำถามให้ระบบร่าง SQL และรันดู, ใส่กฎธุรกิจ, บันทึกความหมายของตาราง และตัวอย่างคำตอบแบบถามกลับ/ปฏิเสธ — สองขั้นหลังข้ามได้ ใช้เวลาไม่ถึง 5 นาที</p>
                 <div class="wizard-inline">
                     <button type="button" class="primary-btn" data-action="openProfileWizard">สร้าง Profile</button>
                     <button type="button" class="link-btn" data-action="dismissProfileNudge">ไว้ทีหลัง</button>
@@ -211,6 +211,8 @@
                 <span class="wizard-step-dot" data-step="2">2 คำศัพท์</span>
                 <span class="wizard-step-dot" data-step="3">3 ตัวอย่าง</span>
                 <span class="wizard-step-dot" data-step="4">4 กฎธุรกิจ</span>
+                <span class="wizard-step-dot" data-step="5">5 ตาราง</span>
+                <span class="wizard-step-dot" data-step="6">6 ตอบกลับ</span>
             </div>
 
             <div class="wizard-body">
@@ -264,6 +266,43 @@
                     <textarea id="wizard-ambiguities" rows="3"
                         placeholder="เช่น ถ้าถามว่า 'ล่าสุด' ให้ถามกลับว่าเอาเดือนหรือปีการศึกษาไหน"></textarea>
                     <p class="field-hint">ข้อความนี้จะถูกเก็บใน <code>hints.md</code> และถูกใช้ทั้งโหมดถามครั้งเดียวและ agent</p>
+                </section>
+
+                <section class="wizard-screen" data-screen="5">
+                    <p class="wizard-lead">บอกว่าแต่ละตาราง “หมายถึงอะไร” และ “มีแถวของใคร/ช่วงไหน” —
+                        agent ใช้ตอบคำถามเชิงความหมายและเลี่ยงการตีความผิด (ไม่ใส่ก็ได้)</p>
+                    <div id="wizard-tables" class="wizard-tables"></div>
+                    <p class="field-hint">ต้องกรอกทั้งสองช่องของตารางนั้นจึงจะถูกบันทึก — ตารางที่เว้นว่างจะไม่ถูกเขียน</p>
+                </section>
+
+                <section class="wizard-screen" data-screen="6">
+                    <p class="wizard-lead">สอนว่าเมื่อคำถามกำกวมหรือขอสิ่งที่ไม่ทำ ระบบควรตอบอย่างไร —
+                        เก็บเป็นตัวอย่างแบบไม่มี SQL (ไม่ใส่ก็ได้)</p>
+                    <div class="control-group">
+                        <label for="wizard-exemplar-question">คำถามตัวอย่าง</label>
+                        <input type="text" id="wizard-exemplar-question" placeholder="เช่น ขอรายชื่อนักเรียนทุกคน">
+                    </div>
+                    <div class="control-group">
+                        <label for="wizard-exemplar-type">ประเภทคำตอบ</label>
+                        <select id="wizard-exemplar-type">
+                            <option value="clarification">ถามกลับ (clarification)</option>
+                            <option value="refusal">ปฏิเสธ (refusal)</option>
+                        </select>
+                    </div>
+                    <div class="control-group">
+                        <label for="wizard-exemplar-message">ข้อความที่ควรตอบ</label>
+                        <textarea id="wizard-exemplar-message" rows="3"
+                            placeholder="พิมพ์ข้อความภาษาไทยที่อยากให้ agent ตอบ"></textarea>
+                    </div>
+                    <div id="wizard-exemplar-preview" class="wizard-preview" hidden>
+                        <p class="field-hint">ตัวอย่างข้อความที่จะบันทึก</p>
+                        <div class="wizard-preview-body" id="wizard-exemplar-preview-body"></div>
+                    </div>
+                    <div class="wizard-inline">
+                        <button type="button" class="secondary-btn" data-action="addWizardExemplar">เพิ่มตัวอย่าง</button>
+                        <span id="wizard-exemplar-status" class="field-hint"></span>
+                    </div>
+                    <div id="wizard-exemplars" class="wizard-list"></div>
                 </section>
 
                 <section class="wizard-screen" data-screen="done">

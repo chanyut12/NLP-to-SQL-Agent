@@ -1,15 +1,18 @@
 /**
  * Profile wizard (demo only, ADR 0014).
  *
- * Four screens turn the connected Datasource into an ordinary
+ * Six screens turn the connected Datasource into an ordinary
  * `profiles/<name>/` profile: name, Thai terms, example questions with drafted
- * SQL and live rows, and business rules. The endpoints called here exist only
- * while the demo UI is mounted; when they are missing the connection panel
- * removes itself and this module has no entry point left.
+ * SQL and live rows, business rules, per-table meaning/population, and
+ * clarification/refusal exemplars. Only screen 1 and an executed SQL per result
+ * example are required; every other screen may be skipped. The endpoints called
+ * here exist only while the demo UI is mounted; when they are missing the
+ * connection panel removes itself and this module has no entry point left.
  */
 
 import {
-    connectDemoDatabase, draftProfileExample, fetchDemoState, saveDemoProfile,
+    connectDemoDatabase, draftProfileExample, fetchDemoState, fetchSchemaData,
+    saveDemoProfile,
 } from './api.js';
 import { appendMessage } from './ui.js';
 import { sanitize } from './utils.js';
@@ -18,12 +21,16 @@ const NAME_RE = /^[a-z0-9_-]{1,64}$/;
 const NUDGE_KEY = 'profileNudgeDismissedFor';
 const SAMPLE_DB = 'local_database.db';
 
+const ANSWER_TYPE_LABELS = { clarification: 'ถามกลับ', refusal: 'ปฏิเสธ' };
+
 let demoState = null;
 let step = 1;
 let lastDraft = null;       // { ok, question, sql, rows, row_count, category }
 let pendingOverwrite = false;
 let saved = null;           // { profile, coverage }
 let drafting = false;
+let tableNames = null;      // readable tables of the connected Datasource
+let tablesFor = null;       // the Datasource that list belongs to
 
 const draft = {
     name: '',
@@ -31,6 +38,8 @@ const draft = {
     examples: [],           // { question, sql }
     rules: '',
     ambiguities: '',
+    tableNotes: {},         // table -> { meaning, population }
+    exemplars: [],          // { question, expected_answer_type, expected_message }
 };
 
 /**
@@ -42,6 +51,13 @@ export function initProfileWizard() {
     document.addEventListener('keydown', (e) => {
         if (e.key !== 'Escape') return;
         if (getModal()?.style.display === 'flex') closeProfileWizard();
+    });
+    // The exemplar message is previewed while it is typed, before saving.
+    document.addEventListener('input', (e) => {
+        if (e.target.id === 'wizard-exemplar-message') updateExemplarPreview();
+    });
+    document.addEventListener('change', (e) => {
+        if (e.target.id === 'wizard-exemplar-type') updateExemplarPreview();
     });
     refreshProfileEntry();
 }
@@ -59,6 +75,13 @@ export async function refreshProfileEntry(state = null) {
         } catch {
             return;  // no demo routes: the connection panel removes itself
         }
+    }
+
+    // A new Datasource has different tables: screen 5 must not offer the old
+    // one's names. The list is fetched again when the wizard next opens.
+    if (demoState.datasource !== tablesFor) {
+        tablesFor = demoState.datasource;
+        tableNames = null;
     }
 
     const button = document.getElementById('open-wizard-btn');
@@ -95,6 +118,8 @@ const ACTIONS = {
     acceptWizardExample: () => acceptExample(),
     skipWizardExample: () => skipExample(),
     removeWizardExample: (target) => removeExample(Number(target.dataset.index)),
+    addWizardExemplar: () => addExemplar(),
+    removeWizardExemplar: (target) => removeExemplar(Number(target.dataset.index)),
     wizardBack: () => setStep(step - 1),
     wizardNext: () => nextStep(),
     saveWizardProfile: () => saveProfile(false),
@@ -121,6 +146,10 @@ function openProfileWizard() {
     if (saved) resetWizard();
     renderMappings();
     renderExamples();
+    renderTables();
+    renderExemplars();
+    updateExemplarPreview();
+    loadTables();
     modal.style.display = 'flex';
     document.getElementById('wizard-datasource').textContent = demoState?.datasource
         ? `ฐานข้อมูลที่ต่ออยู่: ${demoState.datasource}`
@@ -160,11 +189,13 @@ function setStep(next) {
         value('wizard-rules', draft.rules);
         value('wizard-ambiguities', draft.ambiguities);
     }
+    if (step === 5) renderTables();
+    if (step === 6) renderExemplars();
 
     document.getElementById('wizard-back').hidden = !numeric || step === 1;
-    document.getElementById('wizard-next').hidden = !numeric || step === 4;
-    document.getElementById('wizard-save').hidden = step !== 4;
-    document.getElementById('wizard-overwrite').hidden = !(step === 4 && pendingOverwrite);
+    document.getElementById('wizard-next').hidden = !numeric || step === 6;
+    document.getElementById('wizard-save').hidden = step !== 6;
+    document.getElementById('wizard-overwrite').hidden = !(step === 6 && pendingOverwrite);
     setError('');
 }
 
@@ -174,6 +205,7 @@ function captureStep(current) {
         draft.rules = value('wizard-rules');
         draft.ambiguities = value('wizard-ambiguities');
     }
+    if (current === 5) captureTableNotes();
 }
 
 function nextStep() {
@@ -360,7 +392,142 @@ function rowsTable(rows) {
     return `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>${note}`;
 }
 
-/* ---------- screen 4: save ---------- */
+/* ---------- screen 5: table notes ---------- */
+
+async function loadTables() {
+    if (tableNames) return;
+    try {
+        const data = await fetchSchemaData();
+        tableNames = (data.tables || []).map((table) => table.name);
+    } catch {
+        tableNames = [];  // the section is optional: no table list, no notes
+    }
+    renderTables();
+}
+
+function renderTables() {
+    const host = document.getElementById('wizard-tables');
+    if (!host) return;
+    if (!tableNames) {
+        host.innerHTML = '<p class="field-hint">กำลังโหลดรายชื่อตาราง…</p>';
+        return;
+    }
+    if (!tableNames.length) {
+        host.innerHTML = '<p class="field-hint">อ่านรายชื่อตารางไม่ได้ — ข้ามขั้นนี้ได้</p>';
+        return;
+    }
+    host.innerHTML = tableNames.map((table) => {
+        const note = draft.tableNotes[table] || {};
+        return `
+        <div class="wizard-table-note">
+            <strong>${sanitize(table)}</strong>
+            <input type="text" data-table="${escapeAttr(table)}" data-note="meaning"
+                placeholder="ความหมาย: หนึ่งแถวคืออะไร" value="${escapeAttr(note.meaning || '')}">
+            <input type="text" data-table="${escapeAttr(table)}" data-note="population"
+                placeholder="กลุ่มข้อมูล: รวม/ไม่รวมอะไร" value="${escapeAttr(note.population || '')}">
+        </div>`;
+    }).join('');
+}
+
+function captureTableNotes() {
+    document.querySelectorAll('#wizard-tables [data-table]').forEach((input) => {
+        const table = input.dataset.table;
+        const note = draft.tableNotes[table] || { meaning: '', population: '' };
+        note[input.dataset.note] = input.value;
+        draft.tableNotes[table] = note;
+    });
+}
+
+/** Only a table with both halves filled is written (PROFILES.md §5). */
+function tableNotesObject() {
+    const notes = {};
+    for (const [table, note] of Object.entries(draft.tableNotes)) {
+        const meaning = (note.meaning || '').trim();
+        const population = (note.population || '').trim();
+        if (meaning && population) notes[table] = { meaning, population };
+    }
+    return notes;
+}
+
+/* ---------- screen 6: clarification/refusal exemplars ---------- */
+
+function addExemplar() {
+    const question = value('wizard-exemplar-question').trim();
+    const message = value('wizard-exemplar-message').trim();
+    const type = value('wizard-exemplar-type');
+
+    if (!question) {
+        setError('ใส่คำถามของตัวอย่างก่อน');
+        return;
+    }
+    if (!message) {
+        setError('ใส่ข้อความที่ควรตอบก่อน');
+        return;
+    }
+
+    draft.exemplars.push({
+        question,
+        expected_answer_type: type,
+        expected_message: message,
+    });
+    value('wizard-exemplar-question', '');
+    value('wizard-exemplar-message', '');
+    updateExemplarPreview();
+    renderExemplars();
+    setError('');
+    setExemplarStatus(`✅ เพิ่มแล้ว ${draft.exemplars.length} ตัวอย่าง`);
+    document.getElementById('wizard-exemplar-question').focus();
+}
+
+function removeExemplar(index) {
+    draft.exemplars.splice(index, 1);
+    renderExemplars();
+    setExemplarStatus('');
+}
+
+function renderExemplars() {
+    const host = document.getElementById('wizard-exemplars');
+    if (!host) return;
+    if (!draft.exemplars.length) {
+        host.innerHTML = '<p class="field-hint">ยังไม่มีตัวอย่าง — บันทึกโดยไม่มีก็ได้</p>';
+        return;
+    }
+    host.innerHTML = draft.exemplars.map((exemplar, index) => `
+        <div class="wizard-item">
+            <span>
+                <span class="wizard-badge">${typeLabel(exemplar.expected_answer_type)}</span>
+                <strong>${sanitize(exemplar.question)}</strong><br>
+                <span class="wizard-message">${sanitize(exemplar.expected_message)}</span>
+            </span>
+            <button type="button" class="link-btn" data-action="removeWizardExemplar"
+                data-index="${index}">ลบ</button>
+        </div>
+    `).join('');
+}
+
+/** Show the typed message as the chat bubble it becomes, before it is saved. */
+function updateExemplarPreview() {
+    const wrapper = document.getElementById('wizard-exemplar-preview');
+    const body = document.getElementById('wizard-exemplar-preview-body');
+    if (!wrapper || !body) return;
+    const message = value('wizard-exemplar-message').trim();
+    wrapper.hidden = !message;
+    body.innerHTML = message
+        ? `<span class="wizard-badge">${typeLabel(value('wizard-exemplar-type'))}</span>`
+            + sanitize(message).replace(/\n/g, '<br>')
+        : '';
+}
+
+function typeLabel(type) {
+    return ANSWER_TYPE_LABELS[type] || type;
+}
+
+function setExemplarStatus(message) {
+    const element = document.getElementById('wizard-exemplar-status');
+    if (element) element.textContent = message || '';
+}
+
+/* ---------- save ---------- */
 
 function buildHints() {
     const parts = [];
@@ -392,7 +559,13 @@ async function saveProfile(overwrite = false) {
             name: draft.name,
             hints: buildHints(),
             schema_mappings: mappingObject(),
-            examples: draft.examples.map(({ question, sql }) => ({ question, sql })),
+            table_notes: tableNotesObject(),
+            examples: [
+                ...draft.examples.map(({ question, sql }) => ({ question, sql })),
+                ...draft.exemplars.map(({ question, expected_answer_type, expected_message }) => ({
+                    question, expected_answer_type, expected_message,
+                })),
+            ],
             overwrite,
         });
         saved = result;
@@ -430,7 +603,9 @@ function renderDone(result) {
         <ul class="wizard-coverage">
             <li>กฎทางธุรกิจ: ${coverage.hints ? 'มี' : '<span class="missing">ยังไม่มี</span>'}</li>
             <li>ตัวอย่างคำถาม: ${coverage.examples || 0}</li>
+            <li>ตัวอย่างถามกลับ/ปฏิเสธ: ${coverage.exemplars || 0}</li>
             <li>คำศัพท์ไทย: ${coverage.schema_mappings || 0}</li>
+            <li>บันทึกความหมายตาราง: ${coverage.table_notes || 0}</li>
         </ul>
         <p class="field-hint">ไฟล์อยู่ที่ <code>profiles/${sanitize(result.profile)}/</code> — ตรวจและ commit
             ได้ตามปกติ (ไม่ถูก commit ให้อัตโนมัติ)</p>
@@ -480,6 +655,7 @@ function resetWizard() {
     step = 1;
     Object.assign(draft, {
         name: '', mappings: [], examples: [], rules: '', ambiguities: '',
+        tableNotes: {}, exemplars: [],
     });
     value('wizard-name', '');
     value('wizard-rules', '');
@@ -488,16 +664,27 @@ function resetWizard() {
     value('wizard-fragments', '');
     value('wizard-question', '');
     value('wizard-sql', '');
+    value('wizard-exemplar-question', '');
+    value('wizard-exemplar-message', '');
     document.getElementById('wizard-draft').hidden = true;
     document.getElementById('wizard-rows').innerHTML = '';
     document.getElementById('wizard-result').innerHTML = '';
     setDraftStatus('');
+    setExemplarStatus('');
     setError('');
     renderMappings();
     renderExamples();
+    renderTables();
+    renderExemplars();
+    updateExemplarPreview();
 }
 
 /* ---------- small helpers ---------- */
+
+/** HTML-attribute-safe text: sanitize() leaves quotes alone, which breaks value="…". */
+function escapeAttr(text) {
+    return sanitize(text).replace(/"/g, '&quot;');
+}
 
 function value(id, next = undefined) {
     const element = document.getElementById(id);

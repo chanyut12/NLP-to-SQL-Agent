@@ -217,7 +217,7 @@ key); a service deployment returns `404`.
 | Method | Path | Purpose |
 |---|---|---|
 | `POST` | `/api/demo/profile/draft` | Body `{ question, sql? }`. Drafts one example: generates SQL through the service's own path, or executes the supplied corrected SQL. Read-only and LIMIT-clamped. Response `{ status, dialect, sql, rows, row_count, category, error }`. Nothing is written. |
-| `POST` | `/api/demo/profile/save` | Body `{ name, hints, schema_mappings, examples, overwrite }`. Writes the profile and returns `{ profile, coverage }`. |
+| `POST` | `/api/demo/profile/save` | Body `{ name, hints, schema_mappings, table_notes, examples, overwrite }`. Writes the profile and returns `{ profile, coverage }`. |
 
 A save body looks like:
 
@@ -227,12 +227,26 @@ A save body looks like:
   "overwrite": false,
   "hints": "ปีการศึกษามีสองภาค …",
   "schema_mappings": { "นักเรียน": ["students"] },
+  "table_notes": {
+    "students": {
+      "meaning": "หนึ่งแถวต่อนักเรียนหนึ่งคน",
+      "population": "เฉพาะนักเรียนที่ยังมีสถานะใช้งาน"
+    }
+  },
   "examples": [
     { "question": "จำนวนนักเรียนทั้งหมด", "sql": "SELECT COUNT(*) FROM students",
-      "retrieval_tags": ["นับนักเรียน"], "grain": "หนึ่งแถวต่อจำนวนนักเรียน" }
+      "retrieval_tags": ["นับนักเรียน"], "grain": "หนึ่งแถวต่อจำนวนนักเรียน" },
+    { "question": "ขอรายชื่อนักเรียนทุกคน",
+      "expected_answer_type": "refusal",
+      "expected_message": "ขออภัยครับ ระบบให้เฉพาะข้อมูลเชิงสถิติ" }
   ]
 }
 ```
+
+The wizard collects this in six screens: name, Thai terms, example questions,
+business rules, per-table notes and clarification/refusal exemplars. Screens 2,
+4, 5 and 6 may be skipped; only a valid name is required, and a result example
+counts only once its SQL has run.
 
 The writer enforces the contract:
 
@@ -250,15 +264,26 @@ The writer enforces the contract:
   connection (`sqlite`, `postgresql` or `mysql`, in contract spelling) and
   `category` from the drafted SQL's shape. `retrieval_tags` and `grain` remain
   optional visitor input.
+- **Non-SQL exemplars keep the established shape**: an example with
+  `expected_answer_type` (`clarification` or `refusal`) and `expected_message`
+  is written with an empty `sql`, `category` `<type>_exemplar`, and is never
+  executed. Supplying both an answer type and SQL is refused, as is an answer
+  type without a message.
+- **Table notes are complete or absent**: `table_notes` entries need both
+  `meaning` and `population` (the file contract in §5); a half-filled entry is
+  refused. The section may be omitted entirely, and an overwrite that omits it
+  removes the previous `table_notes.json` rather than keeping stale text.
 - **Coverage, not a tier**: the response reports which sections are filled
-  (`hints`, `examples`, `schema_mappings`) and the profile is used as-is.
+  (`hints`, `examples`, `exemplars`, `schema_mappings`, `table_notes`) and the
+  profile is used as-is.
 
 A saved profile appears in `GET /api/demo/state` immediately and can be switched
 to at runtime with `POST /api/demo/connect` (ADR 0013) — no restart. In any other
 deployment it is selected at startup by `DOMAIN_PROFILE`, like any profile.
-`table_notes.json` is written by the wizard's follow-up pass, not the minimum
-pass; editing or evaluating a saved profile stays outside the UI (the files are
-the editing surface).
+Editing an existing profile through the UI stays out of scope — the files are the
+editing surface — and a new run can only replace a profile with an explicit
+overwrite. The wizard covers both passes in one sitting: screens 1–4 are the
+minimum, screens 5–6 add `table_notes.json` and the non-SQL exemplars.
 
 ---
 

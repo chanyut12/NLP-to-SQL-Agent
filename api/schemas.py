@@ -205,15 +205,29 @@ class DemoProfileDraftResponse(BaseModel):
 
 class DemoProfileExample(BaseModel):
     question: str
-    sql: str
+    # Empty for a clarification/refusal exemplar, which has no query to run.
+    sql: str = ""
     retrieval_tags: Optional[List[str]] = None  # optional Thai synonyms
     grain: Optional[str] = None  # optional one-line meaning of a result row
+    # A non-SQL exemplar keeps the established Example set shape: empty sql
+    # plus the answer type and the message the agent should produce.
+    expected_answer_type: Optional[Literal["clarification", "refusal"]] = None
+    expected_message: Optional[str] = None
+
+
+class DemoProfileTableNote(BaseModel):
+    """What one table means and which population its rows cover."""
+    meaning: str = ""
+    population: str = ""
 
 
 class DemoProfileSaveRequest(BaseModel):
     name: str
     hints: str = ""  # business rules and known ambiguities -> hints.md
     schema_mappings: Dict[str, List[str]] = {}  # Thai term -> name fragments
+    # table -> meaning/population -> table_notes.json; only complete entries
+    # are written (the visitor may skip the whole section).
+    table_notes: Dict[str, DemoProfileTableNote] = {}
     examples: List[DemoProfileExample] = []
     overwrite: bool = False  # explicit confirmation to replace an existing profile
 
@@ -222,7 +236,9 @@ class DemoProfileCoverage(BaseModel):
     """Which sections the saved profile fills; there is no draft/supported tier."""
     hints: bool
     examples: int
+    exemplars: int = 0  # clarification/refusal exemplars (no SQL)
     schema_mappings: int
+    table_notes: int = 0  # tables with both a meaning and a population
 
 
 class DemoProfileSaveResponse(BaseModel):

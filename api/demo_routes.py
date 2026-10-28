@@ -268,7 +268,8 @@ async def demo_profile_save(
     """Write a visitor's answers as an ordinary profile (ADR 0014).
 
     Every result example is executed before anything is written, so a profile
-    never teaches the system SQL that cannot run. Existing profiles are only
+    never teaches the system SQL that cannot run; clarification/refusal
+    exemplars carry no SQL and are never executed. Existing profiles are only
     replaced with an explicit overwrite flag.
     """
     db_engine = state.db_engine
@@ -287,9 +288,19 @@ async def demo_profile_save(
             detail=f"มี profile {request.name!r} อยู่แล้ว — ต้องยืนยันเขียนทับ",
         )
 
-    for index, example in enumerate(request.examples, start=1):
+    try:
+        examples = profile_writer.build_examples(
+            [example.model_dump() for example in request.examples],
+            profile_writer.contract_dialect(dialect),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    for index, example in enumerate(examples, start=1):
+        if example.get("expected_answer_type"):
+            continue  # a non-SQL answer: there is nothing to execute
         try:
-            await asyncio.to_thread(run_readonly, db_engine, example.sql, dialect)
+            await asyncio.to_thread(run_readonly, db_engine, example["sql"], dialect)
         except SQLSafetyError as e:
             raise HTTPException(
                 status_code=400, detail=f"ตัวอย่างที่ {index} ใช้ไม่ได้: {e}"
@@ -304,15 +315,14 @@ async def demo_profile_save(
             )
 
     try:
-        examples = profile_writer.build_examples(
-            [example.model_dump() for example in request.examples],
-            profile_writer.contract_dialect(dialect),
-        )
         coverage = await asyncio.to_thread(
             profile_writer.write_profile,
             request.name,
             hints=request.hints,
             schema_mappings=request.schema_mappings,
+            table_notes={
+                table: note.model_dump() for table, note in request.table_notes.items()
+            },
             examples=examples,
             overwrite=request.overwrite,
         )

@@ -220,7 +220,10 @@ class TestSave(unittest.TestCase):
                 self.assertEqual(response.status_code, 200, response.text)
                 self.assertEqual(
                     response.json()["coverage"],
-                    {"hints": True, "examples": 2, "schema_mappings": 2},
+                    {
+                        "hints": True, "examples": 2, "exemplars": 0,
+                        "schema_mappings": 2, "table_notes": 0,
+                    },
                 )
 
             directory = os.path.join(root, "my_school")
@@ -313,6 +316,130 @@ class TestSave(unittest.TestCase):
                 checker._assert_example_contract("conform", example)
                 statements = sqlglot.parse(example["sql"], read="sqlite")
                 self.assertEqual(len(statements), 1, example["id"])
+
+    def test_follow_up_sections_are_written_and_counted(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = os.path.join(tmpdir, "profiles")
+            engine, _ = make_sqlite_engine(tmpdir)
+            with app_client("demo", "", root, db_engine=engine) as client:
+                response = save(
+                    client, "deep",
+                    table_notes={
+                        SESSION_TABLE: {
+                            "meaning": "หนึ่งแถวต่อนักเรียนหนึ่งคน",
+                            "population": "เฉพาะนักเรียนที่ยังมีสถานะใช้งาน",
+                        },
+                    },
+                    examples=[
+                        one_example(),
+                        {
+                            "question": "ล่าสุดหมายถึงช่วงไหน",
+                            "expected_answer_type": "clarification",
+                            "expected_message": "ต้องการดูช่วงเวลาใดครับ — ภาคเรียนหรือวันที่",
+                        },
+                        {
+                            "question": "ขอรายชื่อนักเรียนทุกคน",
+                            "expected_answer_type": "refusal",
+                            "expected_message": "ขออภัยครับ ระบบให้เฉพาะข้อมูลเชิงสถิติ",
+                        },
+                    ],
+                )
+
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertEqual(
+                    response.json()["coverage"],
+                    {
+                        "hints": True, "examples": 1, "exemplars": 2,
+                        "schema_mappings": 1, "table_notes": 1,
+                    },
+                )
+
+            directory = os.path.join(root, "deep")
+            self.assertEqual(
+                sorted(os.listdir(directory)),
+                ["examples.json", "hints.md", "schema_mappings.json", "table_notes.json"],
+            )
+            notes = json.load(open(
+                os.path.join(directory, "table_notes.json"), encoding="utf-8"))
+            self.assertEqual(
+                notes["tables"][SESSION_TABLE],
+                {
+                    "meaning": "หนึ่งแถวต่อนักเรียนหนึ่งคน",
+                    "population": "เฉพาะนักเรียนที่ยังมีสถานะใช้งาน",
+                },
+            )
+
+            examples = json.load(open(
+                os.path.join(directory, "examples.json"), encoding="utf-8"))["examples"]
+            self.assertEqual([ex["id"] for ex in examples], ["wiz-001", "wiz-002", "wiz-003"])
+            clarification, refusal = examples[1], examples[2]
+            self.assertEqual(clarification["sql"], "")
+            self.assertEqual(clarification["category"], "clarification_exemplar")
+            self.assertEqual(clarification["expected_answer_type"], "clarification")
+            self.assertEqual(
+                clarification["expected_message"],
+                "ต้องการดูช่วงเวลาใดครับ — ภาคเรียนหรือวันที่",
+            )
+            self.assertEqual(refusal["category"], "refusal_exemplar")
+            self.assertEqual(refusal["expected_answer_type"], "refusal")
+
+            checker = TestSupportedProfileContract()
+            for example in examples:
+                checker._assert_example_contract("deep", example)
+
+    def test_an_exemplar_needs_a_message_and_must_not_carry_sql(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = os.path.join(tmpdir, "profiles")
+            engine, _ = make_sqlite_engine(tmpdir)
+            with app_client("demo", "", root, db_engine=engine) as client:
+                for label, exemplar in {
+                    "missing message": {
+                        "question": "ขอรายชื่อนักเรียน",
+                        "expected_answer_type": "refusal",
+                    },
+                    "carries sql": {
+                        "question": "ขอรายชื่อนักเรียน",
+                        "sql": f"SELECT name FROM {SESSION_TABLE}",
+                        "expected_answer_type": "refusal",
+                        "expected_message": "ไม่สามารถแสดงข้อมูลส่วนบุคคลได้",
+                    },
+                }.items():
+                    with self.subTest(label=label):
+                        response = save(client, "bad", examples=[exemplar])
+                        self.assertEqual(response.status_code, 400, response.text)
+            self.assertFalse(os.path.exists(os.path.join(root, "bad")))
+
+    def test_incomplete_table_note_blocks_the_save(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = os.path.join(tmpdir, "profiles")
+            engine, _ = make_sqlite_engine(tmpdir)
+            with app_client("demo", "", root, db_engine=engine) as client:
+                response = save(
+                    client, "partial",
+                    table_notes={SESSION_TABLE: {"meaning": "หนึ่งแถวต่อคน", "population": " "}},
+                )
+
+                self.assertEqual(response.status_code, 400, response.text)
+                self.assertIn("กลุ่มข้อมูล", response.json()["detail"])
+            self.assertFalse(os.path.exists(os.path.join(root, "partial")))
+
+    def test_overwrite_without_the_follow_up_pass_removes_stale_table_notes(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = os.path.join(tmpdir, "profiles")
+            engine, _ = make_sqlite_engine(tmpdir)
+            with app_client("demo", "", root, db_engine=engine) as client:
+                first = save(
+                    client, "deep",
+                    table_notes={SESSION_TABLE: {"meaning": "ก", "population": "ข"}},
+                )
+                self.assertEqual(first.status_code, 200, first.text)
+
+                second = save(client, "deep", overwrite=True)
+                self.assertEqual(second.status_code, 200, second.text)
+                self.assertEqual(second.json()["coverage"]["table_notes"], 0)
+            self.assertFalse(
+                os.path.isfile(os.path.join(root, "deep", "table_notes.json"))
+            )
 
     def test_saved_profile_switches_at_runtime_without_a_restart(self):
         from api.dependencies import state_manager
