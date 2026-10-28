@@ -40,4 +40,6 @@ export const CHART_KIND_LABELS = {
     scatter: 'Scatter',
     heatmap: 'Heatmap',
     treemap: 'Treemap',
+    histogram: 'Histogram',
+    boxplot: 'Boxplot',
 };

@@ -92,7 +92,7 @@ interface QueryEnvelope {
     chart_type:                     // kind key ไม่ใช่ label (ADR 0015)
       | 'bar' | 'bar_horizontal' | 'bar_grouped' | 'bar_stacked'
       | 'bar_stacked_100' | 'line' | 'area' | 'combo' | 'pie' | 'scatter'
-      | 'heatmap' | 'treemap'
+      | 'heatmap' | 'treemap' | 'histogram' | 'boxplot'
       | 'table' | 'none';
     x_col: string | null;
     y_col: string | null;
@@ -804,6 +804,12 @@ export function toMarkdown(rows: Record<string, unknown>[]): string {
 > ที่ index จาก `x_col`/`series_col`; `type: 'treemap'` จาก `{name: x_col,
 > value: y_col}`). Heatmap ใช้ `x_col` + `series_col` เป็นสองมิติและ `y_col` เป็นสี;
 > treemap ใช้ `x_col` เป็นชื่อกล่องและ `y_col` เป็นพื้นที่ (เฉพาะค่าบวกที่บวกกันได้)
+>
+> `histogram` และ `boxplot` ใช้กับ **แถวดิบ** เท่านั้น (ผลที่เป็น aggregate แล้วจะไม่ได้):
+> histogram ใช้ `y_col` เป็นค่าที่จะ bin เป็นช่วงกว้างเท่ากัน — ECharts ไม่มี `type: 'histogram'`
+> ให้ bin เองแล้ววาดด้วย `bar` โดยติด label ช่วงที่แกนและนับแถวต่อ bin; boxplot ใช้ `x_col`
+> เป็นหมวดและ `y_col` เป็นค่า วาดด้วย `type: 'boxplot'` ที่รับ `[min, Q1, median, Q3, max]`
+> ต่อกล่อง (Chart.js core ไม่มี boxplot ต้องใช้ plugin)
 
 - **สี**: single-series bar/line = สีแบรนด์เดียว; pie/multi-series = palette เช่น
   `['#4C72B0','#DD8452','#55A868','#C44E52','#8172B2','#937860','#DA8BC3']`

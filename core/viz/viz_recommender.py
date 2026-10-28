@@ -154,6 +154,8 @@ CHART_KINDS = (
     "scatter",
     "heatmap",
     "treemap",
+    "histogram",
+    "boxplot",
     "table",
     "none",
 )
@@ -203,6 +205,41 @@ _ORDERED_AXIS_HINTS = (
 _GROUPING_DIM_HINTS = (
     "year", "term", "round", "cohort", "group", "type", "category",
     "region", "phase", "ปี", "ภาค", "รอบ", "กลุ่ม", "ประเภท",
+)
+
+# Distribution views (ticket #54): a histogram of one measurement column, or a
+# boxplot of that measurement grouped by a category. Only raw rows have a spread
+# to show — an aggregate already holds one row per group.
+_DISTRIBUTION_KINDS = ("histogram", "boxplot")
+
+# Fewer rows than this and a distribution has no shape worth binning.
+_DISTRIBUTION_MIN_ROWS = 5
+
+# Past this many boxes a boxplot's quartiles collide; bars compare better.
+_BOXPLOT_MAX_GROUPS = 8
+
+# Each box needs at least this many observations for its quartiles to mean
+# anything — one observation is a point, not a range.
+_BOXPLOT_MIN_GROUP_ROWS = 3
+
+# Names that say a column is already a summary of many rows rather than a
+# measurement taken from one row (counts, sums, averages, rates).
+_AGGREGATE_NAME_HINTS = (
+    "count", "cnt", "total", "sum", "avg", "average", "mean", "median",
+    "rate", "percent", "pct", "ratio", "share", "amount",
+    "revenue", "sales", "profit",
+    "จำนวน", "รวม", "เฉลี่ย", "อัตรา", "ร้อยละ", "สัดส่วน", "รายได้", "ยอดขาย",
+)
+
+# A single measurement column with one value on every row has no spread to draw;
+# a flat bar chart would only pretend it does.
+_NO_SPREAD_REASON = (
+    "ค่าวัดซ้ำกันทุกแถว (ไม่มีช่วงให้ดูการกระจาย) — แสดงเป็นตารางแทน"
+)
+
+# A distribution view whose rows no longer support it (nulls, too few rows).
+_NO_DISTRIBUTION_REASON = (
+    "ข้อมูลชุดนี้ไม่พอจะดูการกระจาย (ค่าคงที่หรือแถวน้อยเกินไป) — แสดงเป็นตารางแทน"
 )
 
 
@@ -365,6 +402,112 @@ def _treemap_ok(
     return len(values) == len(df) and bool((values > 0).all())
 
 
+def _is_aggregate_measure(col: str) -> bool:
+    """True when the column name says it is already a per-group summary."""
+    name = col.strip().lower()
+    if name in ("c", "n"):
+        return True
+    return any(hint in name for hint in _AGGREGATE_NAME_HINTS)
+
+
+def _one_row_per_group(df: pd.DataFrame, cols: List[str]) -> bool:
+    """True when every combination of these columns appears exactly once — the
+    `GROUP BY` shape, where an integer column is a count of rows per group."""
+    if not cols:
+        return False
+    try:
+        return int(df.groupby(cols, dropna=False).size().max()) <= 1
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
+def _aggregated_shape(df: pd.DataFrame, semantic: Dict[str, str], measure: str) -> bool:
+    """True when the grid already holds one row per group — a summary of rows.
+
+    A `GROUP BY` result places exactly one row for every combination of its label
+    columns, and its measure is then a count, a sum or an average. A listing can
+    also have unique labels (one row per entity); its measure is an ordinary
+    measurement, so only a count-like type or an aggregate-sounding name
+    confirms a summary there.
+    """
+    labels = [c for c in df.columns if semantic.get(c) in _LABEL_PRIORITY]
+    labels = [c for c in labels if c not in _repeating_label_cols(df, labels)]
+    if not labels or not _one_row_per_group(df, labels):
+        return False
+    return _is_aggregate_measure(measure) or semantic.get(measure) == "count"
+
+
+def _distribution_candidate(df: pd.DataFrame, semantic: Dict[str, str]) -> Optional[str]:
+    """The one measurement column a distribution view could show, or None.
+
+    Exactly one numeric column has to qualify: with two measures a scatter states
+    the relationship better, and the catalog reserves the distribution views for
+    the one-measure shape (a measurement alone, or one per category). Ordered
+    dimensions (year, term, cohort) are not measurements. Whether the rows are raw
+    observations or an aggregate is decided from the grid's shape
+    (`_aggregated_shape`), because a per-row quantity may legitimately be named
+    `total_price`.
+    """
+    candidates = [
+        c for c in df.columns
+        if semantic.get(c) not in ("id",)
+        and pd.api.types.is_numeric_dtype(df[c])
+        and not any(h in c.lower() for h in _ORDERED_AXIS_HINTS)
+        and not any(h in c.lower() for h in _GROUPING_DIM_HINTS)
+    ]
+    return candidates[0] if len(candidates) == 1 else None
+
+
+def _distribution_is_flat(df: pd.DataFrame, semantic: Dict[str, str]) -> bool:
+    """One measurement column, but the same value on every row — nothing to bin."""
+    if df.empty:
+        return False
+    measure = _distribution_candidate(df, semantic)
+    if not measure or _aggregated_shape(df, semantic, measure):
+        return False
+    values = pd.to_numeric(df[measure], errors="coerce").dropna()
+    return len(values) >= _DISTRIBUTION_MIN_ROWS and int(values.nunique()) < 2
+
+
+def _boxplot_group(df: pd.DataFrame, semantic: Dict[str, str]) -> Optional[str]:
+    """The category a boxplot can group by: few enough boxes to read, with enough
+    rows in each that its quartiles are not one observation wide."""
+    labels = sorted(
+        (c for c in df.columns if semantic.get(c) in _LABEL_PRIORITY),
+        key=lambda c: _LABEL_PRIORITY[semantic[c]],
+    )
+    for col in labels:
+        try:
+            sizes = df.groupby(col, dropna=True).size()
+        except (KeyError, TypeError, ValueError):
+            continue
+        if 2 <= len(sizes) <= _BOXPLOT_MAX_GROUPS \
+                and int(sizes.min()) >= _BOXPLOT_MIN_GROUP_ROWS:
+            return col
+    return None
+
+
+def distribution_plan(
+    df: pd.DataFrame, semantic: Dict[str, str]
+) -> Optional[Tuple[str, Optional[str]]]:
+    """`(measure, group)` when the result is raw rows with a spread to show.
+
+    Returns None for an empty result, for an aggregate (counts or sums, one row
+    per group), for a constant measurement and for a result too short to bin —
+    those are tables with a reason, never a chart that lies (ticket #54). The
+    group is None when no category holds enough rows per box.
+    """
+    if df.empty:
+        return None
+    measure = _distribution_candidate(df, semantic)
+    if not measure or _aggregated_shape(df, semantic, measure):
+        return None
+    values = pd.to_numeric(df[measure], errors="coerce").dropna()
+    if len(values) < _DISTRIBUTION_MIN_ROWS or int(values.nunique()) < 2:
+        return None
+    return measure, _boxplot_group(df, semantic)
+
+
 def chart_options(
     df: pd.DataFrame,
     chart_type: str,
@@ -388,7 +531,17 @@ def chart_options(
     has_measure = bool(y_col and y_col in numeric)
 
     options: List[str] = []
-    if has_label and has_measure:
+
+    # Raw rows carry a distribution, not a comparison: a bar over them would
+    # draw one mark per observation under a repeated name (ticket #54), so the
+    # alternatives are the distribution views themselves.
+    distribution = None if df.empty else distribution_plan(df, semantic)
+    if distribution:
+        measure, group = distribution
+        options.append("histogram")
+        if group:
+            options.append("boxplot")
+    elif has_label and has_measure:
         options += ["bar", "bar_horizontal", "line", "area"]
         if not series_col:
             options.append("pie")
@@ -406,9 +559,10 @@ def chart_options(
         options.append("scatter")
     options.append("table")
 
-    # The recommended kind is always offered, even when the grid is thin.
-    if chart_type in CHART_KINDS and chart_type not in ("none", "table") \
-            and chart_type not in options:
+    # The recommended kind always arrives first, even when the grid is thin.
+    if chart_type in CHART_KINDS and chart_type not in ("none", "table"):
+        if chart_type in options:
+            options.remove(chart_type)
         options.insert(0, chart_type)
     return options
 
@@ -492,10 +646,10 @@ def recommend_chart(df: pd.DataFrame, question: str = "", preferred_chart_type: 
         if pref == 'pie' and axis_label_cols and num_axis:
             return "pie", axis_label_cols[0], num_axis[0]
         elif pref == 'scatter':
+            # Two measures are a correlation; one measure has no second axis to
+            # scatter against, so it falls through to the shape the rows have.
             if len(num_axis) >= 2:
                 return "scatter", num_axis[0], num_axis[1]
-            elif axis_label_cols and num_axis:
-                return "scatter", axis_label_cols[0], num_axis[0]
         elif pref in ('line', 'area') and axis_label_cols and num_axis:
             return pref, axis_label_cols[0], num_axis[0]
         elif pref == 'combo':
@@ -512,6 +666,15 @@ def recommend_chart(df: pd.DataFrame, question: str = "", preferred_chart_type: 
             pair = _treemap_pick(df, axis_label_cols, num_axis, semantic)
             if pair:
                 return "treemap", pair[0], pair[1]
+        elif pref in _DISTRIBUTION_KINDS:
+            distribution = distribution_plan(df, semantic)
+            if distribution:
+                measure, group = distribution
+                # A box needs a category; without one the histogram is the same
+                # view minus the boxes, so an explicit boxplot asks for that.
+                if pref == 'boxplot' and not group:
+                    return "histogram", None, measure
+                return pref, group, measure
 
     # Priority 2: User Preference from question keywords
     q = question.lower()
@@ -551,8 +714,6 @@ def recommend_chart(df: pd.DataFrame, question: str = "", preferred_chart_type: 
     elif user_pref == 'scatter':
         if len(num_axis) >= 2:
             return "scatter", num_axis[0], num_axis[1]
-        elif axis_label_cols and num_axis:
-            return "scatter", axis_label_cols[0], num_axis[0]
     elif user_pref == 'bar' and axis_label_cols and num_axis:
         return "bar", axis_label_cols[0], num_axis[0]
         
@@ -569,6 +730,16 @@ def recommend_chart(df: pd.DataFrame, question: str = "", preferred_chart_type: 
             
     if date_col and numeric_cols:
         return "line", date_col, numeric_cols[0]
+
+    # Case 1c: raw rows rather than an aggregate -> the distribution is the
+    # honest primary view (ticket #54). A constant measurement has no spread, so
+    # it becomes a table with a reason instead of a row of equal bars.
+    distribution = distribution_plan(df, semantic)
+    if distribution:
+        measure, group = distribution
+        return "histogram", group, measure
+    if _distribution_is_flat(df, semantic):
+        return "table", None, None
 
     # Case 1b: two category dimensions on a dense grid -> heatmap (ticket #53).
     # Below the cell threshold grouped bars keep exact values readable, so the
@@ -614,6 +785,8 @@ _CHART_REASON_TH = {
     "scatter": "ดูความสัมพันธ์ระหว่างสองตัวแปร",
     "heatmap": "เทียบค่าของสองมิติพร้อมกัน — สีเข้มคือค่าสูง",
     "treemap": "ดูสัดส่วนของแต่ละหมวดด้วยพื้นที่สี่เหลี่ยม",
+    "histogram": "ดูการกระจายของค่าต่อแถว — แกนนอนคือช่วงค่า (bin) ที่กว้างเท่ากัน",
+    "boxplot": "เปรียบเทียบการกระจายระหว่างหมวด — กล่องคือ Q1–Q3 เส้นกลางคือมัธยฐาน",
     "table": "ข้อมูลไม่เหมาะกับกราฟ แสดงเป็นตาราง",
     "none": "ไม่มีข้อมูลให้แสดง",
 }
@@ -670,12 +843,26 @@ def plan_chart(df: pd.DataFrame, question: str = "",
         "y2_col": None,
         "chart_form": None,
         "sort": None,
+        "reason": None,
     }
 
     drawable = bool(x_col and y_col and x_col in df.columns and y_col in df.columns)
     cartesian = ("bar", "bar_horizontal", "line", "area", "combo") + tuple(_KIND_FORM)
 
-    if chart_type == "combo" and drawable:
+    if chart_type == "table" and _distribution_is_flat(df, semantic):
+        plan["reason"] = _NO_SPREAD_REASON
+    elif chart_type in _DISTRIBUTION_KINDS:
+        distribution = distribution_plan(df, semantic)
+        if not distribution:
+            plan["chart_type"], plan["x_col"], plan["y_col"] = "table", None, None
+        else:
+            measure, group = distribution
+            plan["x_col"], plan["y_col"] = group, measure
+            # A box needs a category to group by; without one the histogram is
+            # the same view minus the boxes.
+            if chart_type == "boxplot" and not group:
+                plan["chart_type"] = "histogram"
+    elif chart_type == "combo" and drawable:
         numeric = [c for c in df.columns
                    if pd.api.types.is_numeric_dtype(df[c]) and semantic[c] != "id"]
         pair = combo_pair(numeric, semantic)
@@ -759,6 +946,33 @@ def _enforce_axis_policy(config: Dict[str, Any], df: pd.DataFrame) -> Dict[str, 
     ]
     repeating_cols = _repeating_label_cols(df, label_cols)
     label_cols = [c for c in label_cols if c not in repeating_cols]
+
+    # A distribution view is validated against the rows themselves (ticket #54):
+    # the measure must still be a raw measurement with a spread, and a boxplot
+    # must still have a category with enough rows per box. This branch returns
+    # early because a histogram has no x axis to satisfy the label policy.
+    if chart_type in _DISTRIBUTION_KINDS:
+        distribution = distribution_plan(df, semantic)
+        if not distribution:
+            return _table_config(config, _NO_DISTRIBUTION_REASON)
+        measure, group = distribution
+        if chart_type == "boxplot" and not group:
+            chart_type = "histogram"
+        config.update({
+            "chart_type": chart_type,
+            "x_col": group,
+            "y_col": measure,
+            "series_col": None,
+            "y2_col": None,
+            "chart_form": None,
+            "sort": None,
+            "top_n": None,
+            "x_label": humanize_label(group),
+            "y_label": humanize_label(measure),
+            "reason": _CHART_REASON_TH[chart_type],
+        })
+        config["options"] = chart_options(df, chart_type, group, measure, None)
+        return config
 
     def _fix(col: Optional[str]) -> Optional[str]:
         if col not in id_cols and col not in repeating_cols:
@@ -915,8 +1129,8 @@ class VizService:
             f"{y_label} ตาม {x_label}" if x_label and y_label else "ผลลัพธ์"
         )
 
-        reason = _CHART_REASON_TH.get(chart_type, "")
-        if chart_type == "table" and x_col is None:
+        reason = plan.get("reason") or _CHART_REASON_TH.get(chart_type, "")
+        if chart_type == "table" and x_col is None and not plan.get("reason"):
             _has_label = any(
                 _column_info(c, df[c])["semantic_type"] in ("name", "category", "text")
                 for c in df.columns
@@ -977,7 +1191,8 @@ def recommend_chart_intelligent(df: pd.DataFrame, question: str, llm) -> Dict[st
         First Row Data: {sample_data}
         
         Return a JSON object with these keys:
-        - "chart_type": One of ["bar", "bar_horizontal", "line", "area", "pie", "scatter", "table"].
+        - "chart_type": One of ["bar", "bar_horizontal", "line", "area", "pie", "scatter", "table", "histogram", "boxplot"].
+          Use "histogram" or "boxplot" only when the rows are raw observations of one measure (not a per-group count/sum).
         - "title": A concise title for the chart (in Thai if query is Thai).
         - "x_col": Column name for X-axis (labels).
         - "y_col": Column name for Y-axis (values).

@@ -7,9 +7,9 @@
  * colours (ADR 0015).
  *
  * Chart kinds are keys: bar, bar_horizontal, bar_grouped, bar_stacked,
- * bar_stacked_100, line, area, combo, pie, scatter, heatmap, treemap. The
- * config also states the intended series form and the sort order it assumes;
- * the kind wins when both are present.
+ * bar_stacked_100, line, area, combo, pie, scatter, heatmap, treemap,
+ * histogram, boxplot. The config also states the intended series form and the
+ * sort order it assumes; the kind wins when both are present.
  */
 
 import { CATEGORICAL_COLORS } from './config.js';
@@ -164,6 +164,52 @@ function sortRows(rows, sort, xCol, yCol) {
     return rows;
 }
 
+/** A "nice" bin width (1, 2 or 5 × 10^k) that keeps a histogram near ten bins. */
+function niceBinWidth(min, max, targetBins = 10) {
+    const range = max - min;
+    if (!(range > 0)) return 1;
+    const raw = range / targetBins;
+    const magnitude = 10 ** Math.floor(Math.log10(raw));
+    const normalized = raw / magnitude;
+    const step = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
+    return step * magnitude;
+}
+
+/** Equal-width bins over the value range: explicit edges, one count per bin. */
+function binValues(values) {
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const width = niceBinWidth(min, max);
+    const start = Math.floor(min / width) * width;
+    const count = Math.max(1, Math.ceil((max - start) / width));
+    const counts = new Array(count).fill(0);
+    values.forEach((v) => {
+        const idx = Math.min(count - 1, Math.floor((v - start) / width));
+        counts[idx] += 1;
+    });
+    const edges = Array.from({ length: count + 1 }, (_, i) => start + i * width);
+    return { edges, counts };
+}
+
+/** Five-number summary for one box; quartiles interpolate like Tukey's hinges. */
+function boxStats(values) {
+    const sorted = [...values].sort((a, b) => a - b);
+    const quantile = (p) => {
+        const pos = (sorted.length - 1) * p;
+        const lo = Math.floor(pos);
+        const hi = Math.ceil(pos);
+        return sorted[lo] + (pos - lo) * (sorted[hi] - sorted[lo]);
+    };
+    return {
+        min: sorted[0],
+        q1: quantile(0.25),
+        median: quantile(0.5),
+        q3: quantile(0.75),
+        max: sorted[sorted.length - 1],
+        count: sorted.length,
+    };
+}
+
 /** Bar data carrying the theme's value ramp; the maximum takes the accent. */
 function rampedBars(values, t) {
     const min = Math.min(...values);
@@ -219,6 +265,8 @@ export function renderChart(chartId, config, data, columns) {
     const isPie = kind === 'pie';
     const isHeatmap = kind === 'heatmap';
     const isTreemap = kind === 'treemap';
+    const isHistogram = kind === 'histogram';
+    const isBoxplot = kind === 'boxplot';
     const isLineish = kind === 'line' || kind === 'area';
     const isHorizontal = kind === 'bar_horizontal';
 
@@ -421,6 +469,136 @@ export function renderChart(chartId, config, data, columns) {
                 borderWidth: 2,
                 gapWidth: 2,
             },
+        }];
+    } else if (isHistogram) {
+        // Raw observations of one measure: equal-width bins over the value
+        // range. The width is chosen from the data and stated on the axis, so a
+        // bar always means "this many rows fell in this interval".
+        const values = data
+            .map((r) => Number(r[yCol]))
+            .filter((v) => Number.isFinite(v));
+        if (!values.length) {
+            option.title = {
+                text: 'ไม่มีค่าตัวเลขให้แสดงการกระจาย',
+                left: 'center',
+                top: 'middle',
+                textStyle: { color: t.muted, fontFamily: FONT, fontSize: 13, fontWeight: 'normal' },
+            };
+            option.series = [];
+        } else {
+            const binned = binValues(values);
+            const width = binned.edges[1] - binned.edges[0];
+            const names = binned.counts.map(
+                (_, i) => `${fmtVal(binned.edges[i])} – ${fmtVal(binned.edges[i + 1])}`,
+            );
+            const total = binned.counts.reduce((a, b) => a + b, 0);
+            option.tooltip = {
+                ...tooltipBase,
+                trigger: 'axis',
+                axisPointer: { type: 'shadow' },
+                formatter: (items) => {
+                    const i = items[0].dataIndex;
+                    const n = binned.counts[i];
+                    const pct = total ? Math.round((n / total) * 1000) / 10 : 0;
+                    return `<strong>${names[i]}</strong><br>${n} แถว (${pct}%)`;
+                },
+            };
+            option.grid = { left: 8, right: 20, top: 32, bottom: 8, containLabel: true };
+            option.xAxis = {
+                type: 'category',
+                data: names,
+                name: `ช่วงละ ${fmtVal(width)}`,
+                nameLocation: 'middle',
+                nameGap: 30,
+                nameTextStyle: { color: t.muted, fontFamily: FONT },
+                axisLine: { lineStyle: { color: t.border } },
+                axisTick: { show: false },
+                axisLabel: {
+                    color: t.muted,
+                    fontFamily: FONT,
+                    interval: 0,
+                    rotate: names.length > 7 ? 30 : 0,
+                },
+            };
+            option.yAxis = {
+                type: 'value',
+                name: 'จำนวนแถว',
+                nameTextStyle: { color: t.muted, fontFamily: FONT },
+                minInterval: 1,
+                axisLine: { show: false },
+                axisTick: { show: false },
+                axisLabel: { color: t.muted, fontFamily: FONT },
+                splitLine: { lineStyle: { color: t.grid } },
+            };
+            option.series = [{
+                type: 'bar',
+                data: rampedBars(binned.counts, t),
+                barCategoryGap: '10%',
+                label: {
+                    show: binned.counts.length <= MAX_VALUE_LABELS,
+                    position: 'top',
+                    color: t.muted,
+                    fontFamily: FONT,
+                    fontSize: 11,
+                },
+            }];
+        }
+    } else if (isBoxplot) {
+        // One box per category: the five-number summary of that group's rows.
+        const groups = new Map();
+        data.forEach((r) => {
+            const value = Number(r[yCol]);
+            if (!Number.isFinite(value)) return;
+            const key = r[xCol];
+            if (!groups.has(key)) groups.set(key, []);
+            groups.get(key).push(value);
+        });
+        const entries = [...groups.entries()];
+        const categories = entries.map(([key]) => String(key));
+        const stats = entries.map(([, vs]) => boxStats(vs));
+        option.tooltip = {
+            ...tooltipBase,
+            trigger: 'item',
+            formatter: (p) => {
+                const s = stats[p.dataIndex];
+                return `<strong>${truncateLabel(categories[p.dataIndex])}</strong>`
+                    + `<br>มากสุด ${fmtVal(s.max)}`
+                    + `<br>Q3 ${fmtVal(s.q3)}`
+                    + `<br>มัธยฐาน ${fmtVal(s.median)}`
+                    + `<br>Q1 ${fmtVal(s.q1)}`
+                    + `<br>น้อยสุด ${fmtVal(s.min)}`
+                    + `<br>n = ${s.count}`;
+            },
+        };
+        option.grid = { left: 8, right: 20, top: 24, bottom: 8, containLabel: true };
+        option.xAxis = {
+            type: 'category',
+            data: categories,
+            axisLine: { lineStyle: { color: t.border } },
+            axisTick: { show: false },
+            axisLabel: {
+                color: t.muted,
+                fontFamily: FONT,
+                interval: 0,
+                rotate: categories.length > 6 ? 30 : 0,
+                formatter: truncateLabel,
+            },
+        };
+        option.yAxis = {
+            type: 'value',
+            name: yLabel || yCol,
+            nameTextStyle: { color: t.muted, fontFamily: FONT },
+            axisLine: { show: false },
+            axisTick: { show: false },
+            axisLabel: { color: t.muted, fontFamily: FONT, formatter: fmtVal },
+            splitLine: { lineStyle: { color: t.grid } },
+        };
+        option.series = [{
+            type: 'boxplot',
+            data: stats.map((s) => [s.min, s.q1, s.median, s.q3, s.max]),
+            boxWidth: ['15%', '45%'],
+            itemStyle: { color: t.fill, borderColor: t.series, borderWidth: 2 },
+            emphasis: { itemStyle: { borderColor: t.accent, borderWidth: 2 } },
         }];
     } else {
         // Cartesian: the bar family, line/area, or the combo's dual axis.

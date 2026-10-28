@@ -116,7 +116,10 @@ recommendation assumes (`value_desc`, `x_asc`, or `row_order`). Every alternativ
 is a kind the rendering UI can draw. A heatmap uses the axis column and the
 series column as its two category dimensions with the measure as colour; a
 treemap uses one high-cardinality category and a single additive, positive
-measure as area. Color, type and layout stay the Consumer's: the service never
+measure as area. A histogram shows a raw measurement column's spread in
+equal-width, labelled bins; a boxplot shows that measurement's five-number
+summary per category. Both exist only for raw rows — an aggregate already holds
+one row per group, so it never receives a distribution view. Color, type and layout stay the Consumer's: the service never
 sends a palette. Advisory only — the Consumer may ignore any of it (ADR 0015).
 
 Axis-selection language (part of the config's meaning, not implementation):
